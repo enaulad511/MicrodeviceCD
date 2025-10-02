@@ -53,7 +53,7 @@ class EncoderIncremental:
 
 
 if __name__ == "__main__":
-    encoder = EncoderIncremental(pin_a=5, pin_b=6)  # Ajusta según tus GPIOs
+    encoder = EncoderIncremental(pin_a=5, pin_b=6)
 
     try:
         while True:
