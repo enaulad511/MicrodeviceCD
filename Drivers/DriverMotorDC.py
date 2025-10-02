@@ -2,9 +2,7 @@
 __author__ = "Edisson A. Naula"
 __date__ = "$ 01/oct/2025  at 14:02 $"
 
-import RPi.GPIO as GPIO
 from time import sleep
-
 import pigpio
 
 
