@@ -2,9 +2,8 @@
 __author__ = "Edisson A. Naula"
 __date__ = "$ 01/oct/2025  at 15:02 $"
 
-from time import sleep, time
-
-import RPi.GPIO as GPIO
+from time import time
+import pigpio
 
 
 class EncoderIncremental:
@@ -17,15 +16,20 @@ class EncoderIncremental:
         self.last_position = 0
         self.rpm = 0
 
-        GPIO.setmode(GPIO.BCM)
-        GPIO.setup(self.pin_a, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-        GPIO.setup(self.pin_b, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+        self.pi = pigpio.pi()
+        if not self.pi.connected:
+            raise IOError("Failed to connect to pigpio daemon. Is pigpiod running?")
 
-        GPIO.add_event_detect(self.pin_a, GPIO.BOTH, callback=self._actualizar, bouncetime=1)
+        self.pi.set_mode(self.pin_a, pigpio.INPUT)
+        self.pi.set_mode(self.pin_b, pigpio.INPUT)
+        self.pi.set_pull_up_down(self.pin_a, pigpio.PUD_UP)
+        self.pi.set_pull_up_down(self.pin_b, pigpio.PUD_UP)
 
-    def _actualizar(self, canal):
-        estado_a = GPIO.input(self.pin_a)
-        estado_b = GPIO.input(self.pin_b)
+        self.callback_a = self.pi.callback(self.pin_a, pigpio.EITHER_EDGE, self._actualizar)
+
+    def _actualizar(self, gpio, level, tick):
+        estado_a = self.pi.read(self.pin_a)
+        estado_b = self.pi.read(self.pin_b)
 
         if estado_a == estado_b:
             self.position += 1
@@ -49,7 +53,9 @@ class EncoderIncremental:
         return round(self.rpm, 2)
 
     def limpiar(self):
-        GPIO.remove_event_detect(self.pin_a)
+        if self.callback_a:
+            self.callback_a.cancel()
+        self.pi.stop()
 
 
 if __name__ == "__main__":
