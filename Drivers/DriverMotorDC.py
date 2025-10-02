@@ -27,7 +27,7 @@ class MotorDC:
 
         # Configura PWM por hardware
         self.pi.set_mode(self.pwm_pin, pigpio.OUTPUT)
-        self.pi.set_PWM_frequency(self.pwm_pin, 1000)  # Frecuencia de 1 kHz
+        self.pi.set_PWM_frequency(self.pwm_pin, 10000)  # Frecuencia de 1 kHz
 
     def avanzar(self, velocidad):
         self.pi.write(self.in1, 1)

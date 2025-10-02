@@ -12,7 +12,7 @@ if __name__ == "__main__":
     encoder = EncoderIncremental(pin_a=5, pin_b=6, ppr=600)
 
     try:
-        motor.avanzar(60)
+        motor.avanzar(100)
         inicio = time()
 
         while time() - inicio < 5:
