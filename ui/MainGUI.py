@@ -9,6 +9,7 @@ from templates.constants import font_buttons, font_labels, font_entry, font_labe
 from ui.DiscFrame import ControlDiscFrame
 from ui.FluorecenseLEDFrame import ControlFluorescenteFrame
 from ui.LEDFrame import ControleLEDFrame
+from ui.PhotoreceptorFrame import PhotoreceptorFrame
 
 
 def configure_styles():
@@ -107,6 +108,10 @@ class MainGUI(ttk.Window):
         self.tab3 = ControlDiscFrame(self.notebook)
         self.notebook.add(self.tab3, text="Disc Control")
         print("init tabs Disc")
+
+        self.tab4 = PhotoreceptorFrame(self.notebook)
+        self.notebook.add(self.tab4, text="Photoreceptor Control")
+        print("init tabs Photoreceptor")
         # # --------------------footer-------------------
         # self.frame_footer = ttk.Frame(self)
         # self.frame_footer.grid(row=1, column=0, sticky="nsew", padx=15, pady=15)
