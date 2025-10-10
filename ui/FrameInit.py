@@ -35,6 +35,6 @@ class StartImageFrame(ttk.Toplevel):
         image_label.pack(fill="both", expand=True)
 
         # Cerrar automáticamente después de 6 segundos
-        self.after(6000, self.destroy)
+        self.after(3000, self.destroy)
         print("Start image closed")
 

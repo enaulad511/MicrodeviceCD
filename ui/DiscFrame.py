@@ -5,7 +5,6 @@ __date__ = "$ 08/10/2025  at 11:11 a.m. $"
 import ttkbootstrap as ttk
 
 from templates.constants import font_entry
-from ui.FrameInit import StartImageFrame
 
 
 def create_widgets_disco_input(parent, callbacks: dict):
