@@ -13,6 +13,7 @@ class StartImageFrame(ttk.Toplevel):
         self.title("Starting Image")
         self.attributes("-topmost", True)
         self.attributes("-fullscreen", True)
+
         self.overrideredirect(True)  # Remove window decorations for a cleaner display
         self.configure(
             background="black"

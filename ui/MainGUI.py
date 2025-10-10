@@ -8,6 +8,7 @@ from PIL import Image, ImageTk
 from templates.constants import font_buttons, font_labels, font_entry, font_labels_frame, font_tabs
 from ui.DiscFrame import ControlDiscFrame
 from ui.FluorecenseLEDFrame import ControlFluorescenteFrame
+from ui.FrameInit import StartImageFrame
 from ui.LEDFrame import ControleLEDFrame
 from ui.PhotoreceptorFrame import PhotoreceptorFrame
 
@@ -70,7 +71,7 @@ class MainGUI(ttk.Window):
         self.frame_config = None
         self.connected = ttk.BooleanVar(value=False)
         # --------------------Start Animation -------------------
-        # self.show_gif_toplevel()
+        self.show_gif_toplevel()
         # --------------------notebook-------------------
         self.frame_content = ttk.Frame(self)
         self.frame_content.grid(
@@ -173,3 +174,6 @@ class MainGUI(ttk.Window):
         except Exception as e:
             print(f"Error al maximizar la ventana: {e}")
 
+    def show_gif_toplevel(self):
+        # GifFrameApp(self)
+        StartImageFrame(self)

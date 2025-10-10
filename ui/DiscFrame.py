@@ -82,9 +82,7 @@ class ControlDiscFrame(ttk.Frame):
         ttk.Frame.__init__(self, parent)
         self.parent = parent
         self.columnconfigure(0, weight=1)
-        # *******************************Show init image ******************************************
-        self.show_gif_toplevel()
-        # *****************************************************************************************
+
         callbacks = {
             "callback_spin": self.callback_spin,
             "callback_cycle": self.callback_cycle,
@@ -101,6 +99,4 @@ class ControlDiscFrame(ttk.Frame):
     def callback_oscillator(self):
         print("Iniciar modo oscilador")
 
-    def show_gif_toplevel(self):
-        # GifFrameApp(self)
-        StartImageFrame(self)
+
