@@ -63,6 +63,9 @@ class MainGUI(ttk.Window):
         self.project_key = None
         self.title("uAA")
         self.style_gui = configure_styles()
+        # --------------------Start Animation -------------------
+        self.show_gif_toplevel()
+        # --------------------notebook-------------------
         # self.after(0, lambda: self.state("zoomed"))
         self.after(0, self.maximize_window)
         self.columnconfigure(0, weight=1)
@@ -70,9 +73,6 @@ class MainGUI(ttk.Window):
         # self.images = load_images()
         self.frame_config = None
         self.connected = ttk.BooleanVar(value=False)
-        # --------------------Start Animation -------------------
-        self.show_gif_toplevel()
-        # --------------------notebook-------------------
         self.frame_content = ttk.Frame(self)
         self.frame_content.grid(
             row=0, column=0, sticky="nsew", padx=(5, 10), pady=(10, 10)
