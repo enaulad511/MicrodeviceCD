@@ -162,8 +162,14 @@ class MainGUI(ttk.Window):
 
     def maximize_window(self):
         try:
-            self.state("zoomed")
+            self.attributes(
+                "-fullscreen", False
+            )  # Asegura que no esté en modo fullscreen
+            self.state("normal")  # Establece el estado normal antes de maximizar
+            self.update_idletasks()  # Actualiza la geometría
+            screen_width = self.winfo_screenwidth()
+            screen_height = self.winfo_screenheight()
+            self.geometry(f"{screen_width}x{screen_height}+0+0")  # Maximiza manualmente
         except Exception as e:
-            print(e)
-            self.attributes("-zoomed", True)  # maximize
-            # self.attributes("-fullscreen", True) # hide title bar
+            print(f"Error al maximizar la ventana: {e}")
+

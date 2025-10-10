@@ -5,6 +5,7 @@ __date__ = "$ 08/10/2025  at 11:11 a.m. $"
 import ttkbootstrap as ttk
 
 from templates.constants import font_entry
+from ui.FrameInit import StartImageFrame
 
 
 def create_widgets_disco_input(parent, callbacks: dict):
@@ -81,7 +82,9 @@ class ControlDiscFrame(ttk.Frame):
         ttk.Frame.__init__(self, parent)
         self.parent = parent
         self.columnconfigure(0, weight=1)
-
+        # *******************************Show init image ******************************************
+        self.show_gif_toplevel()
+        # *****************************************************************************************
         callbacks = {
             "callback_spin": self.callback_spin,
             "callback_cycle": self.callback_cycle,
@@ -97,3 +100,7 @@ class ControlDiscFrame(ttk.Frame):
 
     def callback_oscillator(self):
         print("Iniciar modo oscilador")
+
+    def show_gif_toplevel(self):
+        # GifFrameApp(self)
+        StartImageFrame(self)

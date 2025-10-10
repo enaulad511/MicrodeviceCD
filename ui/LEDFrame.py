@@ -60,6 +60,7 @@ class ControleLEDFrame(ttk.Frame):
         ttk.Frame.__init__(self, parent)
         self.parent = parent
         self.columnconfigure(0, weight=1)
+        self.rowconfigure((0, 1, 2), weight=1)
 
         callbacks = {
             "callback_on": self.callback_on,

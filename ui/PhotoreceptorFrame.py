@@ -6,7 +6,7 @@ __date__ = "$ 08/10/2025  at 01:07 p.m. $"
 import ttkbootstrap as ttk
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-import random  # Simulación de datos
+import random
 import time
 
 from templates.constants import font_entry
