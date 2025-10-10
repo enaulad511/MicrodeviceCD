@@ -15,20 +15,26 @@ class StartImageFrame(ttk.Toplevel):
         self.attributes("-fullscreen", True)
 
         self.overrideredirect(True)  # Remove window decorations for a cleaner display
+
+        screen_width = self.winfo_screenwidth()
+        screen_height = self.winfo_screenheight()
+        self.geometry(f"{screen_width}x{screen_height}+0+0")
+
         self.configure(
             background="black"
         )  # Set background to white to fix transparency issues
 
-        # Load and display the image
-        image = Image.open("resources/imgs/title.png")  # Replace with the path to your image
+        # Cargar y redimensionar la imagen al tamaño de pantalla
+        image = Image.open("resources/imgs/title.png")
+        image = image.resize((screen_width, screen_height), Image.LANCZOS)
         photo = ImageTk.PhotoImage(image)
 
-        # Create a label to display the image
-        image_label = ttk.Label(self, image=photo)
-        image_label.image = photo  # Keep a reference to prevent garbage collection
+        # Mostrar la imagen
+        image_label = ttk.Label(self, image=photo, background="black")
+        image_label.image = photo
         image_label.pack(fill="both", expand=True)
-        image_label.place(relx=0.5, rely=0.5, anchor="center")
 
-        # Automatically close the Toplevel after 6 seconds
+        # Cerrar automáticamente después de 6 segundos
         self.after(6000, self.destroy)
         print("Start image closed")
+
