@@ -2,6 +2,8 @@
 __author__ = "Edisson A. Naula"
 __date__ = "$ 08/10/2025  at 09:35 a.m. $"
 
+import platform
+
 import ttkbootstrap as ttk
 from PIL import Image, ImageTk
 
@@ -61,7 +63,7 @@ class MainGUI(ttk.Window):
         super().__init__(*args, **kwargs)
         self.frame_m_control = None
         self.project_key = None
-        self.title("uAA")
+        self.title("\u03BCAA")
         self.style_gui = configure_styles()
         # --------------------Start Animation -------------------
         self.show_gif_toplevel()
@@ -114,8 +116,8 @@ class MainGUI(ttk.Window):
         self.notebook.add(self.tab4, text="Photoreceptor Control")
         print("init tabs Photoreceptor")
         # # --------------------footer-------------------
-        # self.frame_footer = ttk.Frame(self)
-        # self.frame_footer.grid(row=1, column=0, sticky="nsew", padx=15, pady=15)
+        self.frame_footer = ttk.Frame(self)
+        self.frame_footer.grid(row=1, column=0, sticky="ew", padx=15, pady=15)
         # self.frame_footer.columnconfigure((0, 1, 2, 3, 4), weight=1)
         # ttk.Button(
         #     self.frame_footer,
@@ -134,13 +136,13 @@ class MainGUI(ttk.Window):
         #     image=self.images["link"],
         # )
         # self.button_test.grid(row=0, column=1, sticky="e", padx=15, pady=15)
-        # self.txt_connected = ttk.StringVar(value="Disconnected")
-        # ttk.Label(
-        #     self.frame_footer,
-        #     textvariable=self.txt_connected,
-        #     font=("Arial", 18),
-        #     style="Custom.TLabel",
-        # ).grid(row=0, column=2, sticky="w", padx=15, pady=15)
+        self.txt_connected = ttk.StringVar(value="Disconnected")
+        ttk.Label(
+            self.frame_footer,
+            textvariable=self.txt_connected,
+            font=("Arial", 18),
+            style="Custom.TLabel",
+        ).grid(row=0, column=0, sticky="w", padx=15, pady=15)
         # self.button_save = ttk.Button(
         #     self.frame_footer,
         #     text="Save project",
@@ -163,14 +165,18 @@ class MainGUI(ttk.Window):
 
     def maximize_window(self):
         try:
-            self.attributes(
-                "-fullscreen", False
-            )  # Asegura que no esté en modo fullscreen
-            self.state("normal")  # Establece el estado normal antes de maximizar
-            self.update_idletasks()  # Actualiza la geometría
-            screen_width = self.winfo_screenwidth()
-            screen_height = self.winfo_screenheight()
-            self.geometry(f"{screen_width}x{screen_height}+0+0")  # Maximiza manualmente
+            self.attributes("-fullscreen", False)
+            system = platform.system()
+
+            if system == "Windows":
+                self.state("zoomed")
+            else:
+                # Fallback para Linux/macOS
+                self.state("normal")
+                self.update_idletasks()
+                screen_width = self.winfo_screenwidth()
+                screen_height = self.winfo_screenheight()
+                self.geometry(f"{screen_width}x{screen_height}+0+0")
         except Exception as e:
             print(f"Error al maximizar la ventana: {e}")
 
