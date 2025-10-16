@@ -91,9 +91,12 @@ class EncoderIncremental:
 
     def limpiar(self):
         """Cancela el callback y detiene pigpio"""
-        if self.callback_a:
-            self.callback_a.cancel()
-        self.pi.stop()
+        try:
+            if self.callback_a:
+                self.callback_a.cancel()
+            self.pi.stop()
+        except Exception as e:
+            print(f"Error al limpiar: {e}")
 
 
 if __name__ == "__main__":
