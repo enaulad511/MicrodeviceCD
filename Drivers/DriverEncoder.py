@@ -27,6 +27,7 @@ class EncoderIncremental:
         self.pi.set_pull_up_down(self.pin_b, pigpio.PUD_UP)
 
         self.callback_a = self.pi.callback(self.pin_a, pigpio.EITHER_EDGE, self._actualizar)
+        # self.callback_b = self.pi.callback(self.pin_b, pigpio.EITHER_EDGE, self._actualizar)
 
     def _actualizar(self, gpio, level, tick):
         estado_a = self.pi.read(self.pin_a)
@@ -43,12 +44,12 @@ class EncoderIncremental:
 
     def leer_grados(self):
         """Convierte la posición a grados en el rango [0, 360)"""
-        grados = (self.position / self.ppr) * 360
+        grados = (self.position / self.ppr*4) * 360
         return grados % 360
 
     def leer_revoluciones(self):
         """Devuelve el número de revoluciones completas (puede ser decimal)"""
-        return self.position / self.ppr
+        return self.position / (self.ppr*4)
 
     def calcular_rpm(self):
         """Calcula las RPM basadas en el cambio de posición y tiempo"""
