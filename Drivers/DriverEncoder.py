@@ -27,16 +27,32 @@ class EncoderIncremental:
         self.pi.set_pull_up_down(self.pin_b, pigpio.PUD_UP)
 
         self.callback_a = self.pi.callback(self.pin_a, pigpio.EITHER_EDGE, self._actualizar)
-        # self.callback_b = self.pi.callback(self.pin_b, pigpio.EITHER_EDGE, self._actualizar)
+        self.callback_b = self.pi.callback(self.pin_b, pigpio.EITHER_EDGE, self._actualizar)
+
+    # def _actualizar(self, gpio, level, tick):
+    #     estado_a = self.pi.read(self.pin_a)
+    #     estado_b = self.pi.read(self.pin_b)
+    #
+    #     if estado_a == estado_b:
+    #         self.position += 1
+    #     else:
+    #         self.position -= 1
 
     def _actualizar(self, gpio, level, tick):
         estado_a = self.pi.read(self.pin_a)
         estado_b = self.pi.read(self.pin_b)
 
-        if estado_a == estado_b:
-            self.position += 1
-        else:
-            self.position -= 1
+        # Determinar dirección de giro
+        if gpio == self.pin_a:
+            if estado_a == estado_b:
+                self.position += 1
+            else:
+                self.position -= 1
+        elif gpio == self.pin_b:
+            if estado_a != estado_b:
+                self.position += 1
+            else:
+                self.position -= 1
 
     def leer_posicion(self):
         """Devuelve la posición en pulsos"""
@@ -49,7 +65,7 @@ class EncoderIncremental:
 
     def leer_revoluciones(self):
         """Devuelve el número de revoluciones completas (puede ser decimal)"""
-        return self.position / (self.ppr*4)
+        return round(self.position / (self.ppr*4), 2)
 
     def calcular_rpm(self):
         """Calcula las RPM basadas en el cambio de posición y tiempo"""
