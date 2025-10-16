@@ -5,6 +5,7 @@ __date__ = "$ 01/oct/2025 at 15:02 $"
 from time import time, sleep
 import pigpio
 
+
 class EncoderIncremental:
     def __init__(self, pin_a, pin_b, ppr=600):
         self.pin_a = pin_a
@@ -38,9 +39,11 @@ class EncoderIncremental:
     def leer_posicion(self):
         """Devuelve la posición en pulsos"""
         return self.position
+
     def leer_grados(self):
-        """Convierte la posición a grados"""
-        return (self.position / self.ppr) * 360
+        """Convierte la posición a grados en el rango [0, 360)"""
+        grados = (self.position / self.ppr) * 360
+        return grados % 360
 
     def calcular_rpm(self):
         """Calcula las RPM basadas en el cambio de posición y tiempo"""
