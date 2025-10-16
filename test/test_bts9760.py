@@ -23,6 +23,7 @@ if __name__ == "__main__":
             grados = encoder.leer_grados()
             rpm = encoder.calcular_rpm()
             print(f"Posición: {pos} | Grados: {grados:.2f}° | RPM: {rpm}")
+            print("Revoluciones:", encoder.leer_revoluciones())
             sleep(0.2)
 
         motor.detener()

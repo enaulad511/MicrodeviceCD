@@ -15,6 +15,7 @@ class EncoderIncremental:
         self.last_time = time()
         self.last_position = 0
         self.rpm = 0
+        self.revolutions = 0
 
         self.pi = pigpio.pi()
         if not self.pi.connected:
@@ -44,6 +45,10 @@ class EncoderIncremental:
         """Convierte la posición a grados en el rango [0, 360)"""
         grados = (self.position / self.ppr) * 360
         return grados % 360
+
+    def leer_revoluciones(self):
+        """Devuelve el número de revoluciones completas (puede ser decimal)"""
+        return self.position / self.ppr
 
     def calcular_rpm(self):
         """Calcula las RPM basadas en el cambio de posición y tiempo"""
