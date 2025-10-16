@@ -8,6 +8,7 @@ import pigpio
 
 class EncoderIncremental:
     def __init__(self, pin_a, pin_b, ppr=600):
+        self.stop = False
         self.state = 0
         self.pin_a = pin_a
         self.pin_b = pin_b
@@ -40,6 +41,8 @@ class EncoderIncremental:
     #         self.position -= 1
 
     def _actualizar(self, gpio, level, tick):
+        if self.stop:
+            return
         # Leer los estados actuales de los pines
         s = self.state & 0b11  # Mantener los 2 bits anteriores
 
@@ -91,6 +94,7 @@ class EncoderIncremental:
 
     def limpiar(self):
         """Cancela el callback y detiene pigpio"""
+        self.stop = True
         try:
             if self.callback_a:
                 self.callback_a.cancel()
