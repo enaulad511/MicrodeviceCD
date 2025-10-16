@@ -34,6 +34,7 @@ if __name__ == "__main__":
     finally:
         print("Liberando recursos...")
         encoder.limpiar()
+        print("Encoder liberado.")
         motor.limpiar()
         print("Finalizado correctamente.")
 
