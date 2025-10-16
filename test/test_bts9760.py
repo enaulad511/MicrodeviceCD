@@ -12,7 +12,7 @@ if __name__ == "__main__":
     motor = MotorBTS7960(en=23)
 
     # Pines del encoder
-    encoder = EncoderIncremental(pin_a=5, pin_b=6, ppr=600)
+    encoder = EncoderIncremental(pin_a=5, pin_b=6, ppr=2400)
 
     try:
         motor.avanzar(50)  # velocidad entre 0 y 255
