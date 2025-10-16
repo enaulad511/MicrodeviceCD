@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 __author__ = "Edisson A. Naula"
-__date__ = "$ 01/oct/2025  at 15:02 $"
+__date__ = "$ 01/oct/2025 at 15:02 $"
 
-from time import time
+from time import time, sleep
 import pigpio
 
 
@@ -18,14 +18,16 @@ class EncoderIncremental:
 
         self.pi = pigpio.pi()
         if not self.pi.connected:
-            raise IOError("Failed to connect to pigpio daemon. Is pigpiod running?")
+            raise IOError("No se pudo conectar con el demonio pigpio. ¿Está corriendo pigpiod?")
 
+        self._configurar_pines()
+        self.callback_a = self.pi.callback(self.pin_a, pigpio.EITHER_EDGE, self._actualizar)
+
+    def _configurar_pines(self):
         self.pi.set_mode(self.pin_a, pigpio.INPUT)
         self.pi.set_mode(self.pin_b, pigpio.INPUT)
         self.pi.set_pull_up_down(self.pin_a, pigpio.PUD_UP)
         self.pi.set_pull_up_down(self.pin_b, pigpio.PUD_UP)
-
-        self.callback_a = self.pi.callback(self.pin_a, pigpio.EITHER_EDGE, self._actualizar)
 
     def _actualizar(self, gpio, level, tick):
         estado_a = self.pi.read(self.pin_a)
@@ -38,6 +40,9 @@ class EncoderIncremental:
 
     def leer_posicion(self):
         return self.position
+
+    def leer_grados(self):
+        return (self.position / self.ppr) * 360
 
     def calcular_rpm(self):
         ahora = time()
