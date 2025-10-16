@@ -10,7 +10,7 @@ class EncoderIncremental:
     def __init__(self, pin_a, pin_b, ppr=600):
         self.pin_a = pin_a
         self.pin_b = pin_b
-        self.ppr = ppr
+        self.ppr = ppr  # Pulsos por revolución
         self.position = 0
         self.last_time = time()
         self.last_position = 0
@@ -21,7 +21,10 @@ class EncoderIncremental:
             raise IOError("No se pudo conectar con el demonio pigpio. ¿Está corriendo pigpiod?")
 
         self._configurar_pines()
+
+        # Interrupciones en ambos canales
         self.callback_a = self.pi.callback(self.pin_a, pigpio.EITHER_EDGE, self._actualizar)
+        self.callback_b = self.pi.callback(self.pin_b, pigpio.EITHER_EDGE, self._actualizar)
 
     def _configurar_pines(self):
         self.pi.set_mode(self.pin_a, pigpio.INPUT)
@@ -33,14 +36,20 @@ class EncoderIncremental:
         estado_a = self.pi.read(self.pin_a)
         estado_b = self.pi.read(self.pin_b)
 
-        if estado_a == estado_b:
-            self.position += 1
-        else:
-            self.position -= 1
+        # Lógica de cuadratura
+        if gpio == self.pin_a:
+            if estado_a == estado_b:
+                self.position += 1
+            else:
+                self.position -= 1
+        elif gpio == self.pin_b:
+            if estado_a != estado_b:
+                self.position += 1
+            else:
+                self.position -= 1
 
     def leer_posicion(self):
         return self.position
-
     def leer_grados(self):
         return (self.position / self.ppr) * 360
 
@@ -60,6 +69,8 @@ class EncoderIncremental:
     def limpiar(self):
         if self.callback_a:
             self.callback_a.cancel()
+        if self.callback_b:
+            self.callback_b.cancel()
         self.pi.stop()
 
 
