@@ -32,5 +32,8 @@ if __name__ == "__main__":
         print("Interrumpido por el usuario.")
 
     finally:
-        motor.limpiar()
+        print("Liberando recursos...")
         encoder.limpiar()
+        motor.limpiar()
+        print("Finalizado correctamente.")
+
