@@ -98,9 +98,9 @@ class MotorBTS7960:
         return int(max(0, min(100, velocidad)) * 255 / 100)
 
     def limpiar(self):
+        self.pi.write(self.enable, 0)
         self.detener()
         self.pi.stop()
-        self.pi.write(self.enable, 0)
 
 
 if __name__ == "__main__":
