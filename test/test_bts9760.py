@@ -15,7 +15,7 @@ if __name__ == "__main__":
     encoder = EncoderIncremental(pin_a=5, pin_b=6, ppr=2400)
 
     try:
-        motor.avanzar(50)  # velocidad entre 0 y 255
+        motor.avanzar(10)  # velocidad entre 0 y 255
         inicio = time()
 
         while time() - inicio < 10:

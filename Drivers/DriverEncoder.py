@@ -5,9 +5,8 @@ __date__ = "$ 01/oct/2025 at 15:02 $"
 from time import time, sleep
 import pigpio
 
-
 class EncoderIncremental:
-    def __init__(self, pin_a, pin_b, ppr=2400):
+    def __init__(self, pin_a, pin_b, ppr=600):
         self.pin_a = pin_a
         self.pin_b = pin_b
         self.ppr = ppr  # Pulsos por revolución
@@ -18,46 +17,36 @@ class EncoderIncremental:
 
         self.pi = pigpio.pi()
         if not self.pi.connected:
-            raise IOError("No se pudo conectar con el demonio pigpio. ¿Está corriendo pigpiod?")
+            raise IOError("No se pudo conectar con el daemon pigpio. ¿Está corriendo pigpiod?")
 
-        self._configurar_pines()
-
-        # Interrupciones en ambos canales
-        self.callback_a = self.pi.callback(self.pin_a, pigpio.EITHER_EDGE, self._actualizar)
-        self.callback_b = self.pi.callback(self.pin_b, pigpio.EITHER_EDGE, self._actualizar)
-
-    def _configurar_pines(self):
         self.pi.set_mode(self.pin_a, pigpio.INPUT)
         self.pi.set_mode(self.pin_b, pigpio.INPUT)
         self.pi.set_pull_up_down(self.pin_a, pigpio.PUD_UP)
         self.pi.set_pull_up_down(self.pin_b, pigpio.PUD_UP)
 
+        self.callback_a = self.pi.callback(self.pin_a, pigpio.EITHER_EDGE, self._actualizar)
+
     def _actualizar(self, gpio, level, tick):
         estado_a = self.pi.read(self.pin_a)
         estado_b = self.pi.read(self.pin_b)
 
-        # Lógica de cuadratura
-        if gpio == self.pin_a:
-            if estado_a == estado_b:
-                self.position += 1
-            else:
-                self.position -= 1
-        elif gpio == self.pin_b:
-            if estado_a != estado_b:
-                self.position += 1
-            else:
-                self.position -= 1
+        if estado_a == estado_b:
+            self.position += 1
+        else:
+            self.position -= 1
 
     def leer_posicion(self):
+        """Devuelve la posición en pulsos"""
         return self.position
     def leer_grados(self):
+        """Convierte la posición a grados"""
         return (self.position / self.ppr) * 360
 
     def calcular_rpm(self):
+        """Calcula las RPM basadas en el cambio de posición y tiempo"""
         ahora = time()
         delta_t = ahora - self.last_time
         delta_p = self.position - self.last_position
-
         if delta_t > 0:
             revs = delta_p / self.ppr
             self.rpm = (revs / delta_t) * 60
@@ -67,10 +56,9 @@ class EncoderIncremental:
         return round(self.rpm, 2)
 
     def limpiar(self):
+        """Cancela el callback y detiene pigpio"""
         if self.callback_a:
             self.callback_a.cancel()
-        if self.callback_b:
-            self.callback_b.cancel()
         self.pi.stop()
 
 
