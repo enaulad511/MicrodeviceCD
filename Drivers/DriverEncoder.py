@@ -29,7 +29,7 @@ class EncoderIncremental:
         self.pi.set_pull_up_down(self.pin_b, pigpio.PUD_UP)
 
         self.callback_a = self.pi.callback(self.pin_a, pigpio.EITHER_EDGE, self._actualizar)
-        self.callback_b = self.pi.callback(self.pin_b, pigpio.EITHER_EDGE, self._actualizar)
+        # self.callback_b = self.pi.callback(self.pin_b, pigpio.EITHER_EDGE, self._actualizar)
 
     # def _actualizar(self, gpio, level, tick):
     #     estado_a = self.pi.read(self.pin_a)
