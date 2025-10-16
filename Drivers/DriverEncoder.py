@@ -8,6 +8,7 @@ import pigpio
 
 class EncoderIncremental:
     def __init__(self, pin_a, pin_b, ppr=600):
+        self.state = 0
         self.pin_a = pin_a
         self.pin_b = pin_b
         self.ppr = ppr  # Pulsos por revolución
@@ -39,20 +40,28 @@ class EncoderIncremental:
     #         self.position -= 1
 
     def _actualizar(self, gpio, level, tick):
-        estado_a = self.pi.read(self.pin_a)
-        estado_b = self.pi.read(self.pin_b)
+        # Leer los estados actuales de los pines
+        s = self.state & 0b11  # Mantener los 2 bits anteriores
 
-        # Determinar dirección de giro
-        if gpio == self.pin_a:
-            if estado_a == estado_b:
-                self.position += 1
-            else:
-                self.position -= 1
-        elif gpio == self.pin_b:
-            if estado_a != estado_b:
-                self.position += 1
-            else:
-                self.position -= 1
+        if self.pi.read(self.pin_a):
+            s |= 0b100
+        if self.pi.read(self.pin_b):
+            s |= 0b1000
+
+        # Decodificar el movimiento según la tabla
+        if s in [0b0000, 0b0101, 0b1010, 0b1111]:
+            pass  # Sin movimiento
+        elif s in [0b0001, 0b0111, 0b1000, 0b1110]:
+            self.position += 1
+        elif s in [0b0010, 0b0100, 0b1011, 0b1101]:
+            self.position -= 1
+        elif s in [0b0011, 0b1100]:
+            self.position += 2
+        else:
+            self.position -= 2
+
+        # Actualizar el estado anterior (solo los 2 bits más recientes)
+        self.state = (s >> 2)
 
     def leer_posicion(self):
         """Devuelve la posición en pulsos"""
