@@ -7,7 +7,7 @@ import pigpio
 
 
 class EncoderIncremental:
-    def __init__(self, pin_a, pin_b, ppr=600):
+    def __init__(self, pin_a, pin_b, ppr=2400):
         self.pin_a = pin_a
         self.pin_b = pin_b
         self.ppr = ppr  # Pulsos por revolución
