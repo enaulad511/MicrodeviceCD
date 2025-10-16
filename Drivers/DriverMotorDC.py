@@ -79,14 +79,17 @@ class MotorBTS7960:
 
         # Habilitar ambos lados
         self.pi.write(self.enable, 1)
+        print(f"Motor habilitado en los pines {self.enable}, {self.rpwm}, {self.lpwm}")
 
     def avanzar(self, velocidad):
         duty = self._calcular_duty(velocidad)
+        print(f"Avanzando a {velocidad}% (Duty Cycle: {duty})")
         self.pi.set_PWM_dutycycle(self.rpwm, duty)
         self.pi.set_PWM_dutycycle(self.lpwm, 0)
 
     def retroceder(self, velocidad):
         duty = self._calcular_duty(velocidad)
+        print(f"Retrocediendo a {velocidad}% (Duty Cycle: {duty})")
         self.pi.set_PWM_dutycycle(self.lpwm, duty)
         self.pi.set_PWM_dutycycle(self.rpwm, 0)
 
