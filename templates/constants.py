@@ -13,3 +13,21 @@ font_entry_display = ("Arial", 18, "normal")
 font_labels_frame = ("Arial", 11, "bold")
 font_labels_plates = ("Arial", 10, "bold")
 format_timestamp = "%Y-%m-%d %H:%M:%S"
+tab_icons = {
+    "LED Control": "💡",
+    "Fluorescence LED Control": "🔬",
+    "Disc Control": "💿",
+    "Photoreceptor Control": "👁️"
+}
+tab_texts = [
+    "LED Control",
+    "Fluorescence LED Control",
+    "Disc Control",
+    "Photoreceptor Control"
+]
+main_tabs_texts = ["PCR", "Electrochemical", "Manual Control"]
+main_tabs_icons = {
+    "PCR": "🧪",
+    "Electrochemical": "🧫",
+    "Manual Control": "🖥️"
+}

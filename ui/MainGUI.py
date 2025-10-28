@@ -7,11 +7,23 @@ import platform
 import ttkbootstrap as ttk
 from PIL import Image, ImageTk
 
-from templates.constants import font_buttons, font_labels, font_entry, font_labels_frame, font_tabs
+from templates.constants import (
+    font_buttons,
+    font_labels,
+    font_entry,
+    font_labels_frame,
+    font_tabs,
+    tab_icons,
+    tab_texts,
+    main_tabs_texts,
+    main_tabs_icons,
+)
 from ui.DiscFrame import ControlDiscFrame
+from ui.ElectrochemicalFrame import ElectrochemicalFrame
 from ui.FluorecenseLEDFrame import ControlFluorescenteFrame
 from ui.FrameInit import StartImageFrame
 from ui.LEDFrame import ControleLEDFrame
+from ui.PcrFrame import PCRFrame
 from ui.PhotoreceptorFrame import PhotoreceptorFrame
 
 
@@ -66,14 +78,12 @@ class MainGUI(ttk.Window):
         self.title("\u03BCAA")
         self.style_gui = configure_styles()
         # --------------------Start Animation -------------------
-        self.show_gif_toplevel()
-        # --------------------notebook-------------------
-        # self.after(0, lambda: self.state("zoomed"))
+        # self.show_gif_toplevel()
         self.after(0, self.maximize_window)
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=1)
         # self.images = load_images()
-        self.frame_config = None
+        # --------------------notebook-------------------
         self.connected = ttk.BooleanVar(value=False)
         self.frame_content = ttk.Frame(self)
         self.frame_content.grid(
@@ -81,12 +91,32 @@ class MainGUI(ttk.Window):
         )
         self.frame_content.columnconfigure(0, weight=1)
         self.frame_content.rowconfigure(0, weight=1)
-        self.notebook = ttk.Notebook(self.frame_content)
+        # ------------------main tabs-------------------
+        self.main_notebook = ttk.Notebook(self.frame_content)
+        self.main_notebook.configure(style="Custom.TNotebook")
+        self.main_notebook.grid(row=0, column=0, sticky="nsew")
+        self.main_notebook.columnconfigure(0, weight=1)
+        self.main_notebook.rowconfigure(0, weight=1)
+        self.main_notebook.bind("<<NotebookTabChanged>>", self.on_main_tab_changed)
+
+        # ------------------PCR tab-------------------
+        self.tab_pcr = PCRFrame(self.main_notebook)
+        self.main_notebook.add(self.tab_pcr, text=main_tabs_texts[0], padding=10)
+        # ------------------Electrochemical tab-------------------
+        self.tab_electrochemical = ElectrochemicalFrame(self.main_notebook)
+        self.main_notebook.add(self.tab_electrochemical, text=main_tabs_texts[1], padding=10)
+        # ------------------Manual Control tab-------------------
+        self.tab_manual_control = ttk.Frame(self.main_notebook)
+        self.main_notebook.add(self.tab_manual_control, text=main_tabs_texts[2], padding=10)
+        self.tab_manual_control.columnconfigure(0, weight=1)
+        self.tab_manual_control.rowconfigure(0, weight=1)
+        # ------------------Manual Control tabs-------------------
+        self.notebook = ttk.Notebook(self.tab_manual_control)
         self.notebook.configure(style="Custom.TNotebook")
         self.notebook.grid(row=0, column=0, sticky="nsew")
         self.notebook.columnconfigure(0, weight=1)
         self.notebook.rowconfigure(0, weight=1)
-        self.callbacks = {
+        self.callbacks_manual_control = {
             # "change_tab_text": self.change_tab_text,
             # "change_title": self.change_title,
             # "init_tabs": self.init_tabs_callback,
@@ -95,47 +125,27 @@ class MainGUI(ttk.Window):
             # "save_project_callback": self.save_project,
             # "on_geometry_changed": self.on_geometry_changed,
         }
+        self.notebook.bind("<<NotebookTabChanged>>", self.on_tab_changed)
         print("init tabs")
-        # self.tab0 = HomePage(self.notebook, callbacks=self.callbacks)
-        # self.notebook.add(self.tab0, text="Home")
-        # self.callbacks["render_thumbnails"] = self.tab0.render_thumbnails
-        # print("init tabs home")
+
         self.tab1 = ControleLEDFrame(self.notebook)
-        self.notebook.add(self.tab1, text="LED Control")
+        self.notebook.add(self.tab1, text=tab_texts[0])
         print("init tabs LED")
 
         self.tab2 = ControlFluorescenteFrame(self.notebook)
-        self.notebook.add(self.tab2, text="Fluorescence LED Control")
+        self.notebook.add(self.tab2, text=tab_texts[1])
         print("init tabs Fluorescence")
 
         self.tab3 = ControlDiscFrame(self.notebook)
-        self.notebook.add(self.tab3, text="Disc Control")
+        self.notebook.add(self.tab3, text=tab_texts[2])
         print("init tabs Disc")
 
         self.tab4 = PhotoreceptorFrame(self.notebook)
-        self.notebook.add(self.tab4, text="Photoreceptor Control")
+        self.notebook.add(self.tab4, text=tab_texts[3])
         print("init tabs Photoreceptor")
         # # --------------------footer-------------------
         self.frame_footer = ttk.Frame(self)
         self.frame_footer.grid(row=1, column=0, sticky="ew", padx=15, pady=15)
-        # self.frame_footer.columnconfigure((0, 1, 2, 3, 4), weight=1)
-        # ttk.Button(
-        #     self.frame_footer,
-        #     text="Configuration",
-        #     image=self.images["config"],
-        #     compound="left",
-        #     command=self.click_config,
-        #     style="secondary.TButton",
-        # ).grid(row=0, column=0, sticky="w", padx=15, pady=15)
-        # self.button_test = ttk.Button(
-        #     self.frame_footer,
-        #     text="Test Connection",
-        #     command=self.test_connection,
-        #     style="danger.TButton",
-        #     compound="left",
-        #     image=self.images["link"],
-        # )
-        # self.button_test.grid(row=0, column=1, sticky="e", padx=15, pady=15)
         self.txt_connected = ttk.StringVar(value="Disconnected")
         ttk.Label(
             self.frame_footer,
@@ -143,25 +153,24 @@ class MainGUI(ttk.Window):
             font=("Arial", 18),
             style="Custom.TLabel",
         ).grid(row=0, column=0, sticky="w", padx=15, pady=15)
-        # self.button_save = ttk.Button(
-        #     self.frame_footer,
-        #     text="Save project",
-        #     image=self.images["save"],
-        #     command=self.save_project,
-        #     style="success.TButton",
-        #     compound="left",
-        # )
-        # self.button_save.grid(row=0, column=3, sticky="e", padx=15, pady=15)
-        # self.button_mControl = ttk.Button(
-        #     self.frame_footer,
-        #     text="Manual Control",
-        #     command=self.click_manual_control,
-        #     style="primary.TButton",
-        #     image=self.images["control"],
-        #     compound="left",
-        # )
-        # self.button_mControl.grid(row=0, column=4, sticky="e", padx=15, pady=15)
-        # print("init tabs footer")
+
+    def on_tab_changed(self, event):
+        selected_index = self.notebook.index(self.notebook.select())
+        for i, text in enumerate(tab_texts):
+            if i == selected_index:
+                icon = tab_icons[text]
+                self.notebook.tab(i, text=f"{icon} {text}")
+            else:
+                self.notebook.tab(i, text=text)
+
+    def on_main_tab_changed(self, event):
+        selected_index = self.main_notebook.index(self.main_notebook.select())
+        for i, text in enumerate(main_tabs_texts):
+            if i == selected_index:
+                icon = main_tabs_icons[text]
+                self.main_notebook.tab(i, text=f"{icon} {text}")
+            else:
+                self.main_notebook.tab(i, text=text)
 
     def maximize_window(self):
         try:
