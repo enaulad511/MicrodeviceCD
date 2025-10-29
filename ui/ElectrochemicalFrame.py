@@ -17,12 +17,12 @@ class ElectrochemicalFrame(ttk.Frame):
         # Main content frame with scroll
         content_frame = ttk.Frame(self,)
         content_frame.grid(row=0, column=0, sticky="nsew")
-        content_frame.columnconfigure(0, weight=1)
+        content_frame.columnconfigure((0, 1), weight=1)
         content_frame.rowconfigure(1, weight=1)
 
         # Combobox for test selection
         ttk.Label(content_frame, text="Select Electrochemical Test:", style="Custom.TLabel").grid(
-            row=0, column=0, padx=10, pady=10, sticky="w"
+            row=0, column=0, padx=10, pady=10, sticky="e"
         )
 
         self.test_selector = ttk.Combobox(
