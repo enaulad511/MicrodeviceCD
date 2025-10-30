@@ -83,8 +83,6 @@ class PCRFrame(ttk.Frame):
             rpm = float(self.entries[5].get())
 
             # Generar datos con pendientes proporcionales a RPM
-            times = []
-            temps = []
             current_time = 0
             transition_const = 10000  # Ajusta la escala de transición
             transition_time_down = transition_const / max(rpm, 1)

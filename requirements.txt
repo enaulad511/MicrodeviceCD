@@ -1,3 +1,4 @@
+pillow
 matplotlib
 ttkbootstrap
 pigpio~=1.78
