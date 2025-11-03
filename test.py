@@ -57,7 +57,7 @@ if __name__ == "__main__":
         time.sleep(1)
 
         # Inicia entrada de comandos por consola
-        motor.avanzar(50)
+        motor.retroceder(25)
         print("Motor avanzando...")
         enviar_comandos()
         # while True:
