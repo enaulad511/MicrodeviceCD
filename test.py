@@ -6,14 +6,13 @@ import serial
 
 from Drivers.DriverMotorDC import MotorBTS7960
 
-# Configura el puerto UART (ajusta '/dev/ttyS0' o '/dev/serial0' según tu configuración)
-ser = serial.Serial('/dev/ttyAMA0', 115200, timeout=0.1)
-
 
 if __name__ == "__main__":
     # Pines del BTS7960
     latest_line = ""
     motor = MotorBTS7960(en=23)
+    # Configura el puerto UART (ajusta '/dev/ttyS0' o '/dev/serial0' según tu configuración)
+    ser = serial.Serial('/dev/ttyAMA0', 115200, timeout=0.1)
     try:
         motor.avanzar(50)
         while True:
