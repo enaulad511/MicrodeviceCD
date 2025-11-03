@@ -47,7 +47,7 @@ def enviar_comandos():
 
 
 if __name__ == "__main__":
-    motor = MotorBTS7960(en=23)  # Descomenta si usas el motor
+    motor = MotorBTS7960(en=24)  # Descomenta si usas el motor
     hilo_uart = threading.Thread(target=leer_uart, daemon=True)
     try:
 
