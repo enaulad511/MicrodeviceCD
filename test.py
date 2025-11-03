@@ -17,18 +17,14 @@ if __name__ == "__main__":
     try:
         motor.avanzar(50)
         while True:
-            try:
-                raw_data = ser.readline()
-                if raw_data:
-                    print("Dato crudo:", raw_data)
-                    try:
-                        latest_line = raw_data.decode('utf-8').strip()
-                        print("Último dato:", latest_line)
-                    except UnicodeDecodeError as e:
-                        print("Error de decodificación:", e)
-            except serial.SerialException as e:
-                print("Error de puerto serial:", e)
-                break
+            # Lee todos los datos disponibles en el buffer
+            while ser.in_waiting:
+                latest_line = ser.readline().decode().strip()
+
+            if latest_line:
+                print("Último dato:", latest_line)
+                # Aquí puedes procesar solo el dato más reciente
+                latest_line = ""  # Reinicia para la próxima lectura
     except KeyboardInterrupt:
         print("Interrumpido por el usuario.")
     finally:
