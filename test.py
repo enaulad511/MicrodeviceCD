@@ -19,7 +19,13 @@ if __name__ == "__main__":
         while True:
             # Lee todos los datos disponibles en el buffer
             while ser.in_waiting:
-                latest_line = ser.readline().decode().strip()
+                raw_data = ser.readline()
+                print("Dato crudo:", raw_data)
+                try:
+                    latest_line = raw_data.decode('utf-8').strip()
+                    print("Último dato:", latest_line)
+                except UnicodeDecodeError as e:
+                    print("Error de decodificación:", e)
 
             if latest_line:
                 print("Último dato:", latest_line)
