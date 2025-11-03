@@ -2,33 +2,34 @@
 __author__ = "Edisson A. Naula"
 __date__ = "$ 01/oct/2025  at 09:54 $"
 
-from time import time, sleep
+import serial
 
-from Drivers.DriverEncoder import EncoderIncremental
-from Drivers.DriverMotorDC import MotorDC
+from Drivers.DriverMotorDC import MotorBTS7960
+
+# Configura el puerto UART (ajusta '/dev/ttyS0' o '/dev/serial0' según tu configuración)
+ser = serial.Serial('/dev/ttyAMA0', 115200, timeout=0.1)
+
 
 if __name__ == "__main__":
-    motor = MotorDC(gpio_in1=17, gpio_in2=27, gpio_pwm=18)
-    encoder = EncoderIncremental(pin_a=5, pin_b=6, ppr=600)
-
+    # Pines del BTS7960
+    latest_line = ""
+    motor = MotorBTS7960(en=23)
     try:
-        motor.avanzar(100)
-        inicio = time()
+        motor.avanzar(50)
+        while True:
+            # Lee todos los datos disponibles en el buffer
+            while ser.in_waiting:
+                latest_line = ser.readline().decode().strip()
 
-        while time() - inicio < 5:
-            pos = encoder.leer_posicion()
-            rpm = encoder.calcular_rpm()
-            print(f"Posición: {pos} | RPM: {rpm}")
-            sleep(0.2)
-
-        motor.detener()
-
+            if latest_line:
+                print("Último dato:", latest_line)
+                # Aquí puedes procesar solo el dato más reciente
+                latest_line = ""  # Reinicia para la próxima lectura
     except KeyboardInterrupt:
         print("Interrumpido por el usuario.")
-
     finally:
+        ser.close()
         motor.limpiar()
-        encoder.limpiar()
-
+        print("Finalizado correctamente.")
 
 
