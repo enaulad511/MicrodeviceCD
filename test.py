@@ -12,9 +12,10 @@ from Drivers.DriverMotorDC import MotorBTS7960
 if __name__ == "__main__":
     # Pines del BTS7960
     latest_line = ""
-    motor = MotorBTS7960(en=23)
+
     # Configura el puerto UART (ajusta '/dev/ttyS0' o '/dev/serial0' según tu configuración)
     ser = serial.Serial('/dev/ttyAMA0', 115200, timeout=0.1)
+    motor = MotorBTS7960(en=23)
     print("Iniciado correctamente.")
     time.sleep(.5)
     try:
@@ -34,8 +35,6 @@ if __name__ == "__main__":
             time.sleep(0.1)  # Pequeña pausa para no saturar el CPU
     except KeyboardInterrupt:
         print("Interrumpido por el usuario.")
-    except Exception as e:
-        print("Error:", e)
     finally:
         ser.close()
         motor.limpiar()
