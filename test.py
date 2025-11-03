@@ -5,10 +5,10 @@ __date__ = "$ 01/oct/2025 at 09:54 $"
 import serial
 import threading
 import time
-from Drivers.DriverMotorDC import MotorBTS7960
 
+# from Drivers.DriverMotorDC import MotorBTS7960  # Descomenta si usas el motor
 # Configura el puerto UART
-ser = serial.Serial('/dev/ttyAMA0', 115200, timeout=0.1)
+ser = serial.Serial('/dev/ttyAMA0', 115200, timeout=0.5)
 
 # Variable compartida
 latest_line = ""
@@ -23,50 +23,40 @@ def leer_uart():
             if raw_data:
                 try:
                     latest_line = raw_data.decode('utf-8').strip()
-                    print("Último dato:", latest_line)
+                    print(">>", latest_line)
                 except UnicodeDecodeError as e:
                     print("Error de decodificación:", e)
         except serial.SerialException as e:
             print("Error de puerto serial:", e)
             break
-        time.sleep(0.01)  # Evita saturación
+        time.sleep(0.01)
 
 
-# Función para controlar el motor
-def controlar_motor(motor):
-    try:
-        print("Motor avanzando al 50%")
-        motor.avanzar(50)
-        time.sleep(5)
-
-        print("Motor retrocediendo al 75%")
-        motor.retroceder(75)
-        time.sleep(5)
-
-        print("Motor detenido")
-        motor.detener()
-    except Exception as e:
-        print("Error en control de motor:", e)
+# Función para enviar comandos desde consola
+def enviar_comandos():
+    while True:
+        try:
+            comando = input("Ingresa comando UART (ej. GET): ").strip()
+            if comando:
+                ser.write(f"{comando}\n".encode())
+        except KeyboardInterrupt:
+            print("\nInterrumpido por el usuario.")
+            break
 
 
 if __name__ == "__main__":
-    motor = MotorBTS7960(en=23)
+    # motor = MotorBTS7960(en=23)  # Descomenta si usas el motor
 
     try:
         # Inicia hilo de lectura UART
         hilo_uart = threading.Thread(target=leer_uart, daemon=True)
         hilo_uart.start()
+        time.sleep(1)
 
-        # Ejecuta control de motor
-        controlar_motor(motor)
+        # Inicia entrada de comandos por consola
+        enviar_comandos()
 
-        # Mantén el programa vivo para seguir leyendo UART
-        while True:
-            time.sleep(1)
-
-    except KeyboardInterrupt:
-        print("Interrumpido por el usuario.")
     finally:
         ser.close()
-        motor.limpiar()
+        # motor.limpiar()
         print("Finalizado correctamente.")
