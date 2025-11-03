@@ -19,7 +19,9 @@ if __name__ == "__main__":
     time.sleep(.5)
     try:
         motor.avanzar(50)
+        print("Avanzando a 50%...")
         while True:
+            print("leyendo...")
             # Lee todos los datos disponibles en el buffer
             while ser.in_waiting:
                 latest_line = ser.readline().decode().strip()
