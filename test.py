@@ -58,6 +58,7 @@ if __name__ == "__main__":
 
         # Inicia entrada de comandos por consola
         motor.avanzar(50)
+        print("Motor avanzando...")
         enviar_comandos()
         # while True:
         #     # Ejemplo de uso del motor
