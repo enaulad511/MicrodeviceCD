@@ -15,15 +15,14 @@ if __name__ == "__main__":
     ser = serial.Serial('/dev/ttyAMA0', 115200, timeout=0.1)
     try:
         motor.avanzar(50)
-        while True:
-            # Lee todos los datos disponibles en el buffer
-            while ser.in_waiting:
-                latest_line = ser.readline().decode().strip()
+        # Lee todos los datos disponibles en el buffer
+        while ser.in_waiting:
+            latest_line = ser.readline().decode().strip()
 
-            if latest_line:
-                print("Último dato:", latest_line)
-                # Aquí puedes procesar solo el dato más reciente
-                latest_line = ""  # Reinicia para la próxima lectura
+        if latest_line:
+            print("Último dato:", latest_line)
+            # Aquí puedes procesar solo el dato más reciente
+            latest_line = ""  # Reinicia para la próxima lectura
     except KeyboardInterrupt:
         print("Interrumpido por el usuario.")
     finally:
