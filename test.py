@@ -6,6 +6,8 @@ import serial
 import threading
 import time
 
+from Drivers.DriverMotorDC import MotorBTS7960
+
 # from Drivers.DriverMotorDC import MotorBTS7960  # Descomenta si usas el motor
 # Configura el puerto UART
 ser = serial.Serial('/dev/ttyAMA0', 115200, timeout=0.5)
@@ -45,9 +47,10 @@ def enviar_comandos():
 
 
 if __name__ == "__main__":
-    # motor = MotorBTS7960(en=23)  # Descomenta si usas el motor
+    motor = MotorBTS7960(en=23)  # Descomenta si usas el motor
 
     try:
+        motor.avanzar(50)
         # Inicia hilo de lectura UART
         hilo_uart = threading.Thread(target=leer_uart, daemon=True)
         hilo_uart.start()
@@ -58,5 +61,5 @@ if __name__ == "__main__":
 
     finally:
         ser.close()
-        # motor.limpiar()
+        motor.limpiar()
         print("Finalizado correctamente.")
