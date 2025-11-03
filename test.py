@@ -24,7 +24,8 @@ if __name__ == "__main__":
             print("leyendo...")
             # Lee todos los datos disponibles en el buffer
             while ser.in_waiting:
-                latest_line = ser.readline().decode().strip()
+                raw_data = ser.readline()
+                latest_line = raw_data.decode('utf-8').strip()
                 print("Dato:", latest_line)
             if latest_line:
                 print("Último dato:", latest_line)
@@ -33,6 +34,8 @@ if __name__ == "__main__":
             time.sleep(0.1)  # Pequeña pausa para no saturar el CPU
     except KeyboardInterrupt:
         print("Interrumpido por el usuario.")
+    except Exception as e:
+        print("Error:", e)
     finally:
         ser.close()
         motor.limpiar()
