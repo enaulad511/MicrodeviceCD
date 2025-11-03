@@ -48,18 +48,29 @@ def enviar_comandos():
 
 if __name__ == "__main__":
     motor = MotorBTS7960(en=23)  # Descomenta si usas el motor
-
+    hilo_uart = threading.Thread(target=leer_uart, daemon=True)
     try:
         motor.avanzar(50)
         # Inicia hilo de lectura UART
-        hilo_uart = threading.Thread(target=leer_uart, daemon=True)
-        hilo_uart.start()
-        time.sleep(1)
+        # hilo_uart = threading.Thread(target=leer_uart, daemon=True)
+        # hilo_uart.start()
+        # time.sleep(1)
 
         # Inicia entrada de comandos por consola
-        enviar_comandos()
-
+        # enviar_comandos()
+        while True:
+            # Ejemplo de uso del motor
+            motor.avanzar(50)
+            time.sleep(1)
+            motor.retroceder(75)
+            time.sleep(1)
+            motor.detener()
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("\nInterrumpido por el usuario.")
+        hilo_uart.join()
     finally:
+
         ser.close()
         motor.limpiar()
         print("Finalizado correctamente.")
