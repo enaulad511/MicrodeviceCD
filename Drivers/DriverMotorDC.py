@@ -7,7 +7,7 @@ from time import sleep
 
 
 class MotorBTS7960:
-    def __init__(self, en, gpio_rpwm=18, gpio_lpwm=12, chip="/dev/gpiochip0"):
+    def __init__(self, en, gpio_rpwm=13, gpio_lpwm=12, chip="/dev/gpiochip0"):
         """
         Constructor para el driver BTS7960 usando gpiod.
 
