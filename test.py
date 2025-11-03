@@ -10,7 +10,7 @@ from Drivers.DriverMotorDC import MotorBTS7960
 
 # from Drivers.DriverMotorDC import MotorBTS7960  # Descomenta si usas el motor
 # Configura el puerto UART
-ser = serial.Serial('/dev/ttyAMA0', 115200, timeout=0.5)
+ser = serial.Serial('/dev/ttyAMA0', 9600, timeout=0.5)
 
 # Variable compartida
 latest_line = ""
