@@ -15,6 +15,8 @@ if __name__ == "__main__":
 
     # Configura el puerto UART (ajusta '/dev/ttyS0' o '/dev/serial0' según tu configuración)
     ser = serial.Serial('/dev/ttyAMA0', 115200, timeout=0.1)
+    # flush the buffer
+    ser.flush()
     motor = MotorBTS7960(en=23)
     print("Iniciado correctamente.")
     time.sleep(.5)
