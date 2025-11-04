@@ -56,6 +56,9 @@ if __name__ == "__main__":
         hilo_uart.start()
         time.sleep(1)
 
+        hilo_comandos = threading.Thread(target=enviar_comandos, daemon=True)
+        hilo_comandos.start()
+
         # Inicia entrada de comandos por consola
         motor.retroceder(25)
         print("Motor avanzando...")
