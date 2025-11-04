@@ -40,8 +40,9 @@ def enviar_comandos():
         try:
             # comando = input("Ingresa comando UART (ej. GET): ").strip()
             comando = "GET"
-            time.sleep(1)
+            time.sleep(0.5)
             if comando:
+
                 ser.write(f"{comando}\n".encode())
         except KeyboardInterrupt:
             print("\nInterrumpido por el usuario.")
@@ -62,17 +63,17 @@ if __name__ == "__main__":
         hilo_comandos.start()
 
         # Inicia entrada de comandos por consola
-        motor.retroceder(25)
+        motor.avanzar(35)
         print("Motor avanzando...")
         # enviar_comandos()
-        while True:
-            # Ejemplo de uso del motor
-            motor.avanzar(15)
-            time.sleep(1)
-            motor.retroceder(25)
-            time.sleep(1)
-            motor.detener()
-            time.sleep(1)
+        # while True:
+        #     # Ejemplo de uso del motor
+        #     motor.avanzar(15)
+        #     time.sleep(1)
+        #     motor.retroceder(25)
+        #     time.sleep(1)
+        #     motor.detener()
+        #     time.sleep(1)
     except KeyboardInterrupt:
         print("\nInterrumpido por el usuario.")
     finally:
