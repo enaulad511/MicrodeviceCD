@@ -59,15 +59,15 @@ if __name__ == "__main__":
         # Inicia entrada de comandos por consola
         motor.retroceder(25)
         print("Motor avanzando...")
-        enviar_comandos()
-        # while True:
-        #     # Ejemplo de uso del motor
-        #     motor.avanzar(15)
-        #     time.sleep(1)
-        #     motor.retroceder(25)
-        #     time.sleep(1)
-        #     motor.detener()
-        #     time.sleep(1)
+        # enviar_comandos()
+        while True:
+            # Ejemplo de uso del motor
+            motor.avanzar(15)
+            time.sleep(1)
+            motor.retroceder(25)
+            time.sleep(1)
+            motor.detener()
+            time.sleep(1)
     except KeyboardInterrupt:
         print("\nInterrumpido por el usuario.")
     finally:
