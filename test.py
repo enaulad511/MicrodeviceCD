@@ -38,7 +38,9 @@ def leer_uart():
 def enviar_comandos():
     while True:
         try:
-            comando = input("Ingresa comando UART (ej. GET): ").strip()
+            # comando = input("Ingresa comando UART (ej. GET): ").strip()
+            comando = "GET"
+            time.sleep(1)
             if comando:
                 ser.write(f"{comando}\n".encode())
         except KeyboardInterrupt:
