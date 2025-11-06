@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include "pico/stdlib.h"
 #include "hardware/pio.h"
-#include "quadrature_counter.pio.h"
+#include "quadrature.pio.h"
 
 #define PIN_A 2
 #define PIN_B 3
@@ -9,7 +9,7 @@ int main() {
     stdio_init_all();
 
     PIO pio = pio0;
-    uint offset = pio_add_program(pio, &quadrature_counter_program);
+    uint offset = pio_add_program(pio, & quadrature_counter_program);
     uint sm = pio_claim_unused_sm(pio, true);
 
     quadrature_counter_program_init(pio, sm, offset, PIN_A);
@@ -22,5 +22,6 @@ int main() {
 
         printf("Posición: %ld\n", count);
         sleep_ms(100);
+        
     }
 }
