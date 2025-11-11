@@ -31,5 +31,5 @@ add_executable(quadrature_counter
 pico_generate_pio_header(quadrature_counter ${CMAKE_CURRENT_LIST_DIR}/quadrature.pio)
 
 target_link_libraries(quadrature_counter pico_stdlib hardware_pio)
-
 pico_add_extra_outputs(quadrature_counter)
+pico_enable_stdio_usb(quadrature_counter 1)
