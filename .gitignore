@@ -6,3 +6,8 @@ CPico/*.txt
 CPico/.vscode/
 CPico/build/
 CPico/*/
+__pycache__/
+*.pyc
+*.pyo
+ui/__pycache__/CvFrame.cpython-313.pyc
+ui/__pycache__/ElectrochemicalFrame.cpython-313.pyc

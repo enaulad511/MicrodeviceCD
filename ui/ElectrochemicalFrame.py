@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+from ui.SqwVFrame import SWVFrame
 __author__ = "Edisson A. Naula"
 __date__ = "$ 28/10/2025 at 10:24 $"
 
@@ -27,7 +28,7 @@ class ElectrochemicalFrame(ttk.Frame):
 
         self.test_selector = ttk.Combobox(
             content_frame,
-            values=["Cyclic Voltammetry", "Chronoamperometry", "Electrochemical Impedance"],
+            values=["Cyclic Voltammetry", "Square Wave Voltammetry", "Electrochemical Impedance"],
             state="readonly",
             width=30
         )
@@ -50,14 +51,17 @@ class ElectrochemicalFrame(ttk.Frame):
             self.current_test_frame.destroy()
 
         # Load the selected test frame
-        if selected_test == "Cyclic Voltammetry":
-            self.current_test_frame = CVFrame(self.test_frame_container)
-            self.current_test_frame.grid(row=0, column=0, sticky="nsew")
-        else:
-            # Placeholder for other tests
-            placeholder = ttk.Label(self.test_frame_container, text=f"{selected_test} UI coming soon...")
-            placeholder.grid(row=0, column=0, sticky="nsew")
-            self.current_test_frame = placeholder
+        print(f"Selected test: {selected_test}")
+        match selected_test:
+            case "Cyclic Voltammetry":
+                self.current_test_frame = CVFrame(self.test_frame_container)
+            case "Square Wave Voltammetry":
+                self.current_test_frame = SWVFrame(self.test_frame_container)
+            case _:
+                placeholder = ttk.Label(self.test_frame_container, text=f"{selected_test} UI coming soon...")
+                # placeholder.grid(row=0, column=0, sticky="nsew")
+                self.current_test_frame = placeholder
+        self.current_test_frame.grid(row=0, column=0, sticky="nsew", pady=5)
 
 
 # Example usage
