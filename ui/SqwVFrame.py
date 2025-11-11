@@ -160,23 +160,23 @@ class SWVFrame(ttk.Frame):
             meas_line += " i_forward i_reverse"
         meas_line += f" {to_mV(e_begin)} {to_mV(e_end)} {to_mV(e_step)} {to_mV(amplitude)} {int(freq)}"
         script = """
-                        {vars_line}
-                        set_pgstat_chan 1
-                        set_pgstat_mode 0
-                        set_pgstat_chan 0
-                        set_pgstat_mode 2
-                        set_max_bandwidth 234021m
-                        set_range_minmax da -600m 600m
-                        set_range ba 470u
-                        set_autoranging ba 917969p 470u
-                        set_e {to_mV(e_begin)}
-                        cell_on
-                        wait {int(t_equilibration * 1000)}ms
-                        {meas_line}
-                        pck_start
-                            pck_add e
-                            pck_add i
-                        """
+                {vars_line}
+                set_pgstat_chan 1
+                set_pgstat_mode 0
+                set_pgstat_chan 0
+                set_pgstat_mode 2
+                set_max_bandwidth 234021m
+                set_range_minmax da -600m 600m
+                set_range ba 470u
+                set_autoranging ba 917969p 470u
+                set_e {to_mV(e_begin)}
+                cell_on
+                wait {int(t_equilibration * 1000)}ms
+                {meas_line}
+                pck_start
+                    pck_add e
+                    pck_add i
+                """
         if measure_forward_reverse:
             script += "    pck_add i_forward\n    pck_add i_reverse\n"
         script += """  pck_end
