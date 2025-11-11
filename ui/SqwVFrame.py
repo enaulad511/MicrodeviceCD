@@ -155,11 +155,11 @@ class SWVFrame(ttk.Frame):
             vars_line += "\nvar i_forward\nvar i_reverse"
 
         # Measurement line
-        meas_line = f"meas_loop_swv e i"
+        meas_line = "meas_loop_swv e i"
         if measure_forward_reverse:
             meas_line += " i_forward i_reverse"
         meas_line += f" {to_mV(e_begin)} {to_mV(e_end)} {to_mV(e_step)} {to_mV(amplitude)} {int(freq)}"
-        script = f"""
+        script = """
                         {vars_line}
                         set_pgstat_chan 1
                         set_pgstat_mode 0

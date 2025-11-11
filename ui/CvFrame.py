@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-from PIL.ImageOps import pad
 __author__ = "Edisson A. Naula"
 __date__ = "$ 11/11/2025 at 14:45 p.m. $"
 
