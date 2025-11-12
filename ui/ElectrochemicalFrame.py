@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
-from ui.SqwVFrame import SWVFrame
 __author__ = "Edisson A. Naula"
 __date__ = "$ 28/10/2025 at 10:24 $"
 
 import ttkbootstrap as ttk
 
+from ui.SqwVFrame import SWVFrame
 from ui.CvFrame import CVFrame
 
 
