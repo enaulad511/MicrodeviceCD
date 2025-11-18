@@ -79,7 +79,7 @@ class MotorBTS7960:
 
 # Ejemplo de uso
 if __name__ == "__main__":
-    motor = MotorBTS7960(en=23, gpio_rpwm=18, gpio_lpwm=12)
+    motor = MotorBTS7960(en=23, gpio_rpwm=13, gpio_lpwm=12)
     try:
         motor.avanzar(50)
         sleep(5)  # Motor avanza 5 segundos
