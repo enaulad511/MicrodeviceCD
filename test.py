@@ -5,21 +5,22 @@ __date__ = "$ 01/oct/2025 at 09:54 $"
 import serial
 import threading
 import time
-
 from Drivers.DriverMotorDC import MotorBTS7960
 
-# from Drivers.DriverMotorDC import MotorBTS7960  # Descomenta si usas el motor
 # Configura el puerto UART
-ser = serial.Serial('/dev/ttyAMA0', 9600, timeout=0.5)
+ser = serial.Serial('/dev/ttyAMA0', 115200, timeout=0.5)
 
 # Variable compartida
 latest_line = ""
+
+# Evento para detener hilos
+stop_event = threading.Event()
 
 
 # Función para leer UART en un hilo separado
 def leer_uart():
     global latest_line
-    while True:
+    while not stop_event.is_set():
         try:
             raw_data = ser.readline()
             if raw_data:
@@ -34,50 +35,47 @@ def leer_uart():
         time.sleep(0.01)
 
 
-# Función para enviar comandos desde consola
+# Función para enviar comandos periódicamente
 def enviar_comandos():
-    while True:
+    while not stop_event.is_set():
         try:
-            # comando = input("Ingresa comando UART (ej. GET): ").strip()
             comando = "GET"
-            time.sleep(0.5)
             if comando:
-
                 ser.write(f"{comando}\n".encode())
-        except KeyboardInterrupt:
-            print("\nInterrumpido por el usuario.")
+            time.sleep(0.5)
+        except serial.SerialException:
+            print("Puerto cerrado, no se puede enviar comando.")
             break
 
 
 if __name__ == "__main__":
-    motor = MotorBTS7960(en=23)  # Descomenta si usas el motor
+    motor = MotorBTS7960(en=23)
     hilo_uart = threading.Thread(target=leer_uart, daemon=True)
+    hilo_comandos = threading.Thread(target=enviar_comandos, daemon=True)
+
     try:
-
-        # Inicia hilo de lectura UART
-        # hilo_uart = threading.Thread(target=leer_uart, daemon=True)
+        # Inicia hilos
         hilo_uart.start()
-        time.sleep(1)
-
-        hilo_comandos = threading.Thread(target=enviar_comandos, daemon=True)
         hilo_comandos.start()
 
-        # Inicia entrada de comandos por consola
-        motor.avanzar(35)
+        # Control del motor
+        motor.avanzar(25)
         print("Motor avanzando...")
-        # enviar_comandos()
-        # while True:
-        #     # Ejemplo de uso del motor
-        #     motor.avanzar(15)
-        #     time.sleep(1)
-        #     motor.retroceder(25)
-        #     time.sleep(1)
-        #     motor.detener()
-        #     time.sleep(1)
+        time.sleep(15)  # Simulación de trabajo
+
+        motor.detener()
+        print("Motor detenido.")
+
     except KeyboardInterrupt:
         print("\nInterrumpido por el usuario.")
     finally:
+        # Señal para detener hilos
+        stop_event.set()
 
+        # Espera a que los hilos terminen
+        hilo_uart.join()
+        hilo_comandos.join()
+
+        # Cierra recursos
         ser.close()
         motor.limpiar()
-        print("Finalizado correctamente.")
