@@ -56,7 +56,7 @@ if __name__ == "__main__":
     try:
         # Inicia hilos
         hilo_uart.start()
-        hilo_comandos.start()
+        # hilo_comandos.start()
 
         # Control del motor
         motor.avanzar(25)
@@ -74,7 +74,7 @@ if __name__ == "__main__":
 
         # Espera a que los hilos terminen
         hilo_uart.join()
-        hilo_comandos.join()
+        # hilo_comandos.join()
 
         # Cierra recursos
         ser.close()
