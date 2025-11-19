@@ -30,7 +30,7 @@ class PIDController:
 
     def compute(self, measurement, current_time=None):
         error = self.setpoint - measurement
-
+        print(f"Error: {error}, Measurement: {measurement}, Setpoint: {self.setpoint}")
         # Tiempo actual con alta resolución
         if current_time is None:
             current_time = perf_counter()

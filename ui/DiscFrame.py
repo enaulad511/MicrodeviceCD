@@ -140,6 +140,7 @@ def spinMotorRPM(direction, rpm, ts):
     settings = read_settings_from_file()
     pid = settings.get("pidControllerRPM", {'kp': 0.1, 'ki': 0.01, 'kd': 0.005})
     data_encoder = EncoderData(serial_port_encoder, 115200)
+    print(pid)
     pid = PIDController(
         kp=pid["kp"], ki=pid["ki"], kd=pid["kd"], setpoint=rpm, output_limits=(0, 30), ts=ts
     )
