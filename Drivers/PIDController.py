@@ -30,7 +30,6 @@ class PIDController:
 
     def compute(self, measurement, current_time=None):
         error = self.setpoint - measurement
-        print(f"Error: {error}, Measurement: {measurement}, Setpoint: {self.setpoint}")
         # Tiempo actual con alta resolución
         if current_time is None:
             current_time = perf_counter()
@@ -60,13 +59,12 @@ class PIDController:
 
         # Salida
         output = p + i + d
-        print(f"PID: {output}")
+        print(f"Error: {error}, Measurement: {measurement}, P: {p}, I: {i}, D: {d}, Output before limits: {output}")
         # Limitar salida
         if self.output_limits[0] is not None:
             output = max(self.output_limits[0], output)
         if self.output_limits[1] is not None:
             output = min(self.output_limits[1], output)
-        print(f"Output: {output}")
         return output
 
 

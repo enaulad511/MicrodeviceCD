@@ -12,7 +12,7 @@ class EncoderData:
         self.direction = "UNKNOWN"
         self.stop_event = stop_event
         self.ser = serial.Serial(port, baudrate, timeout=0.5)
-        self.raw_data = None
+        self.raw_data: str|None = None
 
     def leer_uart(self):
         """
@@ -24,6 +24,7 @@ class EncoderData:
             if raw_data:
                 try:
                     latest_line = raw_data.decode('utf-8').strip()
+                    print("Línea leída:", latest_line)
                     self.raw_data = latest_line
                     return latest_line
                 except UnicodeDecodeError as e:

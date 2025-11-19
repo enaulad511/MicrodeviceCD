@@ -140,16 +140,14 @@ def spinMotorRPM(direction, rpm, ts):
     settings = read_settings_from_file()
     pid = settings.get("pidControllerRPM", {'kp': 0.1, 'ki': 0.01, 'kd': 0.005})
     data_encoder = EncoderData(serial_port_encoder, 115200)
-    print(pid)
     pid = PIDController(
         kp=pid["kp"], ki=pid["ki"], kd=pid["kd"], setpoint=rpm, output_limits=(0, 50), ts=ts
     )
-
+    current_time = time.perf_counter()
     while not stop_event.is_set():
         raw_data = data_encoder.leer_uart()
         data_encoder.parse_line(raw_data)
         rpm_actual = data_encoder.get_rpm()
-        print(f"RPM Actual: {rpm_actual:.2f}")
         control_signal = pid.compute(rpm_actual)
         if direction == "CW":
             motor.avanzar(control_signal)
@@ -160,7 +158,11 @@ def spinMotorRPM(direction, rpm, ts):
             print("Dirección no válida")
             stop_event.set()
             break
-        time.sleep(ts)
+        # time.sleep(ts)
+        while (time.perf_counter() - current_time) < ts:
+            pass
+        print(f"current passed time: {time.perf_counter() - current_time}s")
+        current_time = time.perf_counter()
     motor.detener()
     stop_event.clear()
 
