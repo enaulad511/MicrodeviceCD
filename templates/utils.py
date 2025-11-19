@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import json
 __author__ = "Edisson A. Naula"
 __date__ = "$ 08/10/2025  at 11:20 a.m. $"
 
@@ -23,3 +24,26 @@ def validar_flotante(valor, minimo, maximo):
             return False, f"El número debe estar entre {minimo} y {maximo}."
     except ValueError:
         return False, "El valor ingresado no es un número decimal válido."
+
+
+def read_settings_from_file(file_path="./resources/settings.json"):
+    settings = {}
+    try:
+        with open(file_path, 'r') as file:
+            settings = json.load(file)
+    except FileNotFoundError:
+        print(f"Error: File '{file_path}' not found.")
+        return {}
+    except json.JSONDecodeError:
+        print(f"Error: File '{file_path}' is not a valid JSON.")
+        return {}
+    return settings
+
+def write_settings_to_file(settings: dict, file_path="./resources/settings.json"):
+    try:
+        with open(file_path, 'w') as file:
+            json.dump(settings, file, indent=4)
+    except IOError as e:
+        print(f"Error writing to file '{file_path}': {e}")
+        return False
+    return True

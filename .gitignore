@@ -13,3 +13,4 @@ ui/__pycache__/CvFrame.cpython-313.pyc
 ui/__pycache__/ElectrochemicalFrame.cpython-313.pyc
 pyrefly.toml
 ui/__pycache__/CvFrame.cpython-313.pyc
+*_test.py
