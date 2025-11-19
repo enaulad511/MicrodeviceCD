@@ -1,7 +1,7 @@
 import gpiod
 import threading
 from time import sleep
-from gpiod.line import Direction, Value, LineSettings
+from gpiod.line import Direction, Value
 
 
 class MotorBTS7960:
@@ -16,9 +16,9 @@ class MotorBTS7960:
 
         # Configuración de líneas
         config = {
-            self.enable: LineSettings(direction=Direction.OUTPUT, output_value=Value.INACTIVE),
-            self.rpwm: LineSettings(direction=Direction.OUTPUT, output_value=Value.INACTIVE),
-            self.lpwm: LineSettings(direction=Direction.OUTPUT, output_value=Value.INACTIVE),
+            self.enable: gpiod.LineSettings(direction=Direction.OUTPUT, output_value=Value.INACTIVE),
+            self.rpwm: gpiod.LineSettings(direction=Direction.OUTPUT, output_value=Value.INACTIVE),
+            self.lpwm: gpiod.LineSettings(direction=Direction.OUTPUT, output_value=Value.INACTIVE),
         }
 
         # Solicita las líneas
