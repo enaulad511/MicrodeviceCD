@@ -60,13 +60,13 @@ class PIDController:
 
         # Salida
         output = p + i + d
-
+        print(f"PID: {output}")
         # Limitar salida
         if self.output_limits[0] is not None:
             output = max(self.output_limits[0], output)
         if self.output_limits[1] is not None:
             output = min(self.output_limits[1], output)
-
+        print(f"Output: {output}")
         return output
 
 
