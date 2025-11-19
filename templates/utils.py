@@ -26,7 +26,7 @@ def validar_flotante(valor, minimo, maximo):
         return False, "El valor ingresado no es un número decimal válido."
 
 
-def read_settings_from_file(file_path="./resources/settings.json"):
+def read_settings_from_file(file_path="resources/settings.json"):
     try:
         with open(file_path, 'r') as file:
             settings = json.load(file)
@@ -38,7 +38,7 @@ def read_settings_from_file(file_path="./resources/settings.json"):
         return {}
     return settings
 
-def write_settings_to_file(new_settings: dict, file_path="./resources/settings.json"):
+def write_settings_to_file(new_settings: dict, file_path="resources/settings.json"):
     settings = read_settings_from_file(file_path)
     settings.update(new_settings)
     try:
