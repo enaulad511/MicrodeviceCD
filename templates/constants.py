@@ -31,3 +31,4 @@ main_tabs_icons = {
     "Electrochemical": "🧫",
     "Manual Control": "🖥️"
 }
+serial_port_encoder = '/dev/ttyAMA0'
