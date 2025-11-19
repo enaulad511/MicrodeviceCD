@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from templates.constants import serial_port_encoder
 from Drivers.EncoderData import EncoderData
+
 __author__ = "Edisson A. Naula"
 __date__ = "$ 08/10/2025  at 11:11 a.m. $"
 
@@ -15,6 +16,7 @@ import time
 
 motor = MotorBTS7960(en=23)
 stop_event = threading.Event()
+
 
 def create_widgets_disco_input(parent, callbacks: dict):
     entries = []
@@ -134,8 +136,10 @@ def create_widgets_disco_input(parent, callbacks: dict):
 
 def spinMotorRPM(direction, rpm, ts):
     data_encoder = EncoderData(serial_port_encoder, 115200)
-    pid = PIDController(kp=1.0, ki=0.1, kd=0.05, setpoint=rpm, output_limits=(0, 30), ts=ts)
-    
+    pid = PIDController(
+        kp=0.5, ki=0.1, kd=0.05, setpoint=rpm, output_limits=(0, 30), ts=ts
+    )
+
     while not stop_event.is_set():
         raw_data = data_encoder.leer_uart()
         data_encoder.parse_line(raw_data)
@@ -155,6 +159,7 @@ def spinMotorRPM(direction, rpm, ts):
     motor.detener()
     stop_event.clear()
 
+
 class ControlDiscFrame(ttk.Frame):
     def __init__(self, parent, **kwargs):
         ttk.Frame.__init__(self, parent)
@@ -169,7 +174,7 @@ class ControlDiscFrame(ttk.Frame):
             "callback_spin": self.callback_spin,
             "callback_cycle": self.callback_cycle,
             "callback_oscillator": self.callback_oscillator,
-            "callback_stop": self.callback_stop
+            "callback_stop": self.callback_stop,
         }
         self.entries = create_widgets_disco_input(content_frame, callbacks)
 
@@ -177,10 +182,11 @@ class ControlDiscFrame(ttk.Frame):
         direction = self.entries[0].get()
         rpm_setpoint = float(self.entries[1].get())
         ts = 0.01
-        thread_motor = threading.Thread(target=spinMotorRPM, args=(direction, rpm_setpoint, ts))
+        thread_motor = threading.Thread(
+            target=spinMotorRPM, args=(direction, rpm_setpoint, ts)
+        )
         thread_motor.start()
         print(f"Motor {direction} a {rpm_setpoint} RPM thread")
-        
 
     def callback_cycle(self):
         print("Ejecutar ciclo de encendido/apagado")
