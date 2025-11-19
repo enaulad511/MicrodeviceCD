@@ -188,7 +188,7 @@ class ControlDiscFrame(ttk.Frame):
     def callback_spin(self):
         direction = self.entries[0].get()
         rpm_setpoint = float(self.entries[1].get())
-        ts = 0.5
+        ts = 0.01
         thread_motor = threading.Thread(
             target=spinMotorRPM, args=(direction, rpm_setpoint, ts)
         )
