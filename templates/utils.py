@@ -27,7 +27,6 @@ def validar_flotante(valor, minimo, maximo):
 
 
 def read_settings_from_file(file_path="./resources/settings.json"):
-    settings = {}
     try:
         with open(file_path, 'r') as file:
             settings = json.load(file)
@@ -39,11 +38,13 @@ def read_settings_from_file(file_path="./resources/settings.json"):
         return {}
     return settings
 
-def write_settings_to_file(settings: dict, file_path="./resources/settings.json"):
+def write_settings_to_file(new_settings: dict, file_path="./resources/settings.json"):
+    settings = read_settings_from_file(file_path)
+    settings.update(new_settings)
     try:
         with open(file_path, 'w') as file:
             json.dump(settings, file, indent=4)
-    except IOError as e:
-        print(f"Error writing to file '{file_path}': {e}")
+    except Exception as e:
+        print(f"Error writing to settings file '{file_path}': {e}")
         return False
     return True

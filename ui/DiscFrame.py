@@ -11,11 +11,10 @@ from ttkbootstrap.scrolled import ScrolledFrame
 
 from templates.constants import font_entry
 from Drivers.PIDController import PIDController
-from Drivers.DriverMotorDC import MotorBTS7960
 import threading
 import time
 
-motor = MotorBTS7960(en=23)
+
 stop_event = threading.Event()
 
 
@@ -41,7 +40,7 @@ def create_widgets_disco_input(parent, callbacks: dict):
     ttk.Label(frame1, text="RPM:", style="Custom.TLabel").grid(
         row=1, column=0, padx=5, pady=5, sticky="w"
     )
-    svar_rpm = ttk.StringVar()
+    svar_rpm = ttk.StringVar(value="700")
     rpm_entry = ttk.Entry(frame1, font=font_entry, textvariable=svar_rpm)
     rpm_entry.grid(row=1, column=1, padx=5, pady=5)
     entries.append(svar_rpm)
@@ -136,6 +135,8 @@ def create_widgets_disco_input(parent, callbacks: dict):
 
 
 def spinMotorRPM(direction, rpm, ts):
+    from Drivers.DriverMotorDC import MotorBTS7960
+    motor = MotorBTS7960(en=23)
     settings = read_settings_from_file()
     pid = settings.get("pidControllerRPM", {'kp': 0.1, 'ki': 0.01, 'kd': 0.005})
     data_encoder = EncoderData(serial_port_encoder, 115200)

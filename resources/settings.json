@@ -1,7 +1,7 @@
 {
     "version": "0.1.0",
     "pidControllerRPM": {
-        "kp": 0.1,
+        "kp": 0.12,
         "ki": 0.01,
         "kd": 0.005
     }

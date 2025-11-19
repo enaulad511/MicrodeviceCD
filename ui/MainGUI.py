@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+from ui.ConfigFrame import ConfigFrame
 __author__ = "Edisson A. Naula"
 __date__ = "$ 08/10/2025  at 09:35 a.m. $"
 
@@ -74,6 +75,7 @@ class MainGUI(ttk.Window):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.frame_m_control = None
+        self.config_frame = None
         self.project_key = None
         self.title("\u03BCAA")
         self.style_gui = configure_styles()
@@ -152,7 +154,13 @@ class MainGUI(ttk.Window):
             textvariable=self.txt_connected,
             font=("Arial", 18),
             style="Custom.TLabel",
-        ).grid(row=0, column=0, sticky="w", padx=15, pady=15)
+        ).grid(row=0, column=0, sticky="ns", padx=15, pady=15)
+        ttk.Button(
+            self.frame_footer,
+            text="Configuration",
+            style="success.TButton",
+            command=self.open_configurations,
+        ).grid(row=0, column=1, sticky="ns", padx=15, pady=15)
 
     def on_tab_changed(self, event):
         selected_index = self.notebook.index(self.notebook.select())
@@ -192,3 +200,10 @@ class MainGUI(ttk.Window):
     def show_gif_toplevel(self):
         # GifFrameApp(self)
         StartImageFrame(self)
+
+    def open_configurations(self):
+        # config_frame = ConfigFrame(self)
+        if self.config_frame is None:
+            self.config_frame = ConfigFrame(self)
+        else:
+            self.config_frame.lift()        
