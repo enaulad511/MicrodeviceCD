@@ -189,4 +189,6 @@ class ControlDiscFrame(ttk.Frame):
 
     def callback_stop(self):
         stop_event.set()
-        print("Detener motor")
+        print("Deteniendo motor")
+        time.sleep(1)
+        stop_event.clear()
