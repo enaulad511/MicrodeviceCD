@@ -142,7 +142,7 @@ def spinMotorRPM(direction, rpm, ts):
     data_encoder = EncoderData(serial_port_encoder, 115200)
     print(pid)
     pid = PIDController(
-        kp=pid["kp"], ki=pid["ki"], kd=pid["kd"], setpoint=rpm, output_limits=(0, 30), ts=ts
+        kp=pid["kp"], ki=pid["ki"], kd=pid["kd"], setpoint=rpm, output_limits=(0, 50), ts=ts
     )
 
     while not stop_event.is_set():
