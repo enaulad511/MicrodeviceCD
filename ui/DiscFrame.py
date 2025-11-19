@@ -153,6 +153,7 @@ def spinMotorRPM(direction, rpm, ts):
             break
         time.sleep(ts)
     motor.detener()
+    stop_event.clear()
 
 class ControlDiscFrame(ttk.Frame):
     def __init__(self, parent, **kwargs):
