@@ -20,7 +20,7 @@ class EncoderData:
         Lee una línea del UART y la parsea.
         """
         try:
-            self.ser.reset_input_buffer()
+            self.ser.write(b"GET\n")
             raw_data = self.ser.readline()
             if raw_data:
                 try:
