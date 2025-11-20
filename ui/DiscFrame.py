@@ -148,8 +148,10 @@ def spinMotorRPM(direction, rpm, ts):
     current_time = time.perf_counter()
     while not stop_event.is_set():
         raw_data = data_encoder.leer_uart()
+        print(raw_data)
         data_encoder.parse_line(raw_data)
         count = data_encoder.get_counter()
+        print(f"count: {count}, last_count: {last_count}")
         delta = count - last_count
         last_count = count
         rpm_actual =  (delta / 600) * (60 / ts)
