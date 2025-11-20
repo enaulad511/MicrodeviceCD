@@ -13,13 +13,14 @@ class EncoderData:
         self.stop_event = stop_event
         self.ser = serial.Serial(port, baudrate, timeout=0.5)
         self.raw_data: str|None = None
+        self.ser.reset_input_buffer()
 
     def leer_uart(self):
         """
         Lee una línea del UART y la parsea.
         """
         try:
-            self.ser.reset_input_buffer()
+            
             raw_data = self.ser.readline()
             if raw_data:
                 try:
