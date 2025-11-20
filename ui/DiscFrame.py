@@ -148,7 +148,7 @@ def spinMotorRPM(direction, rpm, ts):
         raw_data = data_encoder.leer_uart()
         data_encoder.parse_line(raw_data)
         rpm_actual = data_encoder.get_rpm()
-        control_signal = pid.compute(rpm_actual)
+        control_signal = round(pid.compute(rpm_actual), 2)
         if direction == "CW":
             motor.avanzar(control_signal)
         elif direction == "CCW":
