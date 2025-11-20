@@ -24,7 +24,7 @@ class EncoderData:
             if raw_data:
                 try:
                     latest_line = raw_data.decode('utf-8').strip()
-                    print("Línea leída:", latest_line)
+                    # print("Línea leída:", latest_line)
                     self.raw_data = latest_line
                     return latest_line
                 except UnicodeDecodeError as e:
