@@ -1,3 +1,4 @@
+from ast import NotEq
 import gpiod
 import threading
 from time import sleep
@@ -7,12 +8,12 @@ from gpiod.line import Direction, Value
 class MotorBTS7960:
     def __init__(self, en, gpio_rpwm=13, gpio_lpwm=12, chip="/dev/gpiochip0"):
         """
-        Inicializa el motor usando la nueva API de gpiod.
+        Control de motor BTS7960 con un solo hilo PWM.
         """
         print("Inicializando motor...")
         self.enable = en
-        self.rpwm = gpio_rpwm
-        self.lpwm = gpio_lpwm
+        self.rpwm: int = gpio_rpwm
+        self.lpwm: int = gpio_lpwm
 
         # Configuración de líneas
         config = {
@@ -28,57 +29,60 @@ class MotorBTS7960:
         self.request.set_value(self.enable, Value.ACTIVE)
         print(f"Motor habilitado en EN={self.enable}, RPWM={self.rpwm}, LPWM={self.lpwm}")
 
-        # Variables para PWM
-        self._pwm_thread = None
+        # Variables para PWM dinámico
+        self._duty = 0.0
+        self._active_line: int|None = None
         self._stop_event = threading.Event()
+        self._pwm_thread = threading.Thread(target=self._pwm_loop, daemon=True)
+        self._pwm_thread.start()
 
     def avanzar(self, velocidad):
         print(f"Avanzando a {velocidad}%")
-        self._start_pwm(self.rpwm, velocidad, self.lpwm)
+        self.request.set_value(self.lpwm, Value.INACTIVE)
+        self._active_line = self.rpwm
+        self._duty = max(0, min(100, velocidad)) / 100.0
 
     def retroceder(self, velocidad):
         print(f"Retrocediendo a {velocidad}%")
-        self._start_pwm(self.lpwm, velocidad, self.rpwm)
+        self.request.set_value(self.rpwm, Value.INACTIVE)
+        self._active_line = self.lpwm
+        self._duty = max(0, min(100, velocidad)) / 100.0
 
     def detener(self):
         print("Deteniendo motor")
-        self._stop_event.set()
-        if self._pwm_thread:
-            self._pwm_thread.join()
+        self._duty = 0.0
+        self._active_line = None
         self.request.set_value(self.rpwm, Value.INACTIVE)
         self.request.set_value(self.lpwm, Value.INACTIVE)
 
-    def _start_pwm(self, active_line, velocidad, inactive_line):
-        self.detener()
-        self._stop_event.clear()
-        self.request.set_value(inactive_line, Value.INACTIVE)
-        self._pwm_thread = threading.Thread(target=self._pwm_loop, args=(active_line, velocidad), daemon=True)
-        self._pwm_thread.start()
-
-    def _pwm_loop(self, line, velocidad):
-        duty = max(0, min(100, velocidad)) / 100.0
-        period = 0.01  # 100 Hz
-        while not self._stop_event.is_set():
-            self.request.set_value(line, Value.ACTIVE)
-            sleep(period * duty)
-            self.request.set_value(line, Value.INACTIVE)
-            sleep(period * (1 - duty))
-
-    def limpiar(self):
-        self.detener()
-        self.request.set_value(self.enable, Value.INACTIVE)
-        print("Motor deshabilitado y líneas liberadas.")
-
     def frenar(self):
         print("Frenando motor")
-        self._stop_event.set()
-        if self._pwm_thread:
-            self._pwm_thread.join()
+        self._duty = 0.0
+        self._active_line = None
         self.request.set_value(self.rpwm, Value.ACTIVE)
         self.request.set_value(self.lpwm, Value.ACTIVE)
         sleep(0.5)
         self.request.set_value(self.rpwm, Value.INACTIVE)
         self.request.set_value(self.lpwm, Value.INACTIVE)
+
+    def limpiar(self):
+        print("Liberando recursos...")
+        self.detener()
+        self._stop_event.set()
+        self._pwm_thread.join()
+        self.request.set_value(self.enable, Value.INACTIVE)
+        print("Motor deshabilitado y líneas liberadas.")
+
+    def _pwm_loop(self):
+        period = 0.005  # 100 Hz
+        while not self._stop_event.is_set():
+            if self._active_line and self._duty > 0:
+                self.request.set_value(self._active_line, Value.ACTIVE)
+                sleep(period * self._duty)
+                self.request.set_value(self._active_line, Value.INACTIVE)
+                sleep(period * (1 - self._duty))
+            else:
+                sleep(period)  # Espera sin señal si no hay movimiento
 
 
 # Ejemplo de uso
@@ -86,9 +90,11 @@ if __name__ == "__main__":
     motor = MotorBTS7960(en=23, gpio_rpwm=13, gpio_lpwm=12)
     try:
         motor.avanzar(50)
-        sleep(5)
-        motor.retroceder(75)
-        sleep(5)
+        sleep(3)
+        motor.avanzar(80)
+        sleep(3)
+        motor.retroceder(60)
+        sleep(3)
         motor.detener()
     finally:
         motor.limpiar()
