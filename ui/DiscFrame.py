@@ -161,7 +161,7 @@ def spinMotorRPM(direction, rpm, ts):
         # time.sleep(ts)
         while (time.perf_counter() - current_time) < ts:
             pass
-        print(f"current passed time: {time.perf_counter() - current_time}s")
+        print(f"current passed time: {(time.perf_counter() - current_time):.4f}s")
         current_time = time.perf_counter()
     motor.detener()
     stop_event.clear()
