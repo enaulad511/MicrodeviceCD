@@ -133,38 +133,71 @@ def create_widgets_disco_input(parent, callbacks: dict):
     ).grid(row=3, column=0, pady=10, padx=5, sticky="w")
     return entries
 
+# Variables globales
+motor = None
+thread_motor = None
+thread_lock = threading.Lock()
 
 def spinMotorRPM(direction, rpm, ts):
-    from Drivers.DriverMotorDC import MotorBTS7960
-    motor = MotorBTS7960(en=23)
+    global motor
     settings = read_settings_from_file()
-    pid = settings.get("pidControllerRPM", {'kp': 0.1, 'ki': 0.01, 'kd': 0.005})
+    pid_cfg = settings.get("pidControllerRPM", {'kp': 0.1, 'ki': 0.01, 'kd': 0.005})
     data_encoder = EncoderData(serial_port_encoder, 115200)
-    pid = PIDController(
-        kp=pid["kp"], ki=pid["ki"], kd=pid["kd"], setpoint=rpm, output_limits=(0, 50), ts=ts
-    )
+    pid = PIDController(kp=pid_cfg["kp"], ki=pid_cfg["ki"], kd=pid_cfg["kd"], setpoint=rpm, output_limits=(0, 50), ts=ts)
+
     current_time = time.perf_counter()
     while not stop_event.is_set():
         raw_data = data_encoder.leer_uart()
         data_encoder.parse_line(raw_data)
         rpm_actual = data_encoder.get_rpm()
         control_signal = round(pid.compute(rpm_actual), 2)
+
         if direction == "CW":
             motor.avanzar(control_signal)
         elif direction == "CCW":
             motor.retroceder(control_signal)
         else:
-            motor.detener()
             print("Dirección no válida")
-            stop_event.set()
             break
-        # time.sleep(ts)
+
         while (time.perf_counter() - current_time) < ts:
             pass
-        print(f"current passed time: {(time.perf_counter() - current_time):.4f}s")
         current_time = time.perf_counter()
+
     motor.detener()
-    stop_event.clear()
+    print("Motor detenido correctamente")
+
+# def spinMotorRPM(direction, rpm, ts):
+#     from Drivers.DriverMotorDC import MotorBTS7960
+#     motor = MotorBTS7960(en=23)
+#     settings = read_settings_from_file()
+#     pid = settings.get("pidControllerRPM", {'kp': 0.1, 'ki': 0.01, 'kd': 0.005})
+#     data_encoder = EncoderData(serial_port_encoder, 115200)
+#     pid = PIDController(
+#         kp=pid["kp"], ki=pid["ki"], kd=pid["kd"], setpoint=rpm, output_limits=(0, 50), ts=ts
+#     )
+#     current_time = time.perf_counter()
+#     while not stop_event.is_set():
+#         raw_data = data_encoder.leer_uart()
+#         data_encoder.parse_line(raw_data)
+#         rpm_actual = data_encoder.get_rpm()
+#         control_signal = round(pid.compute(rpm_actual), 2)
+#         if direction == "CW":
+#             motor.avanzar(control_signal)
+#         elif direction == "CCW":
+#             motor.retroceder(control_signal)
+#         else:
+#             motor.detener()
+#             print("Dirección no válida")
+#             stop_event.set()
+#             break
+#         # time.sleep(ts)
+#         while (time.perf_counter() - current_time) < ts:
+#             pass
+#         print(f"current passed time: {(time.perf_counter() - current_time):.4f}s")
+#         current_time = time.perf_counter()
+#     motor.detener()
+#     stop_event.clear()
 
 
 class ControlDiscFrame(ttk.Frame):
@@ -185,15 +218,32 @@ class ControlDiscFrame(ttk.Frame):
         }
         self.entries = create_widgets_disco_input(content_frame, callbacks)
 
+    # def callback_spin(self):
+    #     direction = self.entries[0].get()
+    #     rpm_setpoint = float(self.entries[1].get())
+    #     ts = 0.01
+    #     thread_motor = threading.Thread(
+    #         target=spinMotorRPM, args=(direction, rpm_setpoint, ts)
+    #     )
+    #     thread_motor.start()
+    #     print(f"Motor {direction} a {rpm_setpoint} RPM thread")
+
     def callback_spin(self):
-        direction = self.entries[0].get()
-        rpm_setpoint = float(self.entries[1].get())
-        ts = 0.01
-        thread_motor = threading.Thread(
-            target=spinMotorRPM, args=(direction, rpm_setpoint, ts)
-        )
-        thread_motor.start()
-        print(f"Motor {direction} a {rpm_setpoint} RPM thread")
+        global motor, thread_motor
+        with thread_lock:
+            if thread_motor and thread_motor.is_alive():
+                print("Ya hay un hilo activo, no se puede iniciar otro.")
+                return
+            direction = self.entries[0].get()
+            rpm_setpoint = float(self.entries[1].get())
+            ts = 0.01
+            if motor is None:
+                from Drivers.DriverMotorDC import MotorBTS7960
+                motor = MotorBTS7960(en=23)
+            stop_event.clear()
+            thread_motor = threading.Thread(target=spinMotorRPM, args=(direction, rpm_setpoint, ts))
+            thread_motor.start()
+            print(f"Motor {direction} a {rpm_setpoint} RPM iniciado")
 
     def callback_cycle(self):
         print("Ejecutar ciclo de encendido/apagado")
@@ -202,7 +252,9 @@ class ControlDiscFrame(ttk.Frame):
         print("Iniciar modo oscilador")
 
     def callback_stop(self):
+        global thread_motor
+        print("Deteniendo motor...")
         stop_event.set()
-        print("Deteniendo motor")
-        time.sleep(1)
-        stop_event.clear()
+        if thread_motor:
+            thread_motor.join()
+        print("Hilo detenido")
