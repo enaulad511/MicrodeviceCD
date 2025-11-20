@@ -59,7 +59,10 @@ class PIDController:
 
         # Salida
         output = p + i + d
-        print(f"Error: {error}, Measurement: {measurement}, P: {p}, I: {i}, D: {d}, Output before limits: {output}")
+        # print(f"Er: {error}, Measurement: {measurement}, P: {p}, I: {i}, D: {d}, Output before limits: {output}")
+        # print with format
+        print(f"Er: {error:.1f}, Ms: {measurement:.1f}, P: {p:.4f}, I: {i:.4f}, D: {d:.4f}")
+        print(f"Ol: {output:.4f}")
         # Limitar salida
         if self.output_limits[0] is not None:
             output = max(self.output_limits[0], output)
