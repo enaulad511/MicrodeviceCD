@@ -1,4 +1,3 @@
-from ast import NotEq
 import gpiod
 import threading
 from time import sleep
