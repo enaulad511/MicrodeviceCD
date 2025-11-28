@@ -16,14 +16,18 @@ if __name__ == "__main__":
     current_time = time.perf_counter()
     data_encoder = EncoderData(serial_port_encoder, 115200)
     passed_time = 0.0
-    while passed_time < t_test:
-        raw_data = data_encoder.leer_uart()
-        data_encoder.parse_line(raw_data)
-        rpm_actual = data_encoder.get_rpm()
-        current_time = time.perf_counter()
-        # print(f"RPM actual: {rpm_actual}")
-        while time.perf_counter() - current_time < t_s:
-            pass
-        passed_time += time.perf_counter() - current_time
-        print(f"{passed_time:.2f}: {rpm_actual}")
+    try:
+        motor.avanzar(15)
+        while passed_time < t_test:
+            raw_data = data_encoder.leer_uart()
+            data_encoder.parse_line(raw_data)
+            rpm_actual = data_encoder.get_rpm()
+            current_time = time.perf_counter()
+            # print(f"RPM actual: {rpm_actual}")
+            while time.perf_counter() - current_time < t_s:
+                pass
+            passed_time += time.perf_counter() - current_time
+            print(f"{passed_time:.2f}: {rpm_actual}")
+    except KeyboardInterrupt:
+        print("Test interrupted by user")
     print("Test finished")
