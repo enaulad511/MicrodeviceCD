@@ -17,7 +17,7 @@ if __name__ == "__main__":
     data_encoder = EncoderData(serial_port_encoder, 115200)
     passed_time = 0.0
     try:
-        motor.avanzar(15)
+        motor.avanzar(10)
         while passed_time < t_test:
             raw_data = data_encoder.leer_uart()
             data_encoder.parse_line(raw_data)
