@@ -31,4 +31,5 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("Test interrupted by user")
     motor.detener()
+    print("Motor stopped")
     print("Test finished")
