@@ -25,4 +25,5 @@ if __name__ == "__main__":
         while time.perf_counter() - current_time < t_s:
             pass
         passed_time += time.perf_counter() - current_time
+        print(f"Tiempo transcurrido: {passed_time}")
     print("Test finished")
