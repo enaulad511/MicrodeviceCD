@@ -12,6 +12,7 @@ motor = MotorBTS7960(en=23)
 if __name__ == "__main__":
     t_test = 10  # seconds
     t_s = 0.01  # seconds
+    print ("Test started")
     current_time = time.perf_counter()
     data_encoder = EncoderData(serial_port_encoder, 115200)
     while current_time < t_test:
@@ -20,4 +21,6 @@ if __name__ == "__main__":
         rpm_actual = data_encoder.get_rpm()
         current_time = time.perf_counter()
         print(f"RPM actual: {rpm_actual}")
+        while time.perf_counter() - current_time < t_s:
+            pass
     print("Test finished")
