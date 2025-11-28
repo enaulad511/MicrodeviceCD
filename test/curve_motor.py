@@ -21,9 +21,9 @@ if __name__ == "__main__":
         data_encoder.parse_line(raw_data)
         rpm_actual = data_encoder.get_rpm()
         current_time = time.perf_counter()
-        print(f"RPM actual: {rpm_actual}")
+        # print(f"RPM actual: {rpm_actual}")
         while time.perf_counter() - current_time < t_s:
             pass
         passed_time += time.perf_counter() - current_time
-        print(f"Tiempo transcurrido: {passed_time}")
+        print(f"{passed_time:.2f}: {rpm_actual}")
     print("Test finished")
