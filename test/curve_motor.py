@@ -30,4 +30,5 @@ if __name__ == "__main__":
             print(f"{passed_time:.2f}: {rpm_actual}")
     except KeyboardInterrupt:
         print("Test interrupted by user")
+    motor.detener()
     print("Test finished")
