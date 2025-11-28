@@ -30,20 +30,20 @@ from ui.PhotoreceptorFrame import PhotoreceptorFrame
 
 def configure_styles():
     style = ttk.Style()
-    style.configure("Custom.TButton", font=font_buttons)
-    style.configure("Custom.TLabel", font=font_labels)
-    style.configure("Custom.TEntry", font=font_entry)
-    style.configure("Custom.TLabelframe.Label", font=font_labels_frame)
-    style.configure("Custom.TNotebook.Tab", font=font_tabs)
-    style.configure("Custom.TCombobox", font=font_entry)
-    style.configure("info.TButton", font=font_buttons)
-    style.configure("success.TButton", font=("Arial", 18))
-    style.configure("danger.TButton", font=("Arial", 18))
-    style.configure("Custom.Treeview", font=("Arial", 18), rowheight=30)
-    style.configure("Custom.Treeview.Heading", font=("Arial", 18, "bold"))
-    style.configure("success.TButton", font=font_buttons)
-    style.configure("primary.TButton", font=font_buttons)
-    style.configure("secondary.TButton", font=font_buttons)
+    style.configure("Custom.TButton", font=font_buttons)        # pyrefly: ignore
+    style.configure("Custom.TLabel", font=font_labels)      # pyrefly: ignore
+    style.configure("Custom.TEntry", font=font_entry)       # pyrefly: ignore
+    style.configure("Custom.TLabelframe.Label", font=font_labels_frame)     # pyrefly: ignore
+    style.configure("Custom.TNotebook.Tab", font=font_tabs)     # pyrefly: ignore
+    style.configure("Custom.TCombobox", font=font_entry)        # pyrefly: ignore
+    style.configure("info.TButton", font=font_buttons)      # pyrefly: ignore
+    style.configure("success.TButton", font=("Arial", 18))      # pyrefly: ignore
+    style.configure("danger.TButton", font=("Arial", 18))       # pyrefly: ignore
+    style.configure("Custom.Treeview", font=("Arial", 18), rowheight=30)        # pyrefly: ignore
+    style.configure("Custom.Treeview.Heading", font=("Arial", 18, "bold"))      # pyrefly: ignore
+    style.configure("success.TButton", font=font_buttons)       # pyrefly: ignore
+    style.configure("primary.TButton", font=font_buttons)       # pyrefly: ignore
+    style.configure("secondary.TButton", font=font_buttons)     # pyrefly: ignore
     return style
 
 
@@ -204,6 +204,6 @@ class MainGUI(ttk.Window):
     def open_configurations(self):
         # config_frame = ConfigFrame(self)
         if self.config_frame is None:
-            self.config_frame = ConfigFrame(self)
+            self.config_frame = ConfigFrame(self)   # pyrefly: ignore
         else:
-            self.config_frame.lift()        
+            self.config_frame.lift()

@@ -63,19 +63,19 @@ class EncoderData:
             self.counter = 0
             self.direction = "UNKNOWN"
 
-    def get_rpm(self):
+    def get_rpm(self) -> float:
         return self.rpm
 
-    def get_counter(self):
+    def get_counter(self) -> int:
         return self.counter
 
-    def get_direction(self):
+    def get_direction(self) -> str:
         return self.direction
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"RPM={self.rpm:.2f}, COUNTER={self.counter}, Dirección={self.direction}"
 
-    def close(self):
+    def close(self) -> None:
         self.ser.close()
         print("UART cerrado.")
     

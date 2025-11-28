@@ -1,4 +1,4 @@
-import gpiod
+import gpiod 
 import threading
 from time import sleep
 from gpiod.line import Direction, Value
@@ -16,21 +16,31 @@ class MotorBTS7960:
 
         # Configuración de líneas
         config = {
-            self.enable: gpiod.LineSettings(direction=Direction.OUTPUT, output_value=Value.INACTIVE),
-            self.rpwm: gpiod.LineSettings(direction=Direction.OUTPUT, output_value=Value.INACTIVE),
-            self.lpwm: gpiod.LineSettings(direction=Direction.OUTPUT, output_value=Value.INACTIVE),
+            self.enable: gpiod.LineSettings(
+                direction=Direction.OUTPUT, output_value=Value.INACTIVE
+            ),
+            self.rpwm: gpiod.LineSettings(
+                direction=Direction.OUTPUT, output_value=Value.INACTIVE
+            ),
+            self.lpwm: gpiod.LineSettings(
+                direction=Direction.OUTPUT, output_value=Value.INACTIVE
+            ),
         }
 
         # Solicita las líneas
-        self.request = gpiod.request_lines(chip, consumer="motor-control", config=config)
+        self.request = gpiod.request_lines(
+            chip, consumer="motor-control", config=config
+        )
 
         # Activa la línea EN
         self.request.set_value(self.enable, Value.ACTIVE)
-        print(f"Motor habilitado en EN={self.enable}, RPWM={self.rpwm}, LPWM={self.lpwm}")
+        print(
+            f"Motor habilitado en EN={self.enable}, RPWM={self.rpwm}, LPWM={self.lpwm}"
+        )
 
         # Variables para PWM dinámico
         self._duty = 0.0
-        self._active_line: int|None = None
+        self._active_line: int | None = None
         self._stop_event = threading.Event()
         self._pwm_thread = threading.Thread(target=self._pwm_loop, daemon=True)
         self._pwm_thread.start()
