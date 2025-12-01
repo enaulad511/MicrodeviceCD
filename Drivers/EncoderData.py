@@ -14,6 +14,8 @@ class EncoderData:
         self.ser = serial.Serial(port, baudrate, timeout=0.5)
         self.raw_data: str|None = None
         self.ser.reset_input_buffer()
+        self.ser.write(b"LPWM: 50\n")
+        self.ser.write(b"RPWM: 20\n")
 
     def leer_uart(self):
         """
