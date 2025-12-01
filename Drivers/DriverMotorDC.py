@@ -1,26 +1,22 @@
 
 import os
 import time
-import RPi.GPIO as GPIO
+import gpiod
+from gpiod.line import Direction, Value
 
 class MotorBTS7960:
     PWM_CHIP = "/sys/class/pwm/pwmchip0"
     PERIOD_NS = 1_000_000  # 1 ms = 1 kHz
 
-    def __init__(self, en=23, pwm_rpwm=0, pwm_lpwm=1):
+    def __init__(self, en=23, pwm_rpwm=0, pwm_lpwm=1, chip="/dev/gpiochip0"):
         """
-        Control de motor BTS7960 usando PWM por hardware vía sysfs y EN con RPi.GPIO.
+        Control de motor BTS7960 usando PWM por hardware vía sysfs y EN con gpiod.
         pwm_rpwm y pwm_lpwm son los canales PWM (0 y 1).
         """
         print("Inicializando motor...")
         self.enable = en
         self.rpwm_channel = f"{self.PWM_CHIP}/pwm{pwm_rpwm}"
         self.lpwm_channel = f"{self.PWM_CHIP}/pwm{pwm_lpwm}"
-
-        # Configurar EN con RPi.GPIO
-        GPIO.setmode(GPIO.BCM)
-        GPIO.setup(self.enable, GPIO.OUT)
-        GPIO.output(self.enable, GPIO.LOW)
 
         # Exportar canales PWM si no existen
         self._export_channel(pwm_rpwm)
@@ -30,7 +26,13 @@ class MotorBTS7960:
         self._setup_pwm(self.rpwm_channel)
         self._setup_pwm(self.lpwm_channel)
 
-        print(f"Motor listo con EN={self.enable}, RPWM=pwm{pwm_rpwm}, LPWM=pwm{pwm_lpwm}")
+        # Configurar línea EN con gpiod
+        config = {
+            self.enable: gpiod.LineSettings(direction=Direction.OUTPUT, output_value=Value.INACTIVE)
+        }
+        self.request = gpiod.request_lines(chip, consumer="motor-control", config=config)
+
+        print(f"Motor habilitado con EN={self.enable}, RPWM=pwm{pwm_rpwm}, LPWM=pwm{pwm_lpwm}")
 
     def _export_channel(self, channel):
         if not os.path.exists(f"{self.PWM_CHIP}/pwm{channel}"):
@@ -48,10 +50,10 @@ class MotorBTS7960:
             f.write(str(value))
 
     def _activar_en(self):
-        GPIO.output(self.enable, GPIO.HIGH)
+        self.request.set_value(self.enable, Value.ACTIVE)
 
     def _desactivar_en(self):
-        GPIO.output(self.enable, GPIO.LOW)
+        self.request.set_value(self.enable, Value.INACTIVE)
 
     def avanzar(self, velocidad):
         print(f"Avanzando a {velocidad}%")
@@ -86,8 +88,7 @@ class MotorBTS7960:
         self.detener()
         self._write(self.rpwm_channel, "enable", 0)
         self._write(self.lpwm_channel, "enable", 0)
-        GPIO.cleanup()
-        print("Motor deshabilitado y GPIO liberado.")
+        print("Motor deshabilitado.")
 
 # Ejemplo de uso
 if __name__ == "__main__":
