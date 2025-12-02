@@ -38,13 +38,13 @@ class DriverEncoderSys:
     # =========================
     def habilitar_avance(self):
         """Habilita solo el medio puente derecho (EN_R) para avanzar."""
-        self.request.set_value(self.en_l, Value.INACTIVE)
+        self.request.set_value(self.en_l, Value.ACTIVE)
         self.request.set_value(self.en_r, Value.ACTIVE)
 
     def habilitar_retroceso(self):
         """Habilita solo el medio puente izquierdo (EN_L) para retroceder."""
         self.request.set_value(self.en_l, Value.ACTIVE)
-        self.request.set_value(self.en_r, Value.INACTIVE)
+        self.request.set_value(self.en_r, Value.ACTIVE)
 
     def deshabilitar_motor(self):
         """Deshabilita ambos medios puentes."""
