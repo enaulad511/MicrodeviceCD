@@ -1,140 +1,147 @@
-# -*- coding: utf-8 -*-
-__author__ = "Edisson A. Naula"
-__date__ = "$ 01/oct/2025 at 15:02 $"
 
-from time import time, sleep
-import pigpio
+import gpiod
+from time import sleep
+from gpiod.line import Direction, Value
+import serial
 
 
-class EncoderIncremental:
-    def __init__(self, pin_a, pin_b, ppr=600):
-        self.stop = False
-        self.state = 0
-        self.pin_a = pin_a
-        self.pin_b = pin_b
-        self.ppr = ppr  # Pulsos por revolución
-        self.position = 0
-        self.last_time = time()
-        self.last_position = 0
-        self.rpm = 0
-        self.revolutions = 0
+class DriverEncoderSys:
+    def __init__(self, en_l=12, en_r=13, uart_port="/dev/ttyAMA0", baudrate=115200, chip="/dev/gpiochip0"):
+        """
+        Control seguro de motor BTS7960 con habilitación selectiva de medio puente
+        y comunicación UART con Raspberry Pi Pico para PWM y lectura de encoder.
+        """
+        print("Inicializando sistema motor + encoder...")
+        self.en_l = en_l  # EN_L (medio puente izquierdo)
+        self.en_r = en_r  # EN_R (medio puente derecho)
 
-        self.pi = pigpio.pi()
-        if not self.pi.connected:
-            raise IOError("No se pudo conectar con el daemon pigpio. ¿Está corriendo pigpiod?")
+        # Configuración GPIO para EN_L y EN_R
+        config = {
+            self.en_l: gpiod.LineSettings(direction=Direction.OUTPUT, output_value=Value.INACTIVE),
+            self.en_r: gpiod.LineSettings(direction=Direction.OUTPUT, output_value=Value.INACTIVE),
+        }
 
-        self.pi.set_mode(self.pin_a, pigpio.INPUT)
-        self.pi.set_mode(self.pin_b, pigpio.INPUT)
-        self.pi.set_pull_up_down(self.pin_a, pigpio.PUD_UP)
-        self.pi.set_pull_up_down(self.pin_b, pigpio.PUD_UP)
+        self.request = gpiod.request_lines(chip, consumer="motor-control", config=config)
 
-        self.callback_a = self.pi.callback(self.pin_a, pigpio.EITHER_EDGE, self._actualizar)
-        # self.callback_b = self.pi.callback(self.pin_b, pigpio.EITHER_EDGE, self._actualizar)
+        # UART para comunicación con Pico
+        self.ser = serial.Serial(uart_port, baudrate, timeout=0.5)
+        self.ser.reset_input_buffer()
+        
+        # Variables del encoder
+        self.raw_data: str|None = None
+        self.rpm = 0.0
+        self.counter = 0
+        self.direction = "UNKNOWN"
 
-    # def _actualizar(self, gpio, level, tick):
-    #     estado_a = self.pi.read(self.pin_a)
-    #     estado_b = self.pi.read(self.pin_b)
-    #
-    #     if estado_a == estado_b:
-    #         self.position += 1
-    #     else:
-    #         self.position -= 1
+    # =========================
+    # Control seguro del motor
+    # =========================
+    def habilitar_avance(self):
+        """Habilita solo el medio puente derecho (EN_R) para avanzar."""
+        self.request.set_value(self.en_l, Value.INACTIVE)
+        self.request.set_value(self.en_r, Value.ACTIVE)
 
-    # def _actualizar(self, gpio, level, tick):
-    #     if self.stop:
-    #         return
-    #     # Leer los estados actuales de los pines
-    #     s = self.state & 0b11  # Mantener los 2 bits anteriores
-    #
-    #     if self.pi.read(self.pin_a):
-    #         s |= 0b100
-    #     if self.pi.read(self.pin_b):
-    #         s |= 0b1000
-    #
-    #     # Decodificar el movimiento según la tabla
-    #     if s in [0b0000, 0b0101, 0b1010, 0b1111]:
-    #         pass  # Sin movimiento
-    #     elif s in [0b0001, 0b0111, 0b1000, 0b1110]:
-    #         self.position += 1
-    #     elif s in [0b0010, 0b0100, 0b1011, 0b1101]:
-    #         self.position -= 1
-    #     elif s in [0b0011, 0b1100]:
-    #         self.position += 2
-    #     else:
-    #         self.position -= 2
-    #
-    #     # Actualizar el estado anterior (solo los 2 bits más recientes)
-    #     self.state = (s >> 2)
+    def habilitar_retroceso(self):
+        """Habilita solo el medio puente izquierdo (EN_L) para retroceder."""
+        self.request.set_value(self.en_l, Value.ACTIVE)
+        self.request.set_value(self.en_r, Value.INACTIVE)
 
-    def _actualizar(self, gpio, level, tick):
-        s = self.state & 0b11  # bits anteriores
+    def deshabilitar_motor(self):
+        """Deshabilita ambos medios puentes."""
+        self.request.set_value(self.en_l, Value.INACTIVE)
+        self.request.set_value(self.en_r, Value.INACTIVE)
 
-        if self.pi.read(self.pin_a):
-            s |= 0b100
-        if self.pi.read(self.pin_b):
-            s |= 0b1000
+    def avanzar(self, velocidad):
+        """Avanza en sentido horario con velocidad (0-100%)."""
+        velocidad = max(0, min(100, velocidad))
+        print(f"Avanzando a {velocidad}%")
+        self.habilitar_avance()
+        self.ser.write(f"RPWM:{velocidad}\n".encode())
 
-        # Tabla de transición
-        if s in [0, 5, 10, 15]:
-            pass  # sin movimiento
-        elif s in [1, 7, 8, 14]:
-            self.position += 1
-        elif s in [2, 4, 11, 13]:
-            self.position -= 1
-        elif s in [3, 12]:
-            self.position += 2
-        else:
-            self.position -= 2
+    def retroceder(self, velocidad):
+        """Retrocede en sentido antihorario con velocidad (0-100%)."""
+        velocidad = max(0, min(100, velocidad))
+        print(f"Retrocediendo a {velocidad}%")
+        self.habilitar_retroceso()
+        self.ser.write(f"LPWM:{velocidad}\n".encode())
 
-        self.state = (s >> 2)  # actualizar estado anterior
+    def detener(self):
+        """Detiene el motor (PWM = 0 y deshabilita ambos medios puentes)."""
+        print("Deteniendo motor...")
+        self.ser.write(b"RPWM:0\n")
+        self.ser.write(b"LPWM:0\n")
+        self.deshabilitar_motor()
 
-    def leer_posicion(self):
-        """Devuelve la posición en pulsos"""
-        return self.position
+    def frenar(self):
+        """Freno activo: ambos medios puentes habilitados y PWM alto por breve tiempo."""
+        print("Frenando motor...")
+        self.request.set_value(self.en_l, Value.ACTIVE)
+        self.request.set_value(self.en_r, Value.ACTIVE)
+        self.ser.write(b"RPWM:100\n")
+        self.ser.write(b"LPWM:100\n")
+        sleep(0.3)
+        self.detener()
 
-    def leer_grados(self):
-        """Convierte la posición a grados en el rango [0, 360)"""
-        grados = (self.position / self.ppr) * 360
-        return grados % 360
-
-    def leer_revoluciones(self):
-        """Devuelve el número de revoluciones completas (puede ser decimal)"""
-        return round(self.position / self.ppr, 2)
-
-    def calcular_rpm(self):
-        """Calcula las RPM basadas en el cambio de posición y tiempo"""
-        ahora = time()
-        delta_t = ahora - self.last_time
-        delta_p = self.position - self.last_position
-        if delta_t > 0:
-            revs = delta_p / self.ppr
-            self.rpm = (revs / delta_t) * 60
-
-        self.last_time = ahora
-        self.last_position = self.position
-        return round(self.rpm, 2)
-
-    def limpiar(self):
-        """Cancela el callback y detiene pigpio"""
-        self.stop = True
+    # =========================
+    # Lectura del encoder
+    # =========================
+    def leer_encoder(self):
+        """Solicita datos al Pico y los parsea."""
         try:
-            if self.callback_a:
-                self.callback_a.cancel()
-            self.pi.stop()
+            self.ser.write(b"GET\n")
+            raw_data = self.ser.readline()
+            self.raw_data = raw_data.decode('utf-8').strip()
+            if raw_data:
+                line = raw_data.decode('utf-8').strip()
+                self._parse_line(line)
+                return line
         except Exception as e:
-            print(f"Error al limpiar: {e}")
+            print("Error al leer UART:", e)
+            return None
+
+    def _parse_line(self, line):
+        try:
+            parts = line.split("|")
+            for part in parts:
+                part = part.strip()
+                if part.startswith("RPM:"):
+                    self.rpm = float(part.replace("RPM:", "").strip())
+                elif part.startswith("COUNTER:"):
+                    self.counter = int(part.replace("COUNTER:", "").strip())
+                elif "Dirección" in part:
+                    self.direction = part.split(":")[1].strip()
+        except Exception as e:
+            print("Error al parsear línea:", e)
+            self.rpm = 0.0
+            self.counter = 0
+            self.direction = "UNKNOWN"
+
+    def get_estado(self):
+        return {"RPM": self.rpm, "COUNTER": self.counter, "DIRECCION": self.direction}
+
+    def get_rpm(self) -> float:
+        return self.rpm
+    # =========================
+    # Limpieza
+    # =========================
+    def limpiar(self):
+        print("Liberando recursos...")
+        self.detener()
+        self.ser.close()
+        print("Sistema apagado y recursos liberados.")
 
 
+# Ejemplo de uso
 if __name__ == "__main__":
-    encoder = EncoderIncremental(pin_a=5, pin_b=6)
-
+    sistema = DriverEncoderSys(en_l=12, en_r=13)
     try:
-        while True:
-            print(f"Posición actual: {encoder.leer_posicion()}")
-            sleep(0.1)
-
-    except KeyboardInterrupt:
-        print("Lectura detenida.")
-
+        sistema.avanzar(50)
+        sleep(2)
+        print(sistema.leer_encoder())
+        sistema.retroceder(70)
+        sleep(2)
+        print(sistema.leer_encoder())
+        sistema.frenar()
+        sistema.detener()
     finally:
-        encoder.limpiar()
+        sistema.limpiar()
