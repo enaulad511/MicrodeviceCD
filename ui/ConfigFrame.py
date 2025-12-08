@@ -18,6 +18,8 @@ def create_widgets_configuration(parent):
         if isinstance(v, dict):
             subframe = ttk.LabelFrame(parent, text=f"{k}")
             subframe.grid(row=index, column=0, padx=10, pady=10, sticky="nswe")
+            subframe.columnconfigure((0, 1), weight=1)
+
             index += 1
             subindex = 0
             entries[k] = {}
@@ -27,7 +29,7 @@ def create_widgets_configuration(parent):
                 )
                 svar = ttk.StringVar(value=str(v1))
                 entry = ttk.Entry(subframe, font=font_entry, textvariable=svar)
-                entry.grid(row=subindex, column=1, padx=5, pady=5)
+                entry.grid(row=subindex, column=1, padx=5, pady=5, sticky="w")
                 entries[k][k1] = svar
                 subindex += 1
         else:
@@ -36,7 +38,7 @@ def create_widgets_configuration(parent):
             )
             svar = ttk.StringVar(value=str(v))
             entry = ttk.Entry(parent, font=font_entry, textvariable=svar)
-            entry.grid(row=index, column=1, padx=5, pady=5)
+            entry.grid(row=index, column=1, padx=5, pady=5, sticky="w")
     return entries
 
 
@@ -45,15 +47,19 @@ class ConfigFrame(ttk.Toplevel):
         super().__init__(parent)
         self.title("Configuration Settings")
         self.parent = parent
+        self.columnconfigure(0, weight=1)
+        self.rowconfigure((0, 1), weight=1)
         content_frame = ScrolledFrame(self)
         content_frame.grid(row=0, column=0, sticky="nswe")
+        content_frame.columnconfigure(0, weight=1)
+
         self.entries = create_widgets_configuration(content_frame)
         ttk.Button(
             self,
             text="Save Settings",
-            style="info.TButton",
+            style="CustomPrimary.TButton",
             command=self.save_settings,
-        ).grid(row=1, column=0, columnspan=2, pady=10, padx=5, sticky="nswe")
+        ).grid(row=1, column=0, columnspan=2, pady=10, padx=5, sticky="n")
         self.protocol("WM_DELETE_WINDOW", self.on_close)
 
     def save_settings(self):

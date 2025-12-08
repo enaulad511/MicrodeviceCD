@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+from templates.constants import font_buttons_small
 from ttkbootstrap.dialogs.dialogs import Messagebox
 import time
 from Drivers.ClientUDP import UdpClient
@@ -37,23 +38,24 @@ def configure_styles():
     style.configure("Custom.TButton", font=font_buttons)  # pyrefly: ignore
     style.configure("Custom.TLabel", font=font_labels)  # pyrefly: ignore
     style.configure("Custom.TEntry", font=font_entry)  # pyrefly: ignore
-    style.configure( # pyrefly: ignore
+    style.configure(  # pyrefly: ignore
         "Custom.TLabelframe.Label", font=font_labels_frame
-    )  
+    )
     style.configure("Custom.TNotebook.Tab", font=font_tabs)  # pyrefly: ignore
     style.configure("Custom.TCombobox", font=font_entry)  # pyrefly: ignore
     style.configure("info.TButton", font=font_buttons)  # pyrefly: ignore
-    style.configure("success.TButton", font=("Arial", 18))  # pyrefly: ignore
-    style.configure("danger.TButton", font=("Arial", 18))  # pyrefly: ignore
-    style.configure( # pyrefly: ignore
-        "Custom.Treeview", font=("Arial", 18), rowheight=30
-    )  # pyrefly: ignore
-    style.configure( # pyrefly: ignore
-        "Custom.Treeview.Heading", font=("Arial", 18, "bold")
-    )  # pyrefly: ignore
+    style.configure("success.TButton", font=font_buttons)  # pyrefly: ignore
+    style.configure("danger.TButton", font=font_buttons)  # pyrefly: ignore
     style.configure("success.TButton", font=font_buttons)  # pyrefly: ignore
     style.configure("primary.TButton", font=font_buttons)  # pyrefly: ignore
     style.configure("secondary.TButton", font=font_buttons)  # pyrefly: ignore
+    style.configure("CustomPrimary.TButton", font=font_buttons_small)  # pyrefly: ignore
+    style.configure(  # pyrefly: ignore
+        "Custom.Treeview", font=("Arial", 18), rowheight=30
+    )  # pyrefly: ignore
+    style.configure(  # pyrefly: ignore
+        "Custom.Treeview.Heading", font=("Arial", 18, "bold")
+    )  # pyrefly: ignore
     return style
 
 
@@ -92,9 +94,9 @@ class MainGUI(ttk.Window):
         self.protocol("WM_DELETE_WINDOW", self.on_close_window)
         # --------------------Start Animation -------------------
         # self.show_gif_toplevel()
-        self.after(0, self.maximize_window)
+        # self.after(0, self.maximize_window)
         self.columnconfigure(0, weight=1)
-        self.rowconfigure(0, weight=1)
+        self.rowconfigure((0, 1), weight=1)
         # self.images = load_images()
         # --------------------notebook-------------------
         self.connected = ttk.BooleanVar(value=False)
@@ -162,24 +164,24 @@ class MainGUI(ttk.Window):
         print("init tabs Photoreceptor")
         # # --------------------footer-------------------
         self.frame_footer = ttk.Frame(self)
-        self.frame_footer.grid(row=1, column=0, sticky="ew", padx=15, pady=15)
+        self.frame_footer.grid(row=1, column=0, sticky="nswe", padx=15, pady=15)
         self.txt_connected = ttk.StringVar(value="Disc Disconnected")
         ttk.Label(
             self.frame_footer,
             textvariable=self.txt_connected,
-            font=("Arial", 18),
+            font=font_tabs,
             style="Custom.TLabel",
         ).grid(row=0, column=0, sticky="ns", padx=15, pady=15)
         ttk.Button(
             self.frame_footer,
             text="Test Connection Disc",
-            style="primary.TButton",
+            style="CustomPrimary.TButton",
             command=self.on_button_test_disc,
         ).grid(row=0, column=1, sticky="e", padx=15, pady=15)
         ttk.Button(
             self.frame_footer,
             text="Configuration",
-            style="success.TButton",
+            style="CustomPrimary.TButton",
             command=self.open_configurations,
         ).grid(row=0, column=2, sticky="e", padx=15, pady=15)
 
@@ -245,7 +247,7 @@ class MainGUI(ttk.Window):
                 title="Connection",
                 message="Disc Disconnected",
             )
-        
+
     def try_connect_disc(self):
         client = UdpClient(
             port=5005,

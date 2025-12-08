@@ -25,24 +25,33 @@ def create_widgets_pcr(parent, callbacks: dict):
         "Number of Cycles:",
         "RPM Cooling:"
     ]
-
+    columns = 2
     default_values = ["100", "25", "15", "10", "1", "500"]
-
+    # for i, lbl in enumerate(labels):
+    #     ttk.Label(frame1, text=lbl, style="Custom.TLabel").grid(
+    #         row=i, column=0, padx=5, pady=5, sticky="e"
+    #     )
+    #     entry = ttk.Entry(frame1, font=font_entry)
+    #     entry.insert(0, default_values[i])
+    #     entry.grid(row=i, column=1, padx=5, pady=5)
+    #     entries.append(entry)
     for i, lbl in enumerate(labels):
+        row = i // columns
+        col = i % columns
         ttk.Label(frame1, text=lbl, style="Custom.TLabel").grid(
-            row=i, column=0, padx=5, pady=5, sticky="e"
+            row=row, column=col * 2, padx=5, pady=5, sticky="e"
         )
         entry = ttk.Entry(frame1, font=font_entry)
         entry.insert(0, default_values[i])
-        entry.grid(row=i, column=1, padx=5, pady=5)
+        entry.grid(row=row, column=col * 2 + 1, padx=5, pady=5)
         entries.append(entry)
-
+    frame1.columnconfigure(tuple(range(2 * columns)), weight=1)
     # Botón para generar perfil
     ttk.Button(
         frame1,
         text="Generate Profile",
         style="info.TButton",
-        command=callbacks.get("callback_generate_profile"),
+        command=callbacks.get("callback_generate_profile", ()),
     ).grid(row=len(labels), column=0, columnspan=2, pady=10)
 
     return entries
