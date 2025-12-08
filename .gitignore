@@ -8,9 +8,11 @@ CPico/build/
 CPico/*/
 __pycache__/
 **.pyc
+ui/*.pyc
 *.pyo
 ui/__pycache__/CvFrame.cpython-313.pyc
 ui/__pycache__/ElectrochemicalFrame.cpython-313.pyc
 pyrefly.toml
 ui/__pycache__/CvFrame.cpython-313.pyc
 *_test.py
+templates/__pycache__/constants.cpython-313.pyc
