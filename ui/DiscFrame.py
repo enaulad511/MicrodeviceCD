@@ -158,7 +158,7 @@ def spinMotorRPM(direction, rpm, ts):
         rpm_actual = sistemaMotor.get_rpm()
         print(raw_data)
         control_signal = round(pid.compute(rpm_actual), 2)
-
+        control_signal = 10
         if direction == "CW":
             sistemaMotor.avanzar(control_signal) # pyrefly: ignore
         elif direction == "CCW":
