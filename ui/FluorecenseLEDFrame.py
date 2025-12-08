@@ -94,7 +94,7 @@ class ControlFluorescenteFrame(ttk.Frame):
         try:
             if self._on_time_job is not None:
                 self.after_cancel(self._on_time_job)
-                self._on_time_job = None
+                self._on_time_job = None        # pyrefly: ignore
         except Exception:
             self._on_time_job = None
 
@@ -111,13 +111,13 @@ class ControlFluorescenteFrame(ttk.Frame):
         if self.pin is None:
             # Importa aquí para evitar dependencias circulares al cargar módulos
             from Drivers.DriverGPIO import GPIOPin
-            self.pin = GPIOPin(
+            self.pin = GPIOPin(     # pyrefly: ignore
                 self.led_gpio,
                 chip=self.chip,
                 consumer="fluorescent-ui",
                 active_low=self.active_low,
             )
-            self.pin.set_output(initial_high=False)
+            self.pin.set_output(initial_high=False)     # pyrefly: ignore
         else:
             # Reasegura modo salida si ya existe
             try:
@@ -125,7 +125,7 @@ class ControlFluorescenteFrame(ttk.Frame):
             except Exception:
                 # Si hubo algún problema, re-crea el recurso
                 from Drivers.DriverGPIO import GPIOPin
-                self.pin = GPIOPin(
+                self.pin = GPIOPin(     # pyrefly: ignore
                     self.led_gpio,
                     chip=self.chip,
                     consumer="fluorescent-ui",
@@ -159,14 +159,14 @@ class ControlFluorescenteFrame(ttk.Frame):
         print("Encender LED Fluorescente")
         self._cleanup_jobs()
         self._ensure_pin()
-        self.pin.write(True)
+        self.pin.write(True)        # pyrefly: ignore
         print("Encendido")
 
     def callback_off(self):
         print("Apagar LED Fluorescente")
         self._cleanup_jobs()
         self._ensure_pin()
-        self.pin.write(False)
+        self.pin.write(False)       # pyrefly: ignore
         print("Apagado")
 
     def callback_on_time(self):
@@ -179,11 +179,11 @@ class ControlFluorescenteFrame(ttk.Frame):
         self._ensure_pin()
 
         # Encender inmediatamente
-        self.pin.write(True)
+        self.pin.write(True)        # pyrefly: ignore
         print(f"Encendido temporizado: {ms} ms")
 
         # Agendar apagado
-        self._on_time_job = self.after(ms, self._on_time_finish)
+        self._on_time_job = self.after(ms, self._on_time_finish)        # pyrefly: ignore
 
     def _on_time_finish(self):
         try:

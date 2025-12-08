@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 
+from tkinter import StringVar
+from tkinter import Entry
 import ttkbootstrap as ttk
 from ttkbootstrap.scrolled import ScrolledFrame
 from templates.constants import font_entry
@@ -9,7 +11,7 @@ __date__ = "$ 08/10/2025  at 09:32 a.m. $"
 
 
 def create_widgets_input(parent, callbacks: dict):
-    entries = []
+    entries: list[Entry| StringVar] = []
     # Control 1: Encender y apagar
     frame1 = ttk.LabelFrame(parent, text="Basic Control")
     frame1.grid(row=0, column=0, padx=10, pady=10, sticky="nswe")
@@ -133,14 +135,14 @@ class ControleLEDFrame(ttk.Frame):
         if self.pin is not None:
             self._cleanup_jobs()
         else:
-            self.pin = GPIOPin(
+            self.pin = GPIOPin(     # pyrefly: ignore
                 self.led_gpio,
                 chip=self.chip,
                 consumer="led-ui",
                 active_low=self.active_low,
             )
             # Preconfigura como salida en bajo
-            self.pin.set_output(initial_high=False)
+            self.pin.set_output(initial_high=False)     # pyrefly: ignore
 
     # ----------------- Helpers GUI/GPIO -----------------
     def _cleanup_jobs(self):
@@ -148,14 +150,14 @@ class ControleLEDFrame(ttk.Frame):
         try:
             if self._on_time_job is not None:
                 self.after_cancel(self._on_time_job)
-                self._on_time_job = None
+                self._on_time_job = None        # pyrefly: ignore
         except Exception:
             self._on_time_job = None
 
         try:
             if self._pattern_job is not None:
                 self.after_cancel(self._pattern_job)
-                self._pattern_job = None
+                self._pattern_job = None        # pyrefly: ignore
         except Exception:
             self._pattern_job = None
 
@@ -182,8 +184,8 @@ class ControleLEDFrame(ttk.Frame):
         # Apaga el LED y libera recursos
         self._cleanup_jobs()
         try:
-            self.pin.write(False)
-            self.pin.close()
+            self.pin.write(False)       # pyrefly: ignore
+            self.pin.close()        # pyrefly: ignore
         except Exception as e:
             print(f"Error al cerrar el GPIO heating led: {e}")        
 
@@ -191,7 +193,7 @@ class ControleLEDFrame(ttk.Frame):
     def callback_on(self):
         self.init_GPIO()
         self._cleanup_jobs()
-        self.pin.write(True)
+        self.pin.write(True)        # pyrefly: ignore
         print("Encender LED")
 
     def callback_off(self):
@@ -210,14 +212,14 @@ class ControleLEDFrame(ttk.Frame):
         if ms < 0:
             ms = 0
         self._cleanup_jobs()
-        self.pin.write(True)
+        self.pin.write(True)        # pyrefly: ignore
         print(f"Encender LED por tiempo: {ms} ms")
 
         # Agenda apagado
-        self._on_time_job = self.after(ms, self._on_time_finish)
+        self._on_time_job = self.after(ms, self._on_time_finish)        # pyrefly: ignore
 
     def _on_time_finish(self):
-        self.pin.write(False)
+        self.pin.write(False)       # pyrefly: ignore
         self._on_time_job = None
         print("Tiempo finalizado: LED apagado")
 

@@ -2,8 +2,8 @@
 # Drivers/DriverGPIO.py
 # -*- coding: utf-8 -*-
 
-import gpiod
-from gpiod.line import Direction, Value, Bias, Drive
+import gpiod    # pyrefly: ignore
+from gpiod.line import Direction, Value, Bias, Drive # pyrefly: ignore
 from typing import Optional
 
 
@@ -111,7 +111,7 @@ class GPIOPin:
         """
         if self._mode != "output":
             self.set_output(initial_high=False)
-        self.request.set_value(self.offset, Value.ACTIVE if value else Value.INACTIVE)
+        self.request.set_value(self.offset, Value.ACTIVE if value else Value.INACTIVE)  # pyrefly: ignore
 
     def set_input(self, pull: Optional[str] = None):
         """
@@ -133,7 +133,7 @@ class GPIOPin:
         """
         if self._mode != "input":
             self.set_input(pull=None)
-        val = self.request.get_value(self.offset)
+        val = self.request.get_value(self.offset)       # pyrefly: ignore
         return 1 if val == Value.ACTIVE else 0
 
     def toggle(self):
@@ -143,8 +143,8 @@ class GPIOPin:
         """
         if self._mode != "output":
             self.set_output(initial_high=False)
-        current = self.request.get_value(self.offset)
-        self.request.set_value(
+        current = self.request.get_value(self.offset)       # pyrefly: ignore
+        self.request.set_value(     # pyrefly: ignore
             self.offset,
             Value.INACTIVE if current == Value.ACTIVE else Value.ACTIVE,
         )
@@ -156,7 +156,7 @@ class GPIOPin:
         """
         try:
             if self.request:
-                self.request.release()
+                self.request.release()      # pyrefly: ignore
                 self.request = None
         except Exception:
             pass
