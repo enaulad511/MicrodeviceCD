@@ -24,7 +24,7 @@ class DriverEncoderSys:
         self.request = gpiod.request_lines(chip, consumer="motor-control", config=config)
 
         # UART para comunicación con Pico
-        self.ser = serial.Serial(uart_port, baudrate, timeout=0.5)
+        self.ser = serial.Serial(uart_port, baudrate, timeout=0.5, stopbits=2)
         self.ser.reset_input_buffer()
         
         # Variables del encoder
