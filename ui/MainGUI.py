@@ -1,5 +1,9 @@
 # -*- coding: utf-8 -*-
+from ttkbootstrap.dialogs.dialogs import Messagebox
+import time
+from Drivers.ClientUDP import UdpClient
 from ui.ConfigFrame import ConfigFrame
+
 __author__ = "Edisson A. Naula"
 __date__ = "$ 08/10/2025  at 09:35 a.m. $"
 
@@ -30,20 +34,26 @@ from ui.PhotoreceptorFrame import PhotoreceptorFrame
 
 def configure_styles():
     style = ttk.Style()
-    style.configure("Custom.TButton", font=font_buttons)        # pyrefly: ignore
-    style.configure("Custom.TLabel", font=font_labels)      # pyrefly: ignore
-    style.configure("Custom.TEntry", font=font_entry)       # pyrefly: ignore
-    style.configure("Custom.TLabelframe.Label", font=font_labels_frame)     # pyrefly: ignore
-    style.configure("Custom.TNotebook.Tab", font=font_tabs)     # pyrefly: ignore
-    style.configure("Custom.TCombobox", font=font_entry)        # pyrefly: ignore
-    style.configure("info.TButton", font=font_buttons)      # pyrefly: ignore
-    style.configure("success.TButton", font=("Arial", 18))      # pyrefly: ignore
-    style.configure("danger.TButton", font=("Arial", 18))       # pyrefly: ignore
-    style.configure("Custom.Treeview", font=("Arial", 18), rowheight=30)        # pyrefly: ignore
-    style.configure("Custom.Treeview.Heading", font=("Arial", 18, "bold"))      # pyrefly: ignore
-    style.configure("success.TButton", font=font_buttons)       # pyrefly: ignore
-    style.configure("primary.TButton", font=font_buttons)       # pyrefly: ignore
-    style.configure("secondary.TButton", font=font_buttons)     # pyrefly: ignore
+    style.configure("Custom.TButton", font=font_buttons)  # pyrefly: ignore
+    style.configure("Custom.TLabel", font=font_labels)  # pyrefly: ignore
+    style.configure("Custom.TEntry", font=font_entry)  # pyrefly: ignore
+    style.configure( # pyrefly: ignore
+        "Custom.TLabelframe.Label", font=font_labels_frame
+    )  
+    style.configure("Custom.TNotebook.Tab", font=font_tabs)  # pyrefly: ignore
+    style.configure("Custom.TCombobox", font=font_entry)  # pyrefly: ignore
+    style.configure("info.TButton", font=font_buttons)  # pyrefly: ignore
+    style.configure("success.TButton", font=("Arial", 18))  # pyrefly: ignore
+    style.configure("danger.TButton", font=("Arial", 18))  # pyrefly: ignore
+    style.configure( # pyrefly: ignore
+        "Custom.Treeview", font=("Arial", 18), rowheight=30
+    )  # pyrefly: ignore
+    style.configure( # pyrefly: ignore
+        "Custom.Treeview.Heading", font=("Arial", 18, "bold")
+    )  # pyrefly: ignore
+    style.configure("success.TButton", font=font_buttons)  # pyrefly: ignore
+    style.configure("primary.TButton", font=font_buttons)  # pyrefly: ignore
+    style.configure("secondary.TButton", font=font_buttons)  # pyrefly: ignore
     return style
 
 
@@ -77,8 +87,9 @@ class MainGUI(ttk.Window):
         self.frame_m_control = None
         self.config_frame = None
         self.project_key = None
-        self.title("\u03BCAA")
+        self.title("\u03bcAA")
         self.style_gui = configure_styles()
+        self.protocol("WM_DELETE_WINDOW", self.on_close_window)
         # --------------------Start Animation -------------------
         # self.show_gif_toplevel()
         self.after(0, self.maximize_window)
@@ -106,10 +117,14 @@ class MainGUI(ttk.Window):
         self.main_notebook.add(self.tab_pcr, text=main_tabs_texts[0], padding=10)
         # ------------------Electrochemical tab-------------------
         self.tab_electrochemical = ElectrochemicalFrame(self.main_notebook)
-        self.main_notebook.add(self.tab_electrochemical, text=main_tabs_texts[1], padding=10)
+        self.main_notebook.add(
+            self.tab_electrochemical, text=main_tabs_texts[1], padding=10
+        )
         # ------------------Manual Control tab-------------------
         self.tab_manual_control = ttk.Frame(self.main_notebook)
-        self.main_notebook.add(self.tab_manual_control, text=main_tabs_texts[2], padding=10)
+        self.main_notebook.add(
+            self.tab_manual_control, text=main_tabs_texts[2], padding=10
+        )
         self.tab_manual_control.columnconfigure(0, weight=1)
         self.tab_manual_control.rowconfigure(0, weight=1)
         # ------------------Manual Control tabs-------------------
@@ -148,7 +163,7 @@ class MainGUI(ttk.Window):
         # # --------------------footer-------------------
         self.frame_footer = ttk.Frame(self)
         self.frame_footer.grid(row=1, column=0, sticky="ew", padx=15, pady=15)
-        self.txt_connected = ttk.StringVar(value="Disconnected")
+        self.txt_connected = ttk.StringVar(value="Disc Disconnected")
         ttk.Label(
             self.frame_footer,
             textvariable=self.txt_connected,
@@ -157,10 +172,19 @@ class MainGUI(ttk.Window):
         ).grid(row=0, column=0, sticky="ns", padx=15, pady=15)
         ttk.Button(
             self.frame_footer,
+            text="Test Connection Disc",
+            style="primary.TButton",
+            command=self.on_button_test_disc,
+        ).grid(row=0, column=1, sticky="e", padx=15, pady=15)
+        ttk.Button(
+            self.frame_footer,
             text="Configuration",
             style="success.TButton",
             command=self.open_configurations,
-        ).grid(row=0, column=1, sticky="ns", padx=15, pady=15)
+        ).grid(row=0, column=2, sticky="e", padx=15, pady=15)
+
+        # ----------------------after init ----------------------
+        self.after(1000, self.try_connect_disc)
 
     def on_tab_changed(self, event):
         selected_index = self.notebook.index(self.notebook.select())
@@ -204,6 +228,49 @@ class MainGUI(ttk.Window):
     def open_configurations(self):
         # config_frame = ConfigFrame(self)
         if self.config_frame is None:
-            self.config_frame = ConfigFrame(self)   # pyrefly: ignore
+            self.config_frame = ConfigFrame(self)  # pyrefly: ignore
         else:
             self.config_frame.lift()
+
+    def on_button_test_disc(self):
+        if self.try_connect_disc():
+            # dialog mesagge
+            Messagebox.show_info(
+                title="Connection",
+                message="Disc Connected",
+            )
+        else:
+            # dialog mesagge
+            Messagebox.show_error(
+                title="Connection",
+                message="Disc Disconnected",
+            )
+        
+    def try_connect_disc(self):
+        client = UdpClient(
+            port=5005,
+            buffer_size=4096,
+            allow_broadcast=True,  # Important for broadcast payloads
+            local_ip="",  # "" listens on all interfaces (wlan0, eth0, etc.)
+            recv_timeout_sec=1.0,  # lets loop check stop flag periodically
+            on_message=None,
+            parse_float=True,  # Arduino sends a numeric string
+        )
+
+        try:
+            client.start()
+            time.sleep(1.0)
+            lf = client.latest_float()
+            if lf is not None:
+                self.txt_connected.set("Disc Connected")
+                client.stop()
+                return True
+        except KeyboardInterrupt:
+            print("Error at testing connection...")
+        finally:
+            client.stop()
+        return False
+
+    def on_close_window(self):
+        self.destroy()
+        self.quit()
