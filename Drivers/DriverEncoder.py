@@ -1,7 +1,7 @@
 
-import gpiod
+import gpiod   # pyrefly: ignore
 from time import sleep
-from gpiod.line import Direction, Value
+from gpiod.line import Direction, Value # pyrefly: ignore
 import serial
 
 

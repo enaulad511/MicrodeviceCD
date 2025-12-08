@@ -94,15 +94,15 @@ class MainGUI(ttk.Window):
         self.protocol("WM_DELETE_WINDOW", self.on_close_window)
         # --------------------Start Animation -------------------
         # self.show_gif_toplevel()
-        # self.after(0, self.maximize_window)
+        self.after(0, self.maximize_window)
         self.columnconfigure(0, weight=1)
-        self.rowconfigure((0, 1), weight=1)
+        self.rowconfigure(0, weight=1)
         # self.images = load_images()
         # --------------------notebook-------------------
         self.connected = ttk.BooleanVar(value=False)
         self.frame_content = ttk.Frame(self)
         self.frame_content.grid(
-            row=0, column=0, sticky="nsew", padx=(5, 10), pady=(10, 10)
+            row=0, column=0, sticky="nsew", padx=(5, 10), pady=(3, 3)
         )
         self.frame_content.columnconfigure(0, weight=1)
         self.frame_content.rowconfigure(0, weight=1)
@@ -164,7 +164,7 @@ class MainGUI(ttk.Window):
         print("init tabs Photoreceptor")
         # # --------------------footer-------------------
         self.frame_footer = ttk.Frame(self)
-        self.frame_footer.grid(row=1, column=0, sticky="nswe", padx=15, pady=15)
+        self.frame_footer.grid(row=1, column=0, sticky="nswe", padx=5, pady=1)
         self.txt_connected = ttk.StringVar(value="Disc Disconnected")
         ttk.Label(
             self.frame_footer,
