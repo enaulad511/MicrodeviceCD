@@ -1,141 +1,182 @@
-# -*- coding: utf-8 -*-
-import gpiod  # pyrefly: ignore
-from gpiod.line import Direction, Value, Bias, Drive    # pyrefly: ignore
+
+# Drivers/DriverGPIO.py
 from typing import Optional
-
-__author__ = "Edisson Naula"
-__date__ = "$ 08/12/2025 at 14:20 $"
-
 
 class GPIOPin:
     """
-    Control de un único GPIO (numeración BCM) con libgpiod v2.
-    Permite configurar como salida (alto/bajo) o como entrada (lectura).
+    Clase GPIO compatible con libgpiod v2 y v1.
+    - Numeración BCM como offset del chip.
+    - Métodos: set_output(), write(), set_input(), read(), toggle(), close()
     """
 
-    def __init__(
-        self,
-        gpio: int,
-        chip: str = "/dev/gpiochip0",
-        consumer: str = "gpio-pin",
-        active_low: bool = False,
-    ):
-        """
-        gpio: número BCM del GPIO (ej. 17).
-        chip: ruta del chip GPIO (por defecto /dev/gpiochip0).
-        consumer: etiqueta de consumidor.
-        active_low: True si 'ACTIVE' debe mapear a nivel físico bajo (invertido).
-        """
+    def __init__(self, gpio: int, chip: str = "/dev/gpiochip0", consumer: str = "gpio-pin", active_low: bool = False):
         self.offset = int(gpio)
         self.consumer = consumer
-        self.active_low = active_low
+        self.active_low = bool(active_low)
+        self._chip_path = chip
 
-        # Recursos libgpiod
-        self._chip = gpiod.Chip(chip)
-        self._req: Optional[gpiod.Request] = None
-        self._cfg: Optional[gpiod.LineConfig] = None
-        self._mode: Optional[str] = None  # 'output' | 'input'
-        return self
-    # ---------- helpers internos ----------
-    def _make_cfg(
-        self,
-        direction: Direction,
-        value: Optional[Value] = None,
-        bias: Optional[Bias] = None,
-        drive: Drive = Drive.PUSH_PULL,
-    ) -> gpiod.LineConfig:
-        settings = gpiod.LineSettings(
+        # Estados internos
+        self._lib = None
+        self._api = None  # 2 o 1
+        self._chip = None
+        self._req = None      # v2: gpiod.Request
+        self._cfg = None      # v2: gpiod.LineConfig
+        self._line = None     # v1: gpiod.Line
+        self._mode = None     # 'output' | 'input'
+
+        # Cargar gpiod y detectar API
+        self._detect_api()
+
+    def _detect_api(self):
+        try:
+            import gpiod as gpiod_mod
+            self._lib = gpiod_mod
+            # v2 tiene LineConfig
+            if hasattr(gpiod_mod, "LineConfig"):
+                self._api = 2
+                from gpiod.line import Direction, Value, Bias, Drive  # type: ignore
+                self.Direction = Direction
+                self.Value = Value
+                self.Bias = Bias
+                self.Drive = Drive
+                # Abrir chip (v2 usa gpiod.Chip(path))
+                self._chip = gpiod_mod.Chip(self._chip_path)
+            else:
+                # API v1
+                self._api = 1
+                # v1 constants están en el propio módulo
+                self.LINE_REQ_DIR_OUT = getattr(gpiod_mod, "LINE_REQ_DIR_OUT")
+                self.LINE_REQ_DIR_IN = getattr(gpiod_mod, "LINE_REQ_DIR_IN")
+                self._chip = gpiod_mod.chip(self._chip_path)
+        except Exception as e:
+            raise RuntimeError("No se pudo importar/abrir libgpiod. ¿Está instalado python3-libgpiod?") from e
+
+    # ======================= API v2 helpers =======================
+    def _v2_make_cfg(self, direction, value=None, bias=None, drive=None):
+        g = self._lib
+        settings = g.LineSettings(
             direction=direction,
-            output_value=value if value is not None else Value.INACTIVE,
-            bias=bias if bias is not None else Bias.AS_IS,
-            drive=drive,
+            output_value=value if value is not None else self.Value.INACTIVE,
+            bias=bias if bias is not None else self.Bias.AS_IS,
+            drive=drive if drive is not None else self.Drive.PUSH_PULL,
             active_low=self.active_low,
         )
-        cfg = gpiod.LineConfig()
+        cfg = g.LineConfig()
         cfg.add_line_settings(self.offset, settings)
         return cfg
 
-    def _apply_cfg(self, cfg: gpiod.LineConfig):
-        rcfg = gpiod.RequestConfig(consumer=self.consumer)
+    def _v2_apply_cfg(self, cfg):
+        g = self._lib
+        rcfg = g.RequestConfig(consumer=self.consumer)
         if self._req is None:
             self._req = self._chip.request_lines(rcfg, cfg)
         else:
-            # Reconfigurar sin liberar (más rápido y seguro)
             self._req.reconfigure_lines(cfg)
         self._cfg = cfg
 
-    # ---------- API pública ----------
-    def set_output(self, initial_high: bool = False, drive: Drive = Drive.PUSH_PULL):
-        """
-        Configura el pin como salida. initial_high=True lo pone 'alto' (Value.ACTIVE).
-        Nota: si active_low=True, 'alto' lógico activa el nivel físico bajo.
-        """
-        val = Value.ACTIVE if initial_high else Value.INACTIVE
-        cfg = self._make_cfg(Direction.OUTPUT, value=val, drive=drive)
-        self._apply_cfg(cfg)
+    # ======================= API v1 helpers =======================
+    def _v1_request_output(self, initial_val: int):
+        g = self._lib
+        self._line = self._chip.get_line(self.offset)
+        # Nota: v1 no soporta 'active_low' en el request; se maneja manualmente al escribir/leer
+        self._line.request(consumer=self.consumer, type=self.LINE_REQ_DIR_OUT, default_val=initial_val)
+
+    def _v1_request_input(self):
+        g = self._lib
+        self._line = self._chip.get_line(self.offset)
+        self._line.request(consumer=self.consumer, type=self.LINE_REQ_DIR_IN)
+
+    # ======================= API pública =======================
+    def set_output(self, initial_high: bool = False):
+        """Configura el pin como salida."""
+        if self._api == 2:
+            val = self.Value.ACTIVE if initial_high else self.Value.INACTIVE
+            cfg = self._v2_make_cfg(self.Direction.OUTPUT, value=val)
+            self._v2_apply_cfg(cfg)
+        else:
+            # Si active_low=True, invertimos el valor físico deseado
+            physical_val = 0 if (initial_high and self.active_low) else (1 if initial_high else 0)
+            self._v1_request_output(physical_val)
         self._mode = "output"
         return self
 
     def write(self, value: bool):
-        """Escribe HIGH/LOW lógico (ACTIVE/INACTIVE)."""
+        """Escribe True(ON)/False(OFF)."""
         if self._mode != "output":
-            # Autoconfigurar si aún no está como salida
             self.set_output(initial_high=False)
-        self._req.set_value(self.offset, Value.ACTIVE if value else Value.INACTIVE)
+
+        if self._api == 2:
+            self._req.set_value(self.offset, self.Value.ACTIVE if value else self.Value.INACTIVE)
+        else:
+            # En v1, set_value usa 0/1 físicos; respetamos active_low
+            physical = 0 if (value and self.active_low) else (1 if value else 0)
+            self._line.set_value(physical)
 
     def set_input(self, pull: Optional[str] = None):
-        """
-        Configura el pin como entrada.
-        pull: None | 'pull_up' | 'pull_down' | 'disabled'
-        """
-        bias_map = {
-            None: Bias.AS_IS,
-            "pull_up": Bias.PULL_UP,
-            "pull_down": Bias.PULL_DOWN,
-            "disabled": Bias.DISABLED,
-        }
-        bias = bias_map.get(pull, Bias.AS_IS)
-        cfg = self._make_cfg(Direction.INPUT, bias=bias)
-        self._apply_cfg(cfg)
+        """Configura el pin como entrada."""
+        if self._api == 2:
+            bias_map = {
+                None: self.Bias.AS_IS,
+                "pull_up": self.Bias.PULL_UP,
+                "pull_down": self.Bias.PULL_DOWN,
+                "disabled": self.Bias.DISABLED,
+            }
+            cfg = self._v2_make_cfg(self.Direction.INPUT, bias=bias_map.get(pull, self.Bias.AS_IS))
+            self._v2_apply_cfg(cfg)
+        else:
+            # v1: no hay bias configurable portable; se ignora o requiere ioctl específico
+            self._v1_request_input()
         self._mode = "input"
         return self
 
     def read(self) -> int:
-        """Lee el valor del pin (0/1). Si no está en modo entrada, lo configura."""
+        """Lee 0/1 (lógico)."""
         if self._mode != "input":
             self.set_input()
-        val = self._req.get_value(self.offset)
-        # Value.ACTIVE → 1, Value.INACTIVE → 0 (respetando active_low si corresponde)
-        return 1 if val == Value.ACTIVE else 0
+
+        if self._api == 2:
+            val = self._req.get_value(self.offset)
+            return 1 if val == self.Value.ACTIVE else 0
+        else:
+            physical = self._line.get_value()
+            # Si active_low=True, invertimos al lógico
+            return 0 if (physical == 1 and self.active_low) else (1 if physical == 1 else 0)
 
     def toggle(self):
         """Conmuta el estado actual (solo salida)."""
         if self._mode != "output":
             self.set_output(initial_high=False)
-        current = self._req.get_value(self.offset)
-        self._req.set_value(
-            self.offset,
-            Value.INACTIVE if current == Value.ACTIVE else Value.ACTIVE,
-        )
+
+        if self._api == 2:
+            current = self._req.get_value(self.offset)
+            self._req.set_value(self.offset, self.Value.INACTIVE if current == self.Value.ACTIVE else self.Value.ACTIVE)
+        else:
+            # Leer físico y escribir invertido
+            cur = self._line.get_value()
+            self._line.set_value(0 if cur == 1 else 1)
 
     def close(self):
         """Libera recursos."""
         try:
-            if self._req:
+            if self._api == 2 and self._req:
                 self._req.release()
                 self._req = None
+            if self._api == 1 and self._line:
+                try:
+                    self._line.release()
+                except Exception:
+                    pass
+                self._line = None
             if self._chip:
-                self._chip.close()
+                try:
+                    self._chip.close()
+                except Exception:
+                    pass
         except Exception:
             pass
 
-    # Context manager opcional
     def __enter__(self):
         return self
 
     def __exit__(self, exc_type, exc, tb):
         self.close()
-
-if __name__ == "__main__":
-    pass
-    
