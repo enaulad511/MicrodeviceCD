@@ -314,3 +314,4 @@ class PCRFrame(ttk.Frame):
         stop_event_motor.clear()
         spinMotorRPMTime("CW", 500, ts, 2)
         time.sleep(1)
+        self.client_temperature.stop()
