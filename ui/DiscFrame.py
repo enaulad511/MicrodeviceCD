@@ -155,16 +155,19 @@ def spinMotorRPM(direction, rpm, ts):
         ts=ts,
     )
     current_time = time.perf_counter()
+    sistemaMotor.avanzar(10) # pyrefly: ignore
     while not stop_event.is_set():
         raw_data = sistemaMotor.leer_encoder()  # pyrefly:ignore
         rpm_actual = sistemaMotor.get_rpm() # pyrefly:ignore
         print(raw_data)
         control_signal = round(pid.compute(rpm_actual), 2)
-        control_signal = 10
+        # control_signal = 10
         if direction == "CW":
-            sistemaMotor.avanzar(control_signal) # pyrefly: ignore
+            print(f"Control signal CW: {control_signal}")
+            # sistemaMotor.avanzar(control_signal) # pyrefly: ignore
         elif direction == "CCW":
-            sistemaMotor.retroceder(control_signal) # pyrefly: ignore
+            print(f"Control signal CCW: {control_signal}")
+            # sistemaMotor.retroceder(control_signal) # pyrefly: ignore
         else:
             print("Dirección no válida")
             break

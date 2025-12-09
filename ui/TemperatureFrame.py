@@ -205,7 +205,7 @@ class TemperatureFrame(ttk.Frame):
         self.ax.set_ylabel(f"Temperatura ({unidad})")
         self.ax.grid(True, alpha=0.25)
         self.canvas.draw()
-        print("Gráfico actualizado")
+        # print("Gráfico actualizado")
 
     # ----------------- Persistencia -----------------
 

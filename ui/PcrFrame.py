@@ -1,4 +1,12 @@
 # -*- coding: utf-8 -*-
+from Drivers.ClientUDP import UdpClient
+from templates.constants import serial_port_encoder
+from templates.constants import led_fluorescence_pin
+from templates.constants import led_heatin_pin
+import time
+from Drivers.PIDController import PIDController
+from templates.utils import read_settings_from_file
+import threading
 __author__ = "Edisson A. Naula"
 __date__ = "$ 21/10/2025 at 11:30 a.m. $"
 
@@ -8,6 +16,42 @@ from templates.constants import font_entry
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
+# Variables globales
+sistemaMotor = None
+thread_motor = None
+thread_lock = threading.Lock()
+stop_event_motor = threading.Event()
+
+def spinMotorRPMTime(direction, rpm, ts, t_experiment):
+    global sistemaMotor
+    settings: dict = read_settings_from_file()
+    pid_cfg: dict = settings.get("pidControllerRPM", {"kp": 0.1, "ki": 0.01, "kd": 0.005}) 
+    pid = PIDController(
+        kp=pid_cfg["kp"],
+        ki=pid_cfg["ki"],
+        kd=pid_cfg["kd"],
+        setpoint=rpm,
+        output_limits=(pid_cfg.get(min, 10), pid_cfg.get("max", 50)),
+        ts=ts,
+    )
+    start_time = time.perf_counter()
+    current_time = time.perf_counter()
+    sistemaMotor.avanzar(10) # pyrefly: ignore
+    while not stop_event_motor.is_set():
+        raw_data = sistemaMotor.leer_encoder()  # pyrefly:ignore
+        rpm_actual = sistemaMotor.get_rpm() # pyrefly:ignore
+        print(raw_data)
+        control_signal = round(pid.compute(rpm_actual), 2)
+        print(f"Control signal: {control_signal}")
+        while (time.perf_counter() - current_time) < ts:
+            pass
+        if (time.perf_counter() - start_time) > t_experiment:
+            stop_event_motor.set()
+            break
+        current_time = time.perf_counter()
+
+    sistemaMotor.detener() # pyrefly: ignore
+    print("Motor detenido correctamente")
 
 def create_widgets_pcr(parent, callbacks: dict):
     entries = []
@@ -23,18 +67,10 @@ def create_widgets_pcr(parent, callbacks: dict):
         "Time High (s):",
         "Time Low (s):",
         "Number of Cycles:",
-        "RPM Cooling:"
+        "RPM Cooling:",
     ]
     columns = 2
     default_values = ["100", "25", "15", "10", "1", "500"]
-    # for i, lbl in enumerate(labels):
-    #     ttk.Label(frame1, text=lbl, style="Custom.TLabel").grid(
-    #         row=i, column=0, padx=5, pady=5, sticky="e"
-    #     )
-    #     entry = ttk.Entry(frame1, font=font_entry)
-    #     entry.insert(0, default_values[i])
-    #     entry.grid(row=i, column=1, padx=5, pady=5)
-    #     entries.append(entry)
     for i, lbl in enumerate(labels):
         row = i // columns
         col = i % columns
@@ -53,7 +89,18 @@ def create_widgets_pcr(parent, callbacks: dict):
         style="info.TButton",
         command=callbacks.get("callback_generate_profile", ()),
     ).grid(row=len(labels), column=0, columnspan=2, pady=10)
-
+    # Boton para empezar experimento
+    ttk.Button(
+        frame1,
+        text="Start Experiment",
+        style="success.TButton",
+        command=callbacks.get("callback_start_experiment", ()),
+    ).grid(row=len(labels), column=2, columnspan=2, pady=10)
+    svar_temperature = ttk.StringVar(value="")
+    ttk.Label(frame1, textvariable=svar_temperature, style="Custom.TLabel").grid(
+        row=len(labels) + 1, column=0, padx=5, pady=5, sticky="e"
+    )
+    entries.append(svar_temperature)
     return entries
 
 
@@ -92,7 +139,7 @@ class PCRFrame(ttk.Frame):
             rpm = float(self.entries[5].get())
 
             # Generar datos con pendientes proporcionales a RPM
-            current_time = 0
+            current_time = 0.0
             transition_const = 10000  # Ajusta la escala de transición
             transition_time_down = transition_const / max(rpm, 1)
             transition_time_up = 15
@@ -104,25 +151,25 @@ class PCRFrame(ttk.Frame):
                 # Transición Low -> High
                 start = current_time
                 end = current_time + transition_time_up
-                phase_segments.append((start, end, None, 'Heating'))
+                phase_segments.append((start, end, None, "Heating"))
                 current_time = end
 
                 # High Temp fase
                 start = current_time
                 end = current_time + time_high
-                phase_segments.append((start, end, high_temp, 'High'))
+                phase_segments.append((start, end, high_temp, "High"))
                 current_time = end
 
                 # Transición High -> Low
                 start = current_time
                 end = current_time + transition_time_down
-                phase_segments.append((start, end, None, 'Cooling'))
+                phase_segments.append((start, end, None, "Cooling"))
                 current_time = end
 
                 # Low Temp fase
                 start = current_time
                 end = current_time + time_low
-                phase_segments.append((start, end, low_temp, 'Low'))
+                phase_segments.append((start, end, low_temp, "Low"))
                 current_time = end
 
             # Crear figura
@@ -131,27 +178,61 @@ class PCRFrame(ttk.Frame):
             # Dibujar fases con colores y etiquetas
             for seg in phase_segments:
                 start, end, temp, label = seg
-                if label == 'High':
-                    ax.hlines(high_temp, start, end, colors='red', linewidth=2)
-                    ax.text((start + end) / 2, high_temp + 1, 'High', ha='center', color='red')
-                elif label == 'Low':
-                    ax.hlines(low_temp, start, end, colors='blue', linewidth=2)
-                    ax.text((start + end) / 2, low_temp + 1, 'Low', ha='center', color='blue')
+                if label == "High":
+                    ax.hlines(high_temp, start, end, colors="red", linewidth=2)
+                    ax.text(
+                        (start + end) / 2,
+                        high_temp + 1,
+                        "High",
+                        ha="center",
+                        color="red",
+                    )
+                elif label == "Low":
+                    ax.hlines(low_temp, start, end, colors="blue", linewidth=2)
+                    ax.text(
+                        (start + end) / 2,
+                        low_temp + 1,
+                        "Low",
+                        ha="center",
+                        color="blue",
+                    )
                 else:  # Transiciones
-                    if label == 'Cooling':
-                        ax.plot([start, end], [high_temp, low_temp], color='green', linestyle='--')
-                        ax.text((start + end) / 2, (high_temp + low_temp) / 2, 'Cooling', ha='center', color='green')
+                    if label == "Cooling":
+                        ax.plot(
+                            [start, end],
+                            [high_temp, low_temp],
+                            color="green",
+                            linestyle="--",
+                        )
+                        ax.text(
+                            (start + end) / 2,
+                            (high_temp + low_temp) / 2,
+                            "Cooling",
+                            ha="center",
+                            color="green",
+                        )
                     else:
-                        ax.plot([start, end], [low_temp, high_temp], color='orange', linestyle='--')
-                        ax.text((start + end) / 2, (high_temp + low_temp) / 2, 'Heating', ha='center', color='orange')
+                        ax.plot(
+                            [start, end],
+                            [low_temp, high_temp],
+                            color="orange",
+                            linestyle="--",
+                        )
+                        ax.text(
+                            (start + end) / 2,
+                            (high_temp + low_temp) / 2,
+                            "Heating",
+                            ha="center",
+                            color="orange",
+                        )
 
             # Líneas horizontales de referencia
-            ax.axhline(high_temp, color='red', linestyle=':', linewidth=1)
-            ax.axhline(low_temp, color='blue', linestyle=':', linewidth=1)
+            ax.axhline(high_temp, color="red", linestyle=":", linewidth=1)
+            ax.axhline(low_temp, color="blue", linestyle=":", linewidth=1)
 
             ax.set_xlabel("Tiempo (s)")
             ax.set_ylabel("Temperatura (°C)")
-            ax.set_title(f"Perfil PCR - RPM Cooling: {rpm}")
+            ax.set_title("Perfil PCR")
             ax.grid(True)
 
             # Limpiar canvas previo
@@ -165,4 +246,68 @@ class PCRFrame(ttk.Frame):
 
         except ValueError:
             print("Error: Verifique los valores ingresados.")
-    
+    def update_displayed_temperature(self, text, address):
+        msg = f"Temperature: {text} °C"
+        self.entries[-1].set(msg)
+
+    def callback_start_experiment(self):
+        global thread_motor, sistemaMotor
+        print("Experimento iniciado")
+        # retrieve data from entries
+        high_temp = float(self.entries[0].get())
+        low_temp = float(self.entries[1].get())
+        time_high = float(self.entries[2].get())
+        time_low = float(self.entries[3].get())
+        cycles = int(self.entries[4].get())
+        rpm = float(self.entries[5].get())
+        print(
+            f"High Temp: {high_temp}, Low Temp: {low_temp}, Time High: {time_high}, Time Low: {time_low}, Cycles: {cycles}, RPM: {rpm}"
+        )
+        # cliente temperature
+        self.client_temperature = UdpClient(
+            port=5005,
+            buffer_size=4096,
+            allow_broadcast=True,  # Important for broadcast payloads
+            local_ip="",  # "" listens on all interfaces (wlan0, eth0, etc.)
+            recv_timeout_sec=1.0,  # lets loop check stop flag periodically
+            on_message= lambda t, a: self.update_displayed_temperature(t, a),
+            parse_float=True,  # Arduino sends a numeric string
+        )
+        self.client_temperature.start()
+        # rotate motor ar rpm
+        from Drivers.DriverEncoder import DriverEncoderSys
+        direction = "CW"
+        rpm_setpoint = rpm
+        ts = 0.01
+        if sistemaMotor is None:
+            sistemaMotor = DriverEncoderSys(en_l=12, en_r=13, uart_port=serial_port_encoder, baudrate=57600)
+        stop_event_motor.clear()
+        spinMotorRPMTime(direction, rpm_setpoint, ts, 5)
+        time.sleep(1)
+        # turn on HEATING LED
+        from Drivers.DriverGPIO import GPIOPin
+        pin_heating = GPIOPin(     
+                led_heatin_pin,
+                consumer="led-heating-ui",
+                active_low=False,
+            )
+        # Preconfigura como salida en bajo
+        pin_heating.set_output(initial_high=False)     # pyrefly: ignore
+        pin_heating.write(True)       # pyrefly: ignore
+        time.sleep(1)
+        pin_heating.close()       # pyrefly: ignore
+        # turn on fluorescen LED
+        pin_pcr = GPIOPin(     
+                led_fluorescence_pin,
+                consumer="led-heating-ui",
+                active_low=False,
+            )
+        # Preconfigura como salida en bajo
+        pin_pcr.set_output(initial_high=False)     # pyrefly: ignore
+        pin_pcr.write(True)       # pyrefly: ignore
+        time.sleep(1)
+        pin_pcr.close()       # pyrefly: ignore
+        # spin for cooling
+        stop_event_motor.clear()
+        spinMotorRPMTime("CW", 500, ts, 5)
+        time.sleep(1)

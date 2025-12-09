@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 
+from templates.constants import led_heatin_pin
 from tkinter import StringVar
 from tkinter import Entry
 import ttkbootstrap as ttk
@@ -99,7 +100,7 @@ class ControleLEDFrame(ttk.Frame):
     def __init__(
         self,
         parent,
-        led_gpio: int = 24,
+        led_gpio: int = 25,
         chip: str = "/dev/gpiochip0",
         active_low: bool = False,
     ):
@@ -140,7 +141,7 @@ class ControleLEDFrame(ttk.Frame):
             self._cleanup_jobs()
         else:
             self.pin = GPIOPin(     # pyrefly: ignore
-                self.led_gpio,
+                led_heatin_pin,
                 chip=self.chip,
                 consumer="led-ui",
                 active_low=self.active_low,

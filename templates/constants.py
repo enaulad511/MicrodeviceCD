@@ -31,3 +31,5 @@ tab_texts = [
 main_tabs_texts = ["PCR", "Electrochemical", "Manual Control"]
 main_tabs_icons = {"PCR": "🧪", "Electrochemical": "🧫", "Manual Control": "🖥️"}
 serial_port_encoder = "/dev/ttyAMA0"
+led_heatin_pin = 25
+led_fluorescence_pin = 24

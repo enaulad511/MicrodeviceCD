@@ -58,7 +58,7 @@ class ControlFluorescenteFrame(ttk.Frame):
     def __init__(
         self,
         parent,
-        led_gpio: int = 25,
+        led_gpio: int = 24,
         chip: str = "/dev/gpiochip0",
         active_low: bool = False,
     ):

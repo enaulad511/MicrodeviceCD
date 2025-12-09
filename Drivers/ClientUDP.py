@@ -146,10 +146,10 @@ class UdpClient:
                     self._latest_float = None   # pyrefly: ignore
 
             # Print basic info
-            if self.parse_float and self._latest_float is not None:
-                print(f"From {addr[0]}:{addr[1]} -> {self._latest_float:.2f}")
-            else:
-                print(f"From {addr[0]}:{addr[1]} -> {text}")
+            # if self.parse_float and self._latest_float is not None:
+            #     print(f"From {addr[0]}:{addr[1]} -> {self._latest_float:.2f}")
+            # else:
+            #     print(f"From {addr[0]}:{addr[1]} -> {text}")
 
             # Call user callback if provided
             if self.on_message:
