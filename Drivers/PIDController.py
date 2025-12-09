@@ -111,11 +111,11 @@ class PIDController:
         self._last_error = error
         self._last_time = current_time
 
-        # Debug
-        print(
-            f"Er: {error:.3f}, Ms: {measurement:.3f}, P: {p:.4f}, I: {i:.4f}, D: {d:.4f}, "
-            f"U*: {u_unsat:.4f}, U_sat: {u_sat:.4f}, Out: {output:.4f}"
-        )
+        # # Debug
+        # print(
+        #     f"Er: {error:.3f}, Ms: {measurement:.3f}, P: {p:.4f}, I: {i:.4f}, D: {d:.4f}, "
+        #     f"U*: {u_unsat:.4f}, U_sat: {u_sat:.4f}, Out: {output:.4f}"
+        # )
 
         return output
 
