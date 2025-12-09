@@ -54,7 +54,7 @@ def create_widgets_disco_input(parent, callbacks: dict):
 
     # Mode 2: On/Off cycle
     frame2 = ttk.LabelFrame(parent, text="On/Off Cycle")
-    frame2.grid(row=0, column=1, padx=10, pady=10, sticky="nswe")
+    frame2.grid(row=1, column=0, padx=10, pady=10, sticky="nswe")
     frame2.configure(style="Custom.TLabelframe")
     frame2.columnconfigure((0, 1), weight=1)
 
@@ -99,7 +99,7 @@ def create_widgets_disco_input(parent, callbacks: dict):
 
     # Mode 3: Oscillator
     frame3 = ttk.LabelFrame(parent, text="Oscillator Mode")
-    frame3.grid(row=2, column=0, padx=10, pady=10, sticky="nswe")
+    frame3.grid(row=0, column=1, padx=10, pady=10, sticky="nswe")
     frame3.configure(style="Custom.TLabelframe")
     frame3.columnconfigure((0, 1), weight=1)
 
@@ -132,7 +132,7 @@ def create_widgets_disco_input(parent, callbacks: dict):
         text="Stop",
         style="danger.TButton",
         command=callbacks.get("callback_stop", ()),
-    ).grid(row=2, column=1, pady=10, padx=5, sticky="we")
+    ).grid(row=1, column=1, pady=10, padx=5, sticky="we")
     return entries
 
 
