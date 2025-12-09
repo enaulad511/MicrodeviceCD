@@ -7,14 +7,15 @@ import time
 from Drivers.PIDController import PIDController
 from templates.utils import read_settings_from_file
 import threading
-__author__ = "Edisson A. Naula"
-__date__ = "$ 21/10/2025 at 11:30 a.m. $"
-
 import ttkbootstrap as ttk
 from ttkbootstrap.scrolled import ScrolledFrame
 from templates.constants import font_entry
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+
+__author__ = "Edisson A. Naula"
+__date__ = "$ 21/10/2025 at 11:30 a.m. $"
+
 
 # Variables globales
 sistemaMotor = None
@@ -108,6 +109,7 @@ class PCRFrame(ttk.Frame):
     def __init__(self, parent):
         ttk.Frame.__init__(self, parent)
         self.parent = parent
+        self.running_experiment = False
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=1)
 
@@ -247,13 +249,16 @@ class PCRFrame(ttk.Frame):
 
         except ValueError:
             print("Error: Verifique los valores ingresados.")
+            
     def update_displayed_temperature(self, text, address):
         msg = f"Temperature: {text} °C"
         print(msg)
         self.entries[-1].set(msg)
 
     def callback_start_experiment(self):
-        global thread_motor, sistemaMotor
+        if self.running_experiment:
+            return
+        self.running_experiment = True
         print("Experimento iniciado")
         # retrieve data from entries
         high_temp = float(self.entries[0].get())
@@ -265,6 +270,11 @@ class PCRFrame(ttk.Frame):
         print(
             f"High Temp: {high_temp}, Low Temp: {low_temp}, Time High: {time_high}, Time Low: {time_low}, Cycles: {cycles}, RPM: {rpm}"
         )
+        thread_experiment = threading.Thread(target=self.experiment_pcr, args=(high_temp, low_temp, time_high, time_low, rpm))
+        thread_experiment.start()
+    
+    def experiment_pcr(self, high_temp, low_temp, time_high, time_low, rpm):
+        global thread_motor, sistemaMotor
         # cliente temperature
         self.client_temperature = UdpClient(
             port=5005,
@@ -316,3 +326,4 @@ class PCRFrame(ttk.Frame):
         spinMotorRPMTime("CW", 500, ts, 2)
         time.sleep(1)
         self.client_temperature.stop()
+        self.running_experiment = False
