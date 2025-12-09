@@ -117,6 +117,7 @@ class PCRFrame(ttk.Frame):
 
         callbacks = {
             "callback_generate_profile": self.callback_generate_profile,
+            "callback_start_experiment": self.callback_start_experiment,
         }
         self.entries = create_widgets_pcr(content_frame, callbacks)
 
