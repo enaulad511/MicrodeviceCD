@@ -17,7 +17,7 @@ from templates.constants import font_entry
 class PhotoreceptorFrame(ttk.Frame):
     def __init__(self, parent):
         super().__init__(parent)
-        self.start_time = 0
+        self.start_time = 0.0
         self.parent = parent
         self.columnconfigure(0, weight=1)
         self.rowconfigure((0, 1), weight=1)

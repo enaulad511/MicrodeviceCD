@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+from ui.TemperatureFrame import TemperatureFrame
 from templates.constants import font_buttons_small
 from ttkbootstrap.dialogs.dialogs import Messagebox
 import time
@@ -162,6 +163,9 @@ class MainGUI(ttk.Window):
         self.tab4 = PhotoreceptorFrame(self.notebook)
         self.notebook.add(self.tab4, text=tab_texts[3])
         print("init tabs Photoreceptor")
+
+        self.tab5 = TemperatureFrame(self.notebook)
+        self.notebook.add(self.tab5, text=tab_texts[4])
         # # --------------------footer-------------------
         self.frame_footer = ttk.Frame(self)
         self.frame_footer.grid(row=1, column=0, sticky="nswe", padx=5, pady=1)
