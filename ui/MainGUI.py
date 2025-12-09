@@ -164,7 +164,7 @@ class MainGUI(ttk.Window):
         self.notebook.add(self.tab4, text=tab_texts[3])
         print("init tabs Photoreceptor")
 
-        self.tab5 = TemperatureFrame(self.notebook)
+        self.tab5 = TemperatureFrame(self.notebook, sensor_reader="termocupula")
         self.notebook.add(self.tab5, text=tab_texts[4])
         # # --------------------footer-------------------
         self.frame_footer = ttk.Frame(self)
