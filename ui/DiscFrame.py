@@ -132,7 +132,7 @@ def create_widgets_disco_input(parent, callbacks: dict):
         text="Stop",
         style="danger.TButton",
         command=callbacks.get("callback_stop", ()),
-    ).grid(row=1, column=1, pady=10, padx=5, sticky="we")
+    ).grid(row=1, column=1, pady=10, padx=5, sticky="nswe")
     return entries
 
 
