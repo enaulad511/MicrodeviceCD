@@ -16,24 +16,26 @@ def create_widgets_fluorescente_input(parent, callbacks: dict):
     frame1 = ttk.LabelFrame(parent, text="Basic Control")
     frame1.grid(row=0, column=0, padx=10, pady=10, sticky="nswe")
     frame1.configure(style="Custom.TLabelframe")
+    frame1.columnconfigure((0, 1), weight=1)
 
     ttk.Button(
         frame1,
         text="On",
         style="info.TButton",
         command=callbacks.get("callback_on", ()),
-    ).grid(row=0, column=0, padx=5, pady=5)
+    ).grid(row=0, column=0, padx=5, pady=5, sticky="nswe")
     ttk.Button(
         frame1,
         text="Off",
         style="info.TButton",
         command=callbacks.get("callback_off", ()),
-    ).grid(row=0, column=1, padx=5, pady=5)
+    ).grid(row=0, column=1, padx=5, pady=5, sticky="nswe")
 
     # Control 2: Encender por tiempo
     frame2 = ttk.LabelFrame(parent, text="Timed On")
     frame2.grid(row=1, column=0, padx=10, pady=10, sticky="nswe")
     frame2.configure(style="Custom.TLabelframe")
+    frame2.columnconfigure((0, 1), weight=1)
 
     ttk.Label(frame2, text="Duration (ms):", style="Custom.TLabel").grid(
         row=0, column=0, padx=5, pady=5, sticky="e"
@@ -47,7 +49,7 @@ def create_widgets_fluorescente_input(parent, callbacks: dict):
         style="info.TButton",
         text="Turn On by Time",
         command=callbacks.get("callback_on_time", ()),
-    ).grid(row=1, column=0, columnspan=2, pady=5, padx=5, sticky="w")
+    ).grid(row=1, column=0, columnspan=2, pady=5, padx=5, sticky="nswe")
 
     return entries
 

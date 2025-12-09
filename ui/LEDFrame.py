@@ -16,29 +16,31 @@ def create_widgets_input(parent, callbacks: dict):
     frame1 = ttk.LabelFrame(parent, text="Basic Control")
     frame1.grid(row=0, column=0, padx=10, pady=10, sticky="nswe")
     frame1.configure(style="Custom.TLabelframe")
+    frame1.columnconfigure((0, 1), weight=1)
 
     ttk.Button(
         frame1,
         text="On",
         style="info.TButton",
         command=callbacks.get("callback_on", ()),
-    ).grid(row=0, column=0, padx=5, pady=5)
+    ).grid(row=0, column=0, padx=5, pady=5, sticky="nswe")
     ttk.Button(
         frame1,
         text="Off",
         style="info.TButton",
         command=callbacks.get("callback_off", ()),
-    ).grid(row=0, column=1, padx=5, pady=5)
+    ).grid(row=0, column=1, padx=5, pady=5, sticky="nswe")
 
     # Control 2: Encender por tiempo
     frame2 = ttk.LabelFrame(parent, text="Timed On")
     frame2.grid(row=0, column=1, padx=10, pady=10, sticky="nswe")
     frame2.configure(style="Custom.TLabelframe")
+    frame2.columnconfigure((0, 1), weight=1)
 
     ttk.Label(frame2, text="Duration (ms):", style="Custom.TLabel").grid(
         row=0, column=0, padx=5, pady=5, sticky="e"
     )
-    duration_entry = ttk.Entry(frame2, font=font_entry)
+    duration_entry = ttk.Entry(frame2, font=font_entry, width=7)
     duration_entry.grid(row=0, column=1, padx=5, pady=5)
     entries.append(duration_entry)  # index 0
 
@@ -47,12 +49,13 @@ def create_widgets_input(parent, callbacks: dict):
         style="info.TButton",
         text="Turn On by Time",
         command=callbacks.get("callback_on_time", ()),
-    ).grid(row=1, column=0, columnspan=2, pady=5, padx=5, sticky="w")
+    ).grid(row=1, column=0, columnspan=2, pady=5, padx=5, sticky="nswe")
 
     # Control 3: Patrón de encendido
     frame3 = ttk.LabelFrame(parent, text="On pattern")
     frame3.grid(row=1, column=0, padx=10, pady=10, sticky="nswe")
     frame3.configure(style="Custom.TLabelframe")
+    frame3.columnconfigure((0, 1), weight=1)
 
     ttk.Label(frame3, text="Patter type:", style="Custom.TLabel").grid(
         row=0, column=0, padx=5, pady=5, sticky="w"
@@ -63,22 +66,23 @@ def create_widgets_input(parent, callbacks: dict):
         values=["Square wave", "Staggered", "Ramp"],
         font=font_entry,
         textvariable=svar_pattern,
+        width=8
     )
-    pattern_combo.grid(row=0, column=1, padx=5, pady=5)
+    pattern_combo.grid(row=0, column=1, padx=5, pady=5, sticky="nswe")
     pattern_combo.current(0)
     entries.append(svar_pattern)  # index 1
 
     ttk.Label(frame3, text="Cycle duration (ms):", style="Custom.TLabel").grid(
         row=1, column=0, padx=5, pady=5, sticky="w"
     )
-    up_duration = ttk.Entry(frame3, font=font_entry)
+    up_duration = ttk.Entry(frame3, font=font_entry, width=7)
     up_duration.grid(row=1, column=1, padx=5, pady=5, sticky="w")
     entries.append(up_duration)  # index 2
 
     ttk.Label(frame3, text="Frequency (Hz):", style="Custom.TLabel").grid(
         row=2, column=0, padx=5, pady=5, sticky="w"
     )
-    frequency_entry = ttk.Entry(frame3, font=font_entry)
+    frequency_entry = ttk.Entry(frame3, font=font_entry, width=7)
     frequency_entry.grid(row=2, column=1, padx=5, pady=5)
     entries.append(frequency_entry)  # index 3
 
@@ -87,7 +91,7 @@ def create_widgets_input(parent, callbacks: dict):
         text="Play Pattern",
         style="info.TButton",
         command=callbacks.get("callback_pattern", ()),
-    ).grid(row=3, column=0, columnspan=2, pady=5, padx=5, sticky="w")
+    ).grid(row=3, column=0, columnspan=2, pady=5, padx=5, sticky="nswe")
     return entries
 
 

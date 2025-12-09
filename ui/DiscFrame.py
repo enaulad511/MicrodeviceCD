@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
-from Drivers.DriverEncoder import DriverEncoderSys
+
 from templates.utils import read_settings_from_file
 from templates.constants import serial_port_encoder
-from Drivers.EncoderData import EncoderData
 import ttkbootstrap as ttk
 from ttkbootstrap.scrolled import ScrolledFrame
 
@@ -20,18 +19,19 @@ stop_event = threading.Event()
 
 def create_widgets_disco_input(parent, callbacks: dict):
     entries = []
-
+    parent.columnconfigure((0, 1), weight=1)
     # Mode 1: Continuous rotation CW or CCW with RPM
     frame1 = ttk.LabelFrame(parent, text="Continuous Rotation")
     frame1.grid(row=0, column=0, padx=10, pady=10, sticky="nswe")
     frame1.configure(style="Custom.TLabelframe")
+    frame1.columnconfigure((0, 1), weight=1)
 
     ttk.Label(frame1, text="Direction:", style="Custom.TLabel").grid(
         row=0, column=0, padx=5, pady=5, sticky="w"
     )
     svar_dir = ttk.StringVar()
     dir_combo = ttk.Combobox(
-        frame1, values=["CW", "CCW"], textvariable=svar_dir, font=font_entry
+        frame1, values=["CW", "CCW"], textvariable=svar_dir, font=font_entry, width=5
     )
     dir_combo.grid(row=0, column=1, padx=5, pady=5)
     dir_combo.current(0)
@@ -41,8 +41,8 @@ def create_widgets_disco_input(parent, callbacks: dict):
         row=1, column=0, padx=5, pady=5, sticky="w"
     )
     svar_rpm = ttk.StringVar(value="700")
-    rpm_entry = ttk.Entry(frame1, font=font_entry, textvariable=svar_rpm)
-    rpm_entry.grid(row=1, column=1, padx=5, pady=5)
+    rpm_entry = ttk.Entry(frame1, font=font_entry, textvariable=svar_rpm, width=5)
+    rpm_entry.grid(row=1, column=1, padx=5, pady=5, sticky="w")
     entries.append(svar_rpm)
 
     ttk.Button(
@@ -50,43 +50,44 @@ def create_widgets_disco_input(parent, callbacks: dict):
         text="Start Rotation",
         style="info.TButton",
         command=callbacks.get("callback_spin", ()),
-    ).grid(row=2, column=0, columnspan=2, pady=5, padx=5, sticky="w")
+    ).grid(row=2, column=0, columnspan=2, pady=5, padx=5, sticky="nswe")
 
     # Mode 2: On/Off cycle
     frame2 = ttk.LabelFrame(parent, text="On/Off Cycle")
-    frame2.grid(row=1, column=0, padx=10, pady=10, sticky="nswe")
+    frame2.grid(row=0, column=1, padx=10, pady=10, sticky="nswe")
     frame2.configure(style="Custom.TLabelframe")
+    frame2.columnconfigure((0, 1), weight=1)
 
     ttk.Label(frame2, text="Number of cycles:", style="Custom.TLabel").grid(
         row=0, column=0, padx=5, pady=5, sticky="w"
     )
     svar_cycles = ttk.StringVar()
-    cycles_entry = ttk.Entry(frame2, font=font_entry, textvariable=svar_cycles)
-    cycles_entry.grid(row=0, column=1, padx=5, pady=5)
+    cycles_entry = ttk.Entry(frame2, font=font_entry, textvariable=svar_cycles, width=5)
+    cycles_entry.grid(row=0, column=1, padx=5, pady=5, sticky="s")
     entries.append(svar_cycles)
 
     ttk.Label(frame2, text="Acceleration time (ms):", style="Custom.TLabel").grid(
         row=1, column=0, padx=5, pady=5, sticky="w"
     )
     svar_accel = ttk.StringVar()
-    accel_entry = ttk.Entry(frame2, font=font_entry, textvariable=svar_accel)
-    accel_entry.grid(row=1, column=1, padx=5, pady=5)
+    accel_entry = ttk.Entry(frame2, font=font_entry, textvariable=svar_accel, width=5)
+    accel_entry.grid(row=1, column=1, padx=5, pady=5, sticky="w")
     entries.append(svar_accel)
 
     ttk.Label(frame2, text="Target RPM:", style="Custom.TLabel").grid(
         row=2, column=0, padx=5, pady=5, sticky="w"
     )
     svar_target_rpm = ttk.StringVar()
-    target_rpm_entry = ttk.Entry(frame2, font=font_entry, textvariable=svar_target_rpm)
-    target_rpm_entry.grid(row=2, column=1, padx=5, pady=5)
+    target_rpm_entry = ttk.Entry(frame2, font=font_entry, textvariable=svar_target_rpm, width=5)
+    target_rpm_entry.grid(row=2, column=1, padx=5, pady=5, sticky="w")
     entries.append(svar_target_rpm)
 
     ttk.Label(frame2, text="Deceleration time (ms):", style="Custom.TLabel").grid(
         row=3, column=0, padx=5, pady=5, sticky="w"
     )
     svar_decel = ttk.StringVar()
-    decel_entry = ttk.Entry(frame2, font=font_entry, textvariable=svar_decel)
-    decel_entry.grid(row=3, column=1, padx=5, pady=5)
+    decel_entry = ttk.Entry(frame2, font=font_entry, textvariable=svar_decel, width=5)
+    decel_entry.grid(row=3, column=1, padx=5, pady=5, sticky="w")
     entries.append(svar_decel)
 
     ttk.Button(
@@ -94,27 +95,28 @@ def create_widgets_disco_input(parent, callbacks: dict):
         text="Run Cycle",
         style="info.TButton",
         command=callbacks.get("callback_cycle", ()),
-    ).grid(row=4, column=0, columnspan=2, pady=5, padx=5, sticky="w")
+    ).grid(row=4, column=0, columnspan=2, pady=5, padx=5, sticky="nswe")
 
     # Mode 3: Oscillator
     frame3 = ttk.LabelFrame(parent, text="Oscillator Mode")
     frame3.grid(row=2, column=0, padx=10, pady=10, sticky="nswe")
     frame3.configure(style="Custom.TLabelframe")
+    frame3.columnconfigure((0, 1), weight=1)
 
     ttk.Label(frame3, text="Angle (°, max 45):", style="Custom.TLabel").grid(
         row=0, column=0, padx=5, pady=5, sticky="w"
     )
     svar_angle = ttk.StringVar()
-    angle_entry = ttk.Entry(frame3, font=font_entry, textvariable=svar_angle)
-    angle_entry.grid(row=0, column=1, padx=5, pady=5)
+    angle_entry = ttk.Entry(frame3, font=font_entry, textvariable=svar_angle, width=5)
+    angle_entry.grid(row=0, column=1, padx=5, pady=5, sticky="w")
     entries.append(svar_angle)
 
     ttk.Label(frame3, text="Speed (°/s):", style="Custom.TLabel").grid(
         row=1, column=0, padx=5, pady=5, sticky="w"
     )
     svar_speed = ttk.StringVar()
-    speed_entry = ttk.Entry(frame3, font=font_entry, textvariable=svar_speed)
-    speed_entry.grid(row=1, column=1, padx=5, pady=5)
+    speed_entry = ttk.Entry(frame3, font=font_entry, textvariable=svar_speed, width=5)
+    speed_entry.grid(row=1, column=1, padx=5, pady=5, sticky="w")
     entries.append(svar_speed)
 
     ttk.Button(
@@ -122,7 +124,7 @@ def create_widgets_disco_input(parent, callbacks: dict):
         text="Start Oscillation",
         style="info.TButton",
         command=callbacks.get("callback_oscillator", ()),
-    ).grid(row=2, column=0, columnspan=2, pady=5, padx=5, sticky="w")
+    ).grid(row=2, column=0, columnspan=2, pady=5, padx=5, sticky="nswe")
 
     # Mode 4: Stop
     ttk.Button(
@@ -130,7 +132,7 @@ def create_widgets_disco_input(parent, callbacks: dict):
         text="Stop",
         style="danger.TButton",
         command=callbacks.get("callback_stop", ()),
-    ).grid(row=3, column=0, pady=10, padx=5, sticky="w")
+    ).grid(row=2, column=1, pady=10, padx=5, sticky="we")
     return entries
 
 
@@ -202,6 +204,7 @@ class ControlDiscFrame(ttk.Frame):
 
     def callback_spin(self):
         global thread_motor, sistemaMotor
+        from Drivers.DriverEncoder import DriverEncoderSys
         with thread_lock:
             if thread_motor and thread_motor.is_alive():
                 print("Ya hay un hilo activo, no se puede iniciar otro.")
