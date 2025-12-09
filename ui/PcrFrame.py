@@ -40,9 +40,9 @@ def spinMotorRPMTime(direction, rpm, ts, t_experiment):
     while not stop_event_motor.is_set():
         raw_data = sistemaMotor.leer_encoder()  # pyrefly:ignore
         rpm_actual = sistemaMotor.get_rpm() # pyrefly:ignore
-        print(raw_data)
+        # print(raw_data)
         control_signal = round(pid.compute(rpm_actual), 2)
-        print(f"Control signal: {control_signal}")
+        # print(f"Control signal: {control_signal}")
         while (time.perf_counter() - current_time) < ts:
             pass
         if (time.perf_counter() - start_time) > t_experiment:
@@ -296,6 +296,7 @@ class PCRFrame(ttk.Frame):
         pin_heating.set_output(initial_high=False)     # pyrefly: ignore
         pin_heating.write(True)       # pyrefly: ignore
         time.sleep(1)
+        pin_heating.write(False)       # pyrefly: ignore
         pin_heating.close()       # pyrefly: ignore
         # turn on fluorescen LED
         pin_pcr = GPIOPin(     
@@ -307,8 +308,9 @@ class PCRFrame(ttk.Frame):
         pin_pcr.set_output(initial_high=False)     # pyrefly: ignore
         pin_pcr.write(True)       # pyrefly: ignore
         time.sleep(1)
+        pin_pcr.write(False)       # pyrefly: ignore
         pin_pcr.close()       # pyrefly: ignore
         # spin for cooling
         stop_event_motor.clear()
-        spinMotorRPMTime("CW", 500, ts, 5)
+        spinMotorRPMTime("CW", 500, ts, 2)
         time.sleep(1)
