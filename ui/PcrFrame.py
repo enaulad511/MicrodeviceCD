@@ -249,6 +249,7 @@ class PCRFrame(ttk.Frame):
             print("Error: Verifique los valores ingresados.")
     def update_displayed_temperature(self, text, address):
         msg = f"Temperature: {text} °C"
+        print(msg)
         self.entries[-1].set(msg)
 
     def callback_start_experiment(self):
