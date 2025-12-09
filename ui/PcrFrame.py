@@ -36,7 +36,7 @@ def spinMotorRPMTime(direction, rpm, ts, t_experiment):
     )
     start_time = time.perf_counter()
     current_time = time.perf_counter()
-    sistemaMotor.avanzar(10) # pyrefly: ignore
+    sistemaMotor.avanzar(7) # pyrefly: ignore
     while not stop_event_motor.is_set():
         raw_data = sistemaMotor.leer_encoder()  # pyrefly:ignore
         rpm_actual = sistemaMotor.get_rpm() # pyrefly:ignore
