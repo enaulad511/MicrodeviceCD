@@ -94,7 +94,7 @@ class MainGUI(ttk.Window):
         self.style_gui = configure_styles()
         self.protocol("WM_DELETE_WINDOW", self.on_close_window)
         # --------------------Start Animation -------------------
-        # self.show_gif_toplevel()
+        self.show_gif_toplevel()
         self.after(0, self.maximize_window)
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=1)
