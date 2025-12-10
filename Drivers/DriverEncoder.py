@@ -51,32 +51,71 @@ class DriverEncoderSys:
         self.request.set_value(self.en_l, Value.INACTIVE)
         self.request.set_value(self.en_r, Value.INACTIVE)
 
-    def avanzar(self, velocidad):
+    def avanzar(self, velocidad, ignore_answer=True):
         """Avanza en sentido horario con velocidad (0-100%)."""
+        count = 0
         velocidad = max(0, min(100, velocidad))
         print(f"Avanzando a {velocidad}%")
         self.habilitar_avance()
-        self.ser.write(f"RPWM:{velocidad}\n".encode())
+        if not ignore_answer:
+            count = 0
+            while count<5:
+                self.ser.write(f"RPWM:{velocidad}\n".encode())
+                answer = self.ser.readline().decode('utf-8').strip()
+                print("Respuesta del Pico:", answer)
+                if "ok" in answer.lower():
+                    break
+                count += 1
+            return count
+        else:
+            self.ser.write(f"RPWM:{velocidad}\n".encode())
+            return 0
 
-    def retroceder(self, velocidad):
+    def retroceder(self, velocidad, ignore_answer=True):
         """Retrocede en sentido antihorario con velocidad (0-100%)."""
         velocidad = max(0, min(100, velocidad))
         print(f"Retrocediendo a {velocidad}%")
         self.habilitar_retroceso()
-        self.ser.write(f"LPWM:{velocidad}\n".encode())
+        count = 0
+        if not ignore_answer:
+            while count<5:
+                self.ser.write(f"LPWM:{velocidad}\n".encode())
+                answer = self.ser.readline().decode('utf-8').strip()
+                print("Respuesta del Pico:", answer)
+                if "ok" in answer.lower():
+                    break
+                count += 1
+            return count
+        else:
+            self.ser.write(f"LPWM:{velocidad}\n".encode())
+            return 0
 
     def detener(self):
         """Detiene el motor con freno (PWM = 0 y deshabilita ambos medios puentes)."""
         print("Deteniendo motor...")
-        self.ser.write(b"RPWM:0\n")
-        self.ser.write(b"LPWM:0\n")
-        self.ser.write(b"STOP\n")
+        # self.ser.write(b"RPWM:0\n")
+        # self.ser.write(b"LPWM:0\n")
+        count = 0
+        while count<5:
+            self.ser.write(b"STOP\n")
+            answer = self.ser.readline().decode('utf-8').strip()
+            print("Respuesta del Pico:", answer)
+            if "ok" in answer.lower():
+                break
+            count += 1
         sleep(1)
         self.deshabilitar_motor()
     
     def frenar_pasivo(self):
         """Freno pasivo: ambos medios puentes habilitados pero PWM = 0."""
-        self.ser.write(b"STOP\n")
+        count = 0
+        while count<5:
+            self.ser.write(b"STOP\n")
+            answer = self.ser.readline().decode('utf-8').strip()
+            print("Respuesta del Pico:", answer)
+            if "ok" in answer.lower():
+                break
+            count += 1
 
     def frenar_activo(self):
         """Freno activo: ambos medios puentes habilitados y PWM alto por breve tiempo."""
