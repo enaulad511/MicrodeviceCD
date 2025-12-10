@@ -71,7 +71,7 @@ class DriverEncoderSys:
         # self.ser.write(b"RPWM:0\n")
         # self.ser.write(b"LPWM:0\n")
         self.ser.write(b"STOP\n")
-        sleep(0.5)
+        sleep(1)
         self.deshabilitar_motor()
     
     def frenar_pasivo(self):
