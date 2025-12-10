@@ -315,7 +315,7 @@ class PCRFrame(ttk.Frame):
             # turn on fluorescen LED
             pin_pcr = GPIOPin(     
                     led_fluorescence_pin,
-                    consumer="led-heating-ui",
+                    consumer="led-pcr",
                     active_low=False,
                 )
             # Preconfigura como salida en bajo
@@ -331,6 +331,6 @@ class PCRFrame(ttk.Frame):
             time.sleep(1)
         except Exception as e:
             print(f"exception in experiment: {e}")
-            
+
         self.client_temperature.stop()
         self.running_experiment = False
