@@ -46,7 +46,7 @@ class TemperatureFrame(ttk.Frame):
         control_frame.columnconfigure((0, 1, 2, 3), weight=1)
 
         ttk.Label(
-            control_frame, text="Intervalo muestreo (ms):", style="Custom.TLabel"
+            control_frame, text="Sample time (ms):", style="Custom.TLabel"
         ).grid(row=0, column=0, padx=5, pady=5, sticky="w")
 
         self.interval_entry = ttk.Entry(control_frame, width=10, font=font_entry)
@@ -85,14 +85,14 @@ class TemperatureFrame(ttk.Frame):
 
         ttk.Button(
             control_frame,
-            text="Limpiar",
+            text="Clean",
             command=self.limpiar_datos,
             style="secondary.TButton",
         ).grid(row=1, column=2, padx=5, pady=5, sticky="we")
 
         ttk.Button(
             control_frame,
-            text="Guardar CSV",
+            text="Save CSV",
             command=self.guardar_csv,
             style="success.TButton",
         ).grid(row=1, column=3, padx=5, pady=5, sticky="we")
@@ -100,8 +100,8 @@ class TemperatureFrame(ttk.Frame):
         # --- Gráfico ---
         self.fig, self.ax = plt.subplots(figsize=(5, 3))
         self.ax.set_title(title)
-        self.ax.set_xlabel("Tiempo (s)")
-        self.ax.set_ylabel("Temperatura (°C)")
+        self.ax.set_xlabel("Time (s)")
+        self.ax.set_ylabel("Temperature (°C)")
         self.canvas = FigureCanvasTkAgg(self.fig, master=self)
         canvas_widget = self.canvas.get_tk_widget()
         canvas_widget.grid(row=1, column=0, padx=10, pady=10, sticky="nsew")
@@ -200,9 +200,9 @@ class TemperatureFrame(ttk.Frame):
 
         unidad = self.unit_var.get()
         self.ax.plot(self.timestamps, temps_conv, color="tomato", linewidth=1.5)
-        self.ax.set_title("Lectura de Temperatura")
-        self.ax.set_xlabel("Tiempo (s)")
-        self.ax.set_ylabel(f"Temperatura ({unidad})")
+        self.ax.set_title("Readings")
+        self.ax.set_xlabel("Time (s)")
+        self.ax.set_ylabel(f"Temperature ({unidad})")
         self.ax.grid(True, alpha=0.25)
         self.canvas.draw()
         # print("Gráfico actualizado")
