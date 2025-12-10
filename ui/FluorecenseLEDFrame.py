@@ -160,14 +160,14 @@ class ControlFluorescenteFrame(ttk.Frame):
     def callback_on(self):
         print("Encender LED Fluorescente")
         self._cleanup_jobs()
-        self._ensure_pin()
+        # self._ensure_pin()
         self.pin.write(True)        # pyrefly: ignore
         print("Encendido")
 
     def callback_off(self):
         print("Apagar LED Fluorescente")
         self._cleanup_jobs()
-        self._ensure_pin()
+        # self._ensure_pin()
         self.pin.write(False)       # pyrefly: ignore
         print("Apagado")
 
@@ -178,7 +178,7 @@ class ControlFluorescenteFrame(ttk.Frame):
             ms = 0
 
         self._cleanup_jobs()
-        self._ensure_pin()
+        # self._ensure_pin()
 
         # Encender inmediatamente
         self.pin.write(True)        # pyrefly: ignore

@@ -71,7 +71,7 @@ def create_widgets_pcr(parent, callbacks: dict):
         "RPM Cooling:",
     ]
     columns = 2
-    default_values = ["100", "25", "15", "10", "1", "500"]
+    default_values = ["80", "30", "15", "10", "1", "500"]
     for i, lbl in enumerate(labels):
         row = i // columns
         col = i % columns
