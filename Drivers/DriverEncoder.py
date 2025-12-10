@@ -68,8 +68,8 @@ class DriverEncoderSys:
     def detener(self):
         """Detiene el motor con freno (PWM = 0 y deshabilita ambos medios puentes)."""
         print("Deteniendo motor...")
-        # self.ser.write(b"RPWM:0\n")
-        # self.ser.write(b"LPWM:0\n")
+        self.ser.write(b"RPWM:0\n")
+        self.ser.write(b"LPWM:0\n")
         self.ser.write(b"STOP\n")
         sleep(1)
         self.deshabilitar_motor()
