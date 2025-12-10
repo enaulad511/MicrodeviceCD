@@ -332,7 +332,9 @@ class PCRFrame(ttk.Frame):
             # spin for cooling
             stop_event_motor.clear()
             spinMotorRPMTime("CW", 500, ts, 2)
+            
             time.sleep(1)
+            sistemaMotor.limpiar()
         except Exception as e:
             print(f"exception in experiment: {e}")
 
