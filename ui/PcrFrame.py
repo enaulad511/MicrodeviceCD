@@ -275,6 +275,7 @@ class PCRFrame(ttk.Frame):
     
     def experiment_pcr(self, high_temp, low_temp, time_high, time_low, rpm):
         global thread_motor, sistemaMotor
+        
         # cliente temperature
         self.client_temperature = UdpClient(
             port=5005,
@@ -288,44 +289,48 @@ class PCRFrame(ttk.Frame):
         self.client_temperature.start()
         # rotate motor ar rpm
         from Drivers.DriverEncoder import DriverEncoderSys
-        direction = "CW"
-        rpm_setpoint = rpm
-        ts = 0.01
-        if sistemaMotor is None:
-            sistemaMotor = DriverEncoderSys(en_l=12, en_r=13, uart_port=serial_port_encoder, baudrate=57600)
-        stop_event_motor.clear()
-        spinMotorRPMTime(direction, rpm_setpoint, ts, 5)
-        time.sleep(1)
-        # turn on HEATING LED
-        from Drivers.DriverGPIO import GPIOPin
-        pin_heating = GPIOPin(     
-                led_heatin_pin,
-                consumer="led-heating-ui",
-                active_low=False,
-            )
-        # Preconfigura como salida en bajo
-        pin_heating.set_output(initial_high=False)     # pyrefly: ignore
-        pin_heating.write(True)       # pyrefly: ignore
-        time.sleep(1)
-        pin_heating.write(False)       # pyrefly: ignore
-        pin_heating.close()       # pyrefly: ignore
-        time.sleep(1)
-        # turn on fluorescen LED
-        pin_pcr = GPIOPin(     
-                led_fluorescence_pin,
-                consumer="led-heating-ui",
-                active_low=False,
-            )
-        # Preconfigura como salida en bajo
-        pin_pcr.set_output(initial_high=False)     # pyrefly: ignore
-        pin_pcr.write(True)       # pyrefly: ignore
-        time.sleep(1)
-        pin_pcr.write(False)       # pyrefly: ignore
-        pin_pcr.close()       # pyrefly: ignore
-        time.sleep(1)
-        # spin for cooling
-        stop_event_motor.clear()
-        spinMotorRPMTime("CW", 500, ts, 2)
-        time.sleep(1)
+        try:
+            direction = "CW"
+            rpm_setpoint = rpm
+            ts = 0.01
+            if sistemaMotor is None:
+                sistemaMotor = DriverEncoderSys(en_l=12, en_r=13, uart_port=serial_port_encoder, baudrate=57600)
+            stop_event_motor.clear()
+            spinMotorRPMTime(direction, rpm_setpoint, ts, 5)
+            time.sleep(1)
+            # turn on HEATING LED
+            from Drivers.DriverGPIO import GPIOPin
+            pin_heating = GPIOPin(     
+                    led_heatin_pin,
+                    consumer="led-heating-ui",
+                    active_low=False,
+                )
+            # Preconfigura como salida en bajo
+            pin_heating.set_output(initial_high=False)     # pyrefly: ignore
+            pin_heating.write(True)       # pyrefly: ignore
+            time.sleep(2)
+            pin_heating.write(False)       # pyrefly: ignore
+            pin_heating.close()       # pyrefly: ignore
+            time.sleep(1)
+            # turn on fluorescen LED
+            pin_pcr = GPIOPin(     
+                    led_fluorescence_pin,
+                    consumer="led-heating-ui",
+                    active_low=False,
+                )
+            # Preconfigura como salida en bajo
+            pin_pcr.set_output(initial_high=False)     # pyrefly: ignore
+            pin_pcr.write(True)       # pyrefly: ignore
+            time.sleep(1)
+            pin_pcr.write(False)       # pyrefly: ignore
+            pin_pcr.close()       # pyrefly: ignore
+            time.sleep(1)
+            # spin for cooling
+            stop_event_motor.clear()
+            spinMotorRPMTime("CW", 500, ts, 2)
+            time.sleep(1)
+        except Exception as e:
+            print(f"exception in experiment: {e}")
+            
         self.client_temperature.stop()
         self.running_experiment = False
