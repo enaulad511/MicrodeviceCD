@@ -52,7 +52,8 @@ def spinMotorRPMTime(direction, rpm, ts, t_experiment):
             break
         current_time = time.perf_counter()
 
-    sistemaMotor.detener() # pyrefly: ignore
+    sistemaMotor.frenar_pasivo() # pyrefly: ignore
+    time.sleep(1)
     print("Motor detenido correctamente")
 
 def create_widgets_pcr(parent, callbacks: dict):

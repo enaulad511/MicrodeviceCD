@@ -134,6 +134,8 @@ class DriverEncoderSys:
         print("Liberando recursos...")
         self.detener()
         self.ser.close()
+        self.request.release()
+        self.request = None
         print("Sistema apagado y recursos liberados.")
 
 
