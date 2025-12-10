@@ -120,6 +120,7 @@ class PCRFrame(ttk.Frame):
         self.running_experiment = False
         self.pin_heating = None
         self.pin_pcr = None
+        self.temp=0.0
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=1)
 
@@ -265,6 +266,12 @@ class PCRFrame(ttk.Frame):
         msg = f"Temperature: {text} °C"
         print(msg)
         self.entries[-1].set(msg)
+        try:
+            self.temp = float(text)
+        except Exception as e:
+            print(e)
+            self.temp = 0.0
+
 
     def callback_start_experiment(self):
         if self.running_experiment:
@@ -320,7 +327,9 @@ class PCRFrame(ttk.Frame):
             # Preconfigura como salida en bajo
             self.pin_heating.set_output(initial_high=False)     # pyrefly: ignore
             self.pin_heating.write(True)       # pyrefly: ignore
-            time.sleep(time_high)
+            # time.sleep(time_high)
+            while self.temp < high_temp:
+                time.sleep(1)
             self.pin_heating.write(False)       # pyrefly: ignore
             self.pin_heating.close()       # pyrefly: ignore
             time.sleep(1)
