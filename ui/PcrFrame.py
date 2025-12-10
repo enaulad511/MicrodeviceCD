@@ -310,7 +310,7 @@ class PCRFrame(ttk.Frame):
             # Preconfigura como salida en bajo
             pin_heating.set_output(initial_high=False)     # pyrefly: ignore
             pin_heating.write(True)       # pyrefly: ignore
-            time.sleep(2)
+            time.sleep(7)
             pin_heating.write(False)       # pyrefly: ignore
             pin_heating.close()       # pyrefly: ignore
             time.sleep(1)
