@@ -158,6 +158,7 @@ class GPIOPin:
             if self.request:
                 self.request.release()      # pyrefly: ignore
                 self.request = None
+                print(f"Pin {self.offset} liberado.")
         except Exception:
             pass
 

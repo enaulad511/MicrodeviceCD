@@ -312,7 +312,7 @@ class PCRFrame(ttk.Frame):
             pin_heating.write(True)       # pyrefly: ignore
             time.sleep(2)
             pin_heating.write(False)       # pyrefly: ignore
-            # pin_heating.close()       # pyrefly: ignore
+            pin_heating.close()       # pyrefly: ignore
             time.sleep(1)
             # turn on fluorescen LED
             pin_pcr = GPIOPin(     
