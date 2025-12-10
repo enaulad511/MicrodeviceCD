@@ -66,13 +66,19 @@ class DriverEncoderSys:
         self.ser.write(f"LPWM:{velocidad}\n".encode())
 
     def detener(self):
-        """Detiene el motor (PWM = 0 y deshabilita ambos medios puentes)."""
+        """Detiene el motor con freno (PWM = 0 y deshabilita ambos medios puentes)."""
         print("Deteniendo motor...")
-        self.ser.write(b"RPWM:0\n")
-        self.ser.write(b"LPWM:0\n")
+        # self.ser.write(b"RPWM:0\n")
+        # self.ser.write(b"LPWM:0\n")
+        self.ser.write(b"STOP\n")
+        sleep(0.5)
         self.deshabilitar_motor()
+    
+    def frenar_pasivo(self):
+        """Freno pasivo: ambos medios puentes habilitados pero PWM = 0."""
+        self.ser.write(b"STOP\n")
 
-    def frenar(self):
+    def frenar_activo(self):
         """Freno activo: ambos medios puentes habilitados y PWM alto por breve tiempo."""
         print("Frenando motor...")
         self.request.set_value(self.en_l, Value.ACTIVE)
@@ -141,7 +147,7 @@ if __name__ == "__main__":
         sistema.retroceder(70)
         sleep(2)
         print(sistema.leer_encoder())
-        sistema.frenar()
+        sistema.frenar_activo()
         sistema.detener()
     finally:
         sistema.limpiar()
