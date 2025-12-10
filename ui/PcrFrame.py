@@ -104,6 +104,12 @@ def create_widgets_pcr(parent, callbacks: dict):
         row=len(labels) + 1, column=0, padx=5, pady=5, sticky="e"
     )
     entries.append(svar_temperature)
+    ttk.Button(
+        frame1,
+        text="Stop Experiment",
+        style="danger.TButton",
+        command=callbacks.get("callback_stop_experiment", ()),
+    ).grid(row=len(labels) + 1, column=2, columnspan=2, pady=10)
     return entries
 
 
@@ -112,6 +118,8 @@ class PCRFrame(ttk.Frame):
         ttk.Frame.__init__(self, parent)
         self.parent = parent
         self.running_experiment = False
+        self.pin_heating = None
+        self.pin_pcr = None
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=1)
 
@@ -122,6 +130,7 @@ class PCRFrame(ttk.Frame):
         callbacks = {
             "callback_generate_profile": self.callback_generate_profile,
             "callback_start_experiment": self.callback_start_experiment,
+            "callback_stop_experiment": self.callback_stop_experiment
         }
         self.entries = create_widgets_pcr(content_frame, callbacks)
 
@@ -302,31 +311,31 @@ class PCRFrame(ttk.Frame):
             time.sleep(1)
             # turn on HEATING LED
             from Drivers.DriverGPIO import GPIOPin
-            pin_heating = GPIOPin(     
+            self.pin_heating = GPIOPin(     
                     led_heatin_pin,
                     chip=chip_rasp,
                     consumer="led-heating-ui",
                     active_low=False,
                 )
             # Preconfigura como salida en bajo
-            pin_heating.set_output(initial_high=False)     # pyrefly: ignore
-            pin_heating.write(True)       # pyrefly: ignore
+            self.pin_heating.set_output(initial_high=False)     # pyrefly: ignore
+            self.pin_heating.write(True)       # pyrefly: ignore
             time.sleep(7)
-            pin_heating.write(False)       # pyrefly: ignore
-            pin_heating.close()       # pyrefly: ignore
+            self.pin_heating.write(False)       # pyrefly: ignore
+            self.pin_heating.close()       # pyrefly: ignore
             time.sleep(1)
             # turn on fluorescen LED
-            pin_pcr = GPIOPin(     
+            self.pin_pcr = GPIOPin(     
                     led_fluorescence_pin,
                     chip=chip_rasp,
                     consumer="test_pcr",
                     active_low=False,
                 )
             # Preconfigura como salida en bajo
-            pin_pcr.set_output(initial_high=False)     # pyrefly: ignore
-            pin_pcr.write(True)       # pyrefly: ignore
+            self.pin_pcr.set_output(initial_high=False)     # pyrefly: ignore
+            self.pin_pcr.write(True)       # pyrefly: ignore
             time.sleep(1)
-            pin_pcr.write(False)       # pyrefly: ignore
+            self.pin_pcr.write(False)       # pyrefly: ignore
             # pin_pcr.close()       # pyrefly: ignore
             time.sleep(1)
             # spin for cooling
@@ -335,9 +344,30 @@ class PCRFrame(ttk.Frame):
             
             time.sleep(1)
             sistemaMotor.limpiar()
-            
         except Exception as e:
             print(f"exception in experiment: {e}")
         sistemaMotor = None
         self.client_temperature.stop()
         self.running_experiment = False
+        self.pin_heating = None
+        self.pin_pcr = None
+
+    def callback_stop_experiment(self):
+        global sistemaMotor
+        print("Experimento detenido")
+        stop_event_motor.set()
+        # stop motor
+        # stop temperature
+        self.client_temperature.stop()
+        self.running_experiment = False
+        time.sleep(1)
+        if sistemaMotor is not None:
+            sistemaMotor.limpiar()
+        if self.pin_heating is not None:
+            self.pin_heating.write(False)       # pyrefly: ignore
+            self.pin_heating.close()       # pyrefly: ignore
+        if self.pin_pcr is not None:
+            self.pin_pcr.write(False)       # pyrefly: ignore
+            self.pin_pcr.close()       # pyrefly: ignore
+        self.pin_heating = None
+        self.pin_pcr = None
