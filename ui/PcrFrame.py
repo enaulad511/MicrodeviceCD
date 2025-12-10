@@ -335,8 +335,9 @@ class PCRFrame(ttk.Frame):
             
             time.sleep(1)
             sistemaMotor.limpiar()
+            
         except Exception as e:
             print(f"exception in experiment: {e}")
-
+        sistemaMotor = None
         self.client_temperature.stop()
         self.running_experiment = False
