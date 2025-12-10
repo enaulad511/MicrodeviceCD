@@ -209,6 +209,7 @@ class ControleLEDFrame(ttk.Frame):
         self._cleanup_jobs()
         self.pin.write(False)
         print("Apagar LED")
+        self.pin.close()       # pyrefly: ignore
 
     def callback_on_time(self):
         self.init_GPIO()

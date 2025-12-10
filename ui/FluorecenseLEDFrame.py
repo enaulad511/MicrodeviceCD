@@ -86,7 +86,7 @@ class ControlFluorescenteFrame(ttk.Frame):
             "callback_on_time": self.callback_on_time,
         }
         self.entries = create_widgets_fluorescente_input(content_frame, callbacks)
-        self.init_GPIO()
+        
         # Limpieza al destruir el frame
         self.bind("<Destroy>", self._on_destroy)
 
@@ -121,19 +121,7 @@ class ControlFluorescenteFrame(ttk.Frame):
             )
             self.pin.set_output(initial_high=False)     # pyrefly: ignore
         else:
-            # Reasegura modo salida si ya existe
-            try:
-                self.pin.set_output(initial_high=False)
-            except Exception:
-                # Si hubo algún problema, re-crea el recurso
-                from Drivers.DriverGPIO import GPIOPin
-                self.pin = GPIOPin(     # pyrefly: ignore
-                    self.led_gpio,
-                    chip=self.chip,
-                    consumer="fluorescent-ui",
-                    active_low=self.active_low,
-                )
-                self.pin.set_output(initial_high=False)
+            print(f"Pin {self.led_gpio} ya existe.")
 
     def _on_destroy(self, event=None):
         """Apaga y libera recursos al destruir el frame."""
@@ -160,16 +148,17 @@ class ControlFluorescenteFrame(ttk.Frame):
     def callback_on(self):
         print("Encender LED Fluorescente")
         self._cleanup_jobs()
-        # self._ensure_pin()
+        self.init_GPIO()
         self.pin.write(True)        # pyrefly: ignore
         print("Encendido")
 
     def callback_off(self):
         print("Apagar LED Fluorescente")
         self._cleanup_jobs()
-        # self._ensure_pin()
+        self.init_GPIO()
         self.pin.write(False)       # pyrefly: ignore
         print("Apagado")
+        self.pin.close()       # pyrefly: ignore
 
     def callback_on_time(self):
         print("Encender LED Fluorescente por tiempo")
