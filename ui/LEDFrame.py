@@ -140,6 +140,7 @@ class ControleLEDFrame(ttk.Frame):
         if self.pin is not None:
             self._cleanup_jobs()
         else:
+            print(f"Creando pin GPIO {led_heatin_pin}")
             self.pin = GPIOPin(     # pyrefly: ignore
                 led_heatin_pin,
                 chip=self.chip,
@@ -210,6 +211,7 @@ class ControleLEDFrame(ttk.Frame):
         self.pin.write(False)
         print("Apagar LED")
         self.pin.close()       # pyrefly: ignore
+        self.pin = None
 
     def callback_on_time(self):
         self.init_GPIO()
@@ -228,6 +230,8 @@ class ControleLEDFrame(ttk.Frame):
         self.pin.write(False)       # pyrefly: ignore
         self._on_time_job = None
         print("Tiempo finalizado: LED apagado")
+        self.pin.close()       # pyrefly: ignore
+        self.pin = None
 
     def callback_pattern(self):
         print("Iniciando patrón")

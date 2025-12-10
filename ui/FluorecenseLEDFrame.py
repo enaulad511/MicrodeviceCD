@@ -159,6 +159,7 @@ class ControlFluorescenteFrame(ttk.Frame):
         self.pin.write(False)       # pyrefly: ignore
         print("Apagado")
         self.pin.close()       # pyrefly: ignore
+        self.pin = None
 
     def callback_on_time(self):
         print("Encender LED Fluorescente por tiempo")
