@@ -309,6 +309,7 @@ class PCRFrame(ttk.Frame):
         time.sleep(1)
         pin_heating.write(False)       # pyrefly: ignore
         pin_heating.close()       # pyrefly: ignore
+        time.sleep(1)
         # turn on fluorescen LED
         pin_pcr = GPIOPin(     
                 led_fluorescence_pin,
@@ -321,6 +322,7 @@ class PCRFrame(ttk.Frame):
         time.sleep(1)
         pin_pcr.write(False)       # pyrefly: ignore
         pin_pcr.close()       # pyrefly: ignore
+        time.sleep(1)
         # spin for cooling
         stop_event_motor.clear()
         spinMotorRPMTime("CW", 500, ts, 2)
