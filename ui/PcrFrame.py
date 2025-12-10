@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+from templates.constants import chip_rasp
 from Drivers.ClientUDP import UdpClient
 from templates.constants import serial_port_encoder
 from templates.constants import led_fluorescence_pin
@@ -302,6 +303,7 @@ class PCRFrame(ttk.Frame):
             from Drivers.DriverGPIO import GPIOPin
             pin_heating = GPIOPin(     
                     led_heatin_pin,
+                    chip=chip_rasp,
                     consumer="led-heating-ui",
                     active_low=False,
                 )
@@ -310,12 +312,13 @@ class PCRFrame(ttk.Frame):
             pin_heating.write(True)       # pyrefly: ignore
             time.sleep(2)
             pin_heating.write(False)       # pyrefly: ignore
-            pin_heating.close()       # pyrefly: ignore
+            # pin_heating.close()       # pyrefly: ignore
             time.sleep(1)
             # turn on fluorescen LED
             pin_pcr = GPIOPin(     
                     led_fluorescence_pin,
-                    consumer="led-pcr",
+                    chip=chip_rasp,
+                    consumer="test_pcr",
                     active_low=False,
                 )
             # Preconfigura como salida en bajo
@@ -323,7 +326,7 @@ class PCRFrame(ttk.Frame):
             pin_pcr.write(True)       # pyrefly: ignore
             time.sleep(1)
             pin_pcr.write(False)       # pyrefly: ignore
-            pin_pcr.close()       # pyrefly: ignore
+            # pin_pcr.close()       # pyrefly: ignore
             time.sleep(1)
             # spin for cooling
             stop_event_motor.clear()
