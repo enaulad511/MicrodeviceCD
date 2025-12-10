@@ -100,6 +100,7 @@ class GPIOPin:
         Nota: si active_low=True, 'ACTIVE' corresponde a nivel físico bajo.
         """
         config = self._build_output_config(initial_high=initial_high, drive=drive)
+        print(f"Configurando pin {self.offset} como salida con initial_high={initial_high}-{config}")
         self._ensure_request(config)
         self._mode = "output"
         return self
