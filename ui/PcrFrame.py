@@ -73,7 +73,7 @@ def create_widgets_pcr(parent, callbacks: dict):
         "RPM Cooling:",
     ]
     columns = 2
-    default_values = ["80", "30", "15", "10", "1", "500"]
+    default_values = ["80", "30", "8", "3", "1", "500"]
     for i, lbl in enumerate(labels):
         row = i // columns
         col = i % columns
@@ -320,7 +320,7 @@ class PCRFrame(ttk.Frame):
             # Preconfigura como salida en bajo
             self.pin_heating.set_output(initial_high=False)     # pyrefly: ignore
             self.pin_heating.write(True)       # pyrefly: ignore
-            time.sleep(7)
+            time.sleep(time_high)
             self.pin_heating.write(False)       # pyrefly: ignore
             self.pin_heating.close()       # pyrefly: ignore
             time.sleep(1)
@@ -340,8 +340,7 @@ class PCRFrame(ttk.Frame):
             time.sleep(1)
             # spin for cooling
             stop_event_motor.clear()
-            spinMotorRPMTime("CW", 500, ts, 2)
-            
+            spinMotorRPMTime("CW", 500, ts, time_low)
             time.sleep(1)
             sistemaMotor.limpiar()
         except Exception as e:
