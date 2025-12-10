@@ -102,7 +102,7 @@ class TemperatureFrame(ttk.Frame):
         self.ax.set_title(title)
         self.ax.set_xlabel("Time (s)")
         self.ax.set_ylabel("Temperature (°C)")
-        self.canvas = FigureCanvasTkAgg(self.fig, master=self)
+        self.canvas = FigureCanvasTkAgg(self.fig, master=content_frame)
         canvas_widget = self.canvas.get_tk_widget()
         canvas_widget.grid(row=1, column=0, padx=10, pady=10, sticky="nsew")
         canvas_widget.columnconfigure(0, weight=1)

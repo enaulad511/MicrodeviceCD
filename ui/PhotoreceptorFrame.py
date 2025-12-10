@@ -36,7 +36,7 @@ class PhotoreceptorFrame(ttk.Frame):
         control_frame.rowconfigure((0, 1), weight=1)
 
         ttk.Label(
-            control_frame, text="Intervale sample (ms):", style="Custom.TLabel"
+            control_frame, text="Sample time (ms):", style="Custom.TLabel"
         ).grid(row=0, column=0, padx=5, pady=5, sticky="w")
         self.interval_entry = ttk.Entry(control_frame, width=10, font=font_entry)
         self.interval_entry.insert(0, "500")
@@ -60,7 +60,7 @@ class PhotoreceptorFrame(ttk.Frame):
         self.ax.set_title("Measurement")
         self.ax.set_xlabel("Time (s)")
         self.ax.set_ylabel("Intensity")
-        self.canvas = FigureCanvasTkAgg(self.fig, master=self)
+        self.canvas = FigureCanvasTkAgg(self.fig, master=content_frame)
         canvas_widget = self.canvas.get_tk_widget()
         canvas_widget.grid(row=1, column=0, padx=10, pady=10, sticky="nsew")
         canvas_widget.columnconfigure(0, weight=1)
@@ -99,7 +99,7 @@ class PhotoreceptorFrame(ttk.Frame):
         self.timestamps.append(timestamp - self.start_time)
 
         self.actualizar_grafico()
-        print(f"Intensidad: {intensidad:.2f}, Timestamp: {timestamp:.2f}")
+        print(f"Intensity: {intensidad:.2f}, Timestamp: {timestamp:.2f}")
 
         try:
             intervalo = int(self.interval_entry.get())
@@ -111,10 +111,9 @@ class PhotoreceptorFrame(ttk.Frame):
     def actualizar_grafico(self):
         self.ax.clear()
         self.ax.plot(self.timestamps, self.data, color="blue")
-        self.ax.set_title("Lectura del Fotoreceptor")
-        self.ax.set_xlabel("Tiempo (s)")
-        self.ax.set_ylabel("Intensidad")
+        self.ax.set_title("Photoreceptor")
+        self.ax.set_xlabel("Time (s)")
+        self.ax.set_ylabel("Intensity")
         self.canvas.draw()
-        print("Gráfico actualizado")
 
 
