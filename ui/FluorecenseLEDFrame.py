@@ -86,7 +86,7 @@ class ControlFluorescenteFrame(ttk.Frame):
             "callback_on_time": self.callback_on_time,
         }
         self.entries = create_widgets_fluorescente_input(content_frame, callbacks)
-
+        self.init_GPIO()
         # Limpieza al destruir el frame
         self.bind("<Destroy>", self._on_destroy)
 
