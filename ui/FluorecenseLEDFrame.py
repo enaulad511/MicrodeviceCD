@@ -151,6 +151,8 @@ class ControlFluorescenteFrame(ttk.Frame):
         self.init_GPIO()
         self.pin.write(True)        # pyrefly: ignore
         print("Encendido")
+        self.pin.close()       # pyrefly: ignore
+        self.pin = None
 
     def callback_off(self):
         print("Apagar LED Fluorescente")
