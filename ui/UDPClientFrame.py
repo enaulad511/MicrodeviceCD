@@ -27,7 +27,7 @@ class UDPIVPlotter(ttk.Frame):
     """
 
     def __init__(self, master, udp_port=5005, buffer_size=4096, max_points=5000,
-                 update_interval_ms=80, **kwargs):
+                 update_interval_ms=80, title="CV", x_label="E(V)", y_label="I(A)", **kwargs):
         super().__init__(master, **kwargs)
 
         # --- Parámetros de comunicación y plotting ---
@@ -38,6 +38,9 @@ class UDPIVPlotter(ttk.Frame):
         self.prefix_legend="M-"
         self.legends_list=None
         self.config_legend = None
+        self.title = title
+        self.x_label = x_label
+        self.y_label = y_label
 
         # --- Estado de ejecución ---
         self.q_points = queue.Queue()
@@ -54,9 +57,9 @@ class UDPIVPlotter(ttk.Frame):
         # --- Estado del gráfico ---
         plt.style.use("seaborn-v0_8-darkgrid")
         self.fig, self.ax = plt.subplots(figsize=(10, 6))
-        self.ax.set_title("Voltaje vs Corriente (en vivo)")
-        self.ax.set_xlabel("Voltaje (V)")
-        self.ax.set_ylabel("Corriente (A)")
+        self.ax.set_title(self.title)
+        self.ax.set_xlabel(self.x_label)
+        self.ax.set_ylabel(self.y_label)
 
         # Por medición (m): deques y Line2D
         self.v_by_m = {}
@@ -100,6 +103,16 @@ class UDPIVPlotter(ttk.Frame):
         self.stop()
         # self.clear_plot()
         self.destroy()
+
+    def change_axes_text(self, title, x_label, y_label):
+        """Cambia títulos y etiquetas del gráfico."""
+        self.title = title
+        self.x_label = x_label
+        self.y_label = y_label
+        self.ax.set_title(self.title)
+        self.ax.set_xlabel(self.x_label)
+        self.ax.set_ylabel(self.y_label)
+        self.canvas.draw_idle()
 
     # ---------------------------
     # API pública
@@ -413,36 +426,42 @@ class LegendManagerWindow(ttk.Toplevel):
         :param plotter: instancia de UDPIVPlotter
         """
         super().__init__(master, **kwargs)
-        self.title("Gestión de Leyendas")
-        self.geometry("400x300")
+        self.title("Legends")
+        # self.geometry("400x300")
         self.plotter = plotter
         self.parent = master
         self.idx_sel = None
         self.lines_list=None
 
         # --- Lista de mediciones ---
-        self.lbl_title = ttk.Label(self, text="Leyendas actuales:", bootstyle="inverse")
-        self.lbl_title.pack(pady=6)
+        frame_legends = ttk.LabelFrame(self, text="Legends")
+        frame_legends.pack(fill=ttk.BOTH, expand=True, padx=10, pady=10)
 
-        self.listbox = tk.Listbox(self, height=10)
+        self.listbox = tk.Listbox(frame_legends, height=10)
         self.listbox.pack(fill=ttk.BOTH, expand=True, padx=10, pady=6)
         self.listbox.bind("<Double-1>", self.on_double_clic_line)
 
         # --- Controles para agregar/eliminar ---
-        controls = ttk.Frame(self)
+        controls = ttk.Frame(frame_legends)
         controls.pack(fill=ttk.X, pady=6)
 
         self.entry_new = ttk.Entry(controls)
         self.entry_new.pack(side=ttk.LEFT, padx=4)
-        self.btn_add = ttk.Button(controls, text="➕ Agregar", bootstyle="success", command=self.add_legend)
-        self.btn_remove = ttk.Button(controls, text="🗑 Eliminar", bootstyle="danger", command=self.remove_selected)
+        self.btn_add = ttk.Button(controls, text="➕ Add", bootstyle="success", command=self.add_legend)
+        self.btn_remove = ttk.Button(controls, text="🗑 Delete", bootstyle="danger", command=self.remove_selected)
         self.btn_edit = ttk.Button(controls, text="✏️ Editar", bootstyle="primary", command=self.on_edit_line)
         self.btn_add.pack(side=ttk.LEFT, padx=4)
         self.btn_remove.pack(side=ttk.LEFT, padx=4)
         self.btn_edit.pack(side=ttk.LEFT, padx=4)
+        # --- Prefix handlers
+        prefix_frame = ttk.LabelFrame(self, text="Prefix")
+        prefix_frame.pack(fill=ttk.X, padx=10, pady=6)
+        self.entry_prefix = ttk.Entry(prefix_frame)
+        self.entry_prefix.insert(0, "M-")
+        self.entry_prefix.pack(fill=ttk.X, padx=10, pady=6)
 
         # --- Botón cerrar ---
-        self.btn_close = ttk.Button(self, text="Cerrar", bootstyle="secondary", command=self.on_close)
+        self.btn_close = ttk.Button(self, text="Close", bootstyle="secondary", command=self.on_close)
         self.btn_close.pack(pady=6)
 
         # Cargar leyendas actuales
@@ -515,7 +534,12 @@ class LegendManagerWindow(ttk.Toplevel):
 
     def on_close(self):
         """Limpia la referencia al plotter."""
-        self.parent.on_close_config_legend(self.lines_list)
+        prefix = self.entry_prefix.get().strip()
+        if not prefix:
+            prefix = "M-"
+        if prefix=="":
+            prefix="M-"
+        self.parent.on_close_config_legend(self.lines_list, prefix)
         self.destroy()
 
 
