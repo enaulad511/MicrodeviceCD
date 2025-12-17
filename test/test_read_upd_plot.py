@@ -194,8 +194,8 @@ def plot_live(q_points, max_points=5000):
         return line
 
     # Límites iniciales (ajústalos a tu rango típico)
-    ax.set_xlim(-1, 1)
-    ax.set_ylim(-1, 1)
+    # ax.set_xlim(-1, 1)
+    # ax.set_ylim(-1, 1)
 
     def update(_frame):
         drained = 0

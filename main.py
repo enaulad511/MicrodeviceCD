@@ -8,3 +8,4 @@ from ui.MainGUI import MainGUI
 if __name__ == '__main__':
     app = MainGUI(themename="litera")
     app.mainloop()
+    
