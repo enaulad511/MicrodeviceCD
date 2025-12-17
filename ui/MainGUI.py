@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+from templates.constants import font_text
 from ui.TemperatureFrame import TemperatureFrame
 from templates.constants import font_buttons_small
 from ttkbootstrap.dialogs.dialogs import Messagebox
@@ -43,7 +44,7 @@ def configure_styles():
         "Custom.TLabelframe.Label", font=font_labels_frame
     )
     style.configure("Custom.TNotebook.Tab", font=font_tabs)  # pyrefly: ignore
-    style.configure("Custom.TCombobox", font=font_entry)  # pyrefly: ignore
+    style.configure("Custom.TCombobox.Text", background='green', font=font_entry)  # pyrefly: ignore
     style.configure("info.TButton", font=font_buttons)  # pyrefly: ignore
     style.configure("success.TButton", font=font_buttons)  # pyrefly: ignore
     style.configure("danger.TButton", font=font_buttons)  # pyrefly: ignore
@@ -93,6 +94,8 @@ class MainGUI(ttk.Window):
         self.title("\u03bcAA")
         self.style_gui = configure_styles()
         self.protocol("WM_DELETE_WINDOW", self.on_close_window)
+        self.option_add('*TCombobox*Listbox.font', font_text)
+        self.option_add('*Combobox*Listbox.font', font_text) 
         # --------------------Start Animation -------------------
         # self.show_gif_toplevel()
         self.after(0, self.maximize_window)
@@ -280,3 +283,19 @@ class MainGUI(ttk.Window):
     def on_close_window(self):
         self.destroy()
         self.quit()
+
+
+if __name__ == '__main__':
+    app = ttk.Window(themename="flatly")
+    app.title("MicroAA Main GUI")
+    app.geometry("1200x800")
+    frame_test = ttk.Frame(app)
+    frame_test.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
+    selector = ttk.Combobox(
+        frame_test,
+        values=["PCR", "Electrochemical", "Manual Control"],
+        state="readonly",
+        width=30,
+        style="Custom.TCombobox",
+    )
+    selector.grid(row=0, column=0, padx=10, pady=10, sticky="w")

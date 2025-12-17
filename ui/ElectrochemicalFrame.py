@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+from templates.constants import font_text
+from templates.constants import font_entry
 __author__ = "Edisson A. Naula"
 __date__ = "$ 28/10/2025 at 10:24 $"
 
@@ -31,7 +33,7 @@ class ElectrochemicalFrame(ttk.Frame):
             values=["Cyclic Voltammetry", "Square Wave Voltammetry", "Electrochemical Impedance"],
             state="readonly",
             width=30,
-            style="Custom.TCombobox",
+            font=font_text
         )
         self.test_selector.grid(row=0, column=1, padx=10, pady=10, sticky="w")
         self.test_selector.bind("<<ComboboxSelected>>", self.on_test_selected)
