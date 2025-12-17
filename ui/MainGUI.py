@@ -58,6 +58,7 @@ def configure_styles():
     style.configure(  # pyrefly: ignore
         "Custom.Treeview.Heading", font=("Arial", 18, "bold")
     )  # pyrefly: ignore
+    style.configure("Vertical.TScrollbar", arrowsize=20) #pyrefly: ignore
     return style
 
 
