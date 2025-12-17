@@ -30,7 +30,8 @@ class ElectrochemicalFrame(ttk.Frame):
             content_frame,
             values=["Cyclic Voltammetry", "Square Wave Voltammetry", "Electrochemical Impedance"],
             state="readonly",
-            width=30
+            width=30,
+            style="Custom.TCombobox",
         )
         self.test_selector.grid(row=0, column=1, padx=10, pady=10, sticky="w")
         self.test_selector.bind("<<ComboboxSelected>>", self.on_test_selected)
