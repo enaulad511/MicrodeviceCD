@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+from ui.UDPClientFrame import UDPIVPlotter
 __author__ = "Edisson A. Naula"
 __date__ = "$ 11/11/2025 at 14:45 p.m. $"
 
@@ -228,6 +229,12 @@ def create_widgets_cv(parent, callbacks: dict):
         style="info.TButton",
         command=callbacks.get("callback_show_script", ()),
     ).grid(row=1, column=0, pady=5)
+    ttk.Button(
+        frame_controls,
+        text="Send Script",
+        style="info.TButton",
+        command=callbacks.get("callback_send_script", ()),
+    ).grid(row=2, column=0, pady=5)
 
     return entries
 
@@ -257,8 +264,14 @@ class CVFrame(ttk.Frame):
         callbacks = {
             "callback_generate_profile": self.callback_generate_profile,
             "callback_show_script": self.callback_show_methodscript,
+            "callback_send_script": self.callback_send_script,
         }
         self.entries = create_widgets_cv(content_frame, callbacks)
+        self.frame_plotter = ttk.LabelFrame(content_frame, text="Live Data Plotter")
+        self.frame_plotter.grid(row=1, column=0, padx=10, pady=10, sticky="nsew")
+        udp_plotter = UDPIVPlotter(self.frame_plotter, udp_port=5005, buffer_size=4096, max_points=5000, update_interval_ms=80)
+        udp_plotter.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
+        self.frame_plotter.grid_forget()
 
     def update_data_script(self):
         try:
@@ -279,6 +292,17 @@ class CVFrame(ttk.Frame):
             self.E_step = float(DEFAUL_VALUES_CV[4])
             self.scan_rate = float(DEFAUL_VALUES_CV[5])
             self.n_scans = int(DEFAUL_VALUES_CV[6])
+
+    def callback_send_script(self):
+        try:
+            self.update_data_script()
+            script = self.generate_methodscript()
+            print(script)
+            self.frame_plotter.grid(row=1, column=0, padx=10, pady=10, sticky="nsew")
+        except ValueError:
+            self.frame_plotter.grid_forget()
+            print("Error: Check input values.")
+            return
 
     def callback_generate_profile(self):
         try:

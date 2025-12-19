@@ -2,6 +2,7 @@
 import socket
 import threading
 import matplotlib.pyplot as plt
+import time
 __author__ = "Edisson Naula"
 __date__ = "$ 05/12/2025 at 16:26 $"
 
@@ -45,7 +46,9 @@ if __name__ == "__main__":
                 text = data.decode('utf-8', errors='replace')
             except Exception:
                 text = str(data)
-            print(f"From {addr[0]}:{addr[1]} -> {text}")
+
+            timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+            print(f"{timestamp}-From {addr[0]}:{addr[1]} -> {text}")
             if "start sent" in text.lower():
                 flag_recording = True
                 data_cv = {}
