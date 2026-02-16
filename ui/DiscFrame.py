@@ -176,7 +176,7 @@ def spinMotorRPM(direction, rpm, ts):
 
         while (time.perf_counter() - current_time) < ts:
             pass
-        print(f"current passed time: {(time.perf_counter() - current_time):.2f}s")
+        print(f"current passed time: {(time.perf_counter() - current_time):.2f}s, ts: {ts}")
         current_time = time.perf_counter()
 
     sistemaMotor.detener() # pyrefly: ignore
