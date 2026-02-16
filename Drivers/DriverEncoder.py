@@ -180,6 +180,8 @@ class DriverEncoderSys:
         self.ser.close()
         self.request.release()
         self.request = None
+        self.counter = 0
+        self.old_count = 0.0
         print("Sistema apagado y recursos liberados.")
 
 
