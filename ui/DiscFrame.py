@@ -218,7 +218,7 @@ class ControlDiscFrame(ttk.Frame):
             rpm_setpoint = float(self.entries[1].get())
             ts = 0.005
             if sistemaMotor is None:
-                sistemaMotor = DriverEncoderSys(en_l=12, en_r=13, uart_port=serial_port_encoder, baudrate=57600)
+                sistemaMotor = DriverEncoderSys(en_l=12, en_r=13, uart_port=serial_port_encoder, baudrate=115200)
             stop_event.clear()
             thread_motor = threading.Thread(
                 target=spinMotorRPM, args=(direction, rpm_setpoint, ts)
