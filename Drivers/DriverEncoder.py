@@ -132,7 +132,7 @@ class DriverEncoderSys:
     # =========================
     # Lectura del encoder
     # =========================
-    def leer_encoder(self, ts|):
+    def leer_encoder(self, ts):
         """Solicita datos al Pico y los parsea."""
         try:
             self.ser.write(b"GET\n")
