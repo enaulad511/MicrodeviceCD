@@ -83,7 +83,7 @@ class MotorBTS7960:
         print("Motor deshabilitado y líneas liberadas.")
 
     def _pwm_loop(self):
-        period = 0.001  # 1000 Hz
+        period = 0.00005  # 20 000 Hz
         while not self._stop_event.is_set():
             if self._active_line and self._duty > 0:
                 self.request.set_value(self._active_line, Value.ACTIVE)

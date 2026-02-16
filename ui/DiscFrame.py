@@ -164,10 +164,10 @@ def spinMotorRPM(direction, rpm, ts):
         # control_signal = 10
         if direction == "CW":
             print(f"Control signal CW: {control_signal}")
-            # sistemaMotor.avanzar(control_signal) # pyrefly: ignore
+            sistemaMotor.avanzar(control_signal) # pyrefly: ignore
         elif direction == "CCW":
             print(f"Control signal CCW: {control_signal}")
-            # sistemaMotor.retroceder(control_signal) # pyrefly: ignore
+            sistemaMotor.retroceder(control_signal) # pyrefly: ignore
         else:
             print("Dirección no válida")
             break

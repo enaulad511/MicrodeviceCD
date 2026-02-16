@@ -6,7 +6,7 @@ import serial
 
 
 class DriverEncoderSys:
-    def __init__(self, en_l=12, en_r=13, uart_port="/dev/ttyAMA0", baudrate=115200, chip="/dev/gpiochip0"):
+    def __init__(self, en_l=16, en_r=26, uart_port="/dev/ttyAMA0", baudrate=115200, chip="/dev/gpiochip0"):
         """
         Control seguro de motor BTS7960 con habilitación selectiva de medio puente
         y comunicación UART con Raspberry Pi Pico para PWM y lectura de encoder.

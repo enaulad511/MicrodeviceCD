@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+from tracemalloc import start
 from templates.constants import chip_rasp
 from Drivers.ClientUDP import UdpClient
 from templates.constants import serial_port_encoder
@@ -14,6 +15,8 @@ from templates.constants import font_entry
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
+from ui.DiscFrame import spinMotorRPM
+
 __author__ = "Edisson A. Naula"
 __date__ = "$ 21/10/2025 at 11:30 a.m. $"
 
@@ -24,10 +27,13 @@ thread_motor = None
 thread_lock = threading.Lock()
 stop_event_motor = threading.Event()
 
+
 def spinMotorRPMTime(direction, rpm, ts, t_experiment):
     global sistemaMotor
     settings: dict = read_settings_from_file()
-    pid_cfg: dict = settings.get("pidControllerRPM", {"kp": 0.1, "ki": 0.01, "kd": 0.005}) 
+    pid_cfg: dict = settings.get(
+        "pidControllerRPM", {"kp": 0.1, "ki": 0.01, "kd": 0.005}
+    )
     pid = PIDController(
         kp=pid_cfg["kp"],
         ki=pid_cfg["ki"],
@@ -38,10 +44,10 @@ def spinMotorRPMTime(direction, rpm, ts, t_experiment):
     )
     start_time = time.perf_counter()
     current_time = time.perf_counter()
-    sistemaMotor.avanzar(7, ignore_answer=False) # pyrefly: ignore
+    sistemaMotor.avanzar(7, ignore_answer=False)  # pyrefly: ignore
     while not stop_event_motor.is_set():
         raw_data = sistemaMotor.leer_encoder()  # pyrefly:ignore
-        rpm_actual = sistemaMotor.get_rpm() # pyrefly:ignore
+        rpm_actual = sistemaMotor.get_rpm()  # pyrefly:ignore
         # print(raw_data)
         control_signal = round(pid.compute(rpm_actual), 2)
         # print(f"Control signal: {control_signal}")
@@ -52,9 +58,10 @@ def spinMotorRPMTime(direction, rpm, ts, t_experiment):
             break
         current_time = time.perf_counter()
 
-    sistemaMotor.frenar_pasivo() # pyrefly: ignore
+    sistemaMotor.frenar_pasivo()  # pyrefly: ignore
     time.sleep(1)
     print("Motor detenido correctamente")
+
 
 def create_widgets_pcr(parent, callbacks: dict):
     entries = []
@@ -120,7 +127,7 @@ class PCRFrame(ttk.Frame):
         self.running_experiment = False
         self.pin_heating = None
         self.pin_pcr = None
-        self.temp=0.0
+        self.temp = 0.0
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=1)
 
@@ -131,7 +138,7 @@ class PCRFrame(ttk.Frame):
         callbacks = {
             "callback_generate_profile": self.callback_generate_profile,
             "callback_start_experiment": self.callback_start_experiment,
-            "callback_stop_experiment": self.callback_stop_experiment
+            "callback_stop_experiment": self.callback_stop_experiment,
         }
         self.entries = create_widgets_pcr(content_frame, callbacks)
 
@@ -261,17 +268,16 @@ class PCRFrame(ttk.Frame):
 
         except ValueError:
             print("Error: Verifique los valores ingresados.")
-            
+
     def update_displayed_temperature(self, text, address):
         msg = f"Temperature: {text} °C"
-        print(msg)
-        self.entries[-1].set(msg)
+        # print(msg)
+        self.entries[-1].set(msg)  # pyrefly: ignore
         try:
             self.temp = float(text)
         except Exception as e:
             print(e)
             self.temp = 0.0
-
 
     def callback_start_experiment(self):
         if self.running_experiment:
@@ -288,12 +294,15 @@ class PCRFrame(ttk.Frame):
         print(
             f"High Temp: {high_temp}, Low Temp: {low_temp}, Time High: {time_high}, Time Low: {time_low}, Cycles: {cycles}, RPM: {rpm}"
         )
-        thread_experiment = threading.Thread(target=self.experiment_pcr, args=(high_temp, low_temp, time_high, time_low, rpm))
+        thread_experiment = threading.Thread(
+            target=self.experiment_pcr,
+            args=(high_temp, low_temp, time_high, time_low, rpm),
+        )
         thread_experiment.start()
-    
+
     def experiment_pcr(self, high_temp, low_temp, time_high, time_low, rpm):
         global thread_motor, sistemaMotor
-        
+
         # cliente temperature
         self.client_temperature = UdpClient(
             port=5005,
@@ -301,56 +310,91 @@ class PCRFrame(ttk.Frame):
             allow_broadcast=True,  # Important for broadcast payloads
             local_ip="",  # "" listens on all interfaces (wlan0, eth0, etc.)
             recv_timeout_sec=1.0,  # lets loop check stop flag periodically
-            on_message= lambda t, a: self.update_displayed_temperature(t, a),
+            on_message=lambda t, a: self.update_displayed_temperature(t, a),
             parse_float=True,  # Arduino sends a numeric string
         )
         self.client_temperature.start()
         # rotate motor ar rpm
         from Drivers.DriverEncoder import DriverEncoderSys
+
         try:
             direction = "CW"
             rpm_setpoint = rpm
             ts = 0.01
             if sistemaMotor is None:
-                sistemaMotor = DriverEncoderSys(en_l=12, en_r=13, uart_port=serial_port_encoder, baudrate=57600)
+                sistemaMotor = DriverEncoderSys(
+                    en_l=12, en_r=13, uart_port=serial_port_encoder, baudrate=57600
+                )
             stop_event_motor.clear()
+            # initial spin with expecific time
             spinMotorRPMTime(direction, rpm_setpoint, ts, 5)
             time.sleep(1)
-            # turn on HEATING LED
             from Drivers.DriverGPIO import GPIOPin
-            self.pin_heating = GPIOPin(     
-                    led_heatin_pin,
-                    chip=chip_rasp,
-                    consumer="led-heating-ui",
-                    active_low=False,
-                )
+
+            self.pin_heating = GPIOPin(
+                led_heatin_pin,
+                chip=chip_rasp,
+                consumer="led-heating-ui",
+                active_low=False,
+            )
             # Preconfigura como salida en bajo
-            self.pin_heating.set_output(initial_high=False)     # pyrefly: ignore
-            self.pin_heating.write(True)       # pyrefly: ignore
-            # time.sleep(time_high)
-            while self.temp < high_temp:
-                time.sleep(1)
-            self.pin_heating.write(False)       # pyrefly: ignore
-            self.pin_heating.close()       # pyrefly: ignore
-            time.sleep(1)
+            self.pin_heating.set_output(initial_high=False)  # pyrefly: ignore
+
+            cycles = 40
+            current_cycle = 0
+            
+            while current_cycle< cycles:
+                # init cycle 
+                # start heating to reach high_temp value
+                self.pin_heating.write(True)  # pyrefly: ignore
+                # time.sleep(time_high)
+                while self.temp < high_temp:
+                    time.sleep(1)
+                self.pin_heating.write(False)  # pyrefly: ignore
+                # hold temperature for 10 sec only with heating led
+                time_hold = 10
+                start_time = time.time()
+                current_time = time.time()
+                while current_time - start_time < time_hold:
+                    if self.temp > high_temp:  # si se pasa de la temperatura objetivo
+                        self.pin_heating.write(False)  # apagar calor
+                    else:
+                        self.pin_heating.write(True)  # encender calor
+                    time.sleep(0.5)
+                    current_time = time.time()
+                # cool down with motor spin
+                stop_event_motor.clear()
+                spinMotorRPM("CW", 500, ts)
+                while self.temp > low_temp:
+                    time.sleep(1)
+                stop_event_motor.set()
+                # hold temperature for 10 sec with led only
+                time_hold = 10
+                start_time = time.time()
+                current_time = time.time()
+                while current_time - start_time < time_hold:
+                    if self.temp < low_temp:  # si se pasa de la temperatura objetivo
+                        self.pin_heating.write(False)  # apagar calor
+                    else:
+                        self.pin_heating.write(True)  # encender calor
+                    time.sleep(0.5)
+                    current_time = time.time()
+                #end of cycle
+            self.pin_heating.close()  # pyrefly: ignore
+            
             # turn on fluorescen LED
-            self.pin_pcr = GPIOPin(     
-                    led_fluorescence_pin,
-                    chip=chip_rasp,
-                    consumer="test_pcr",
-                    active_low=False,
-                )
+            self.pin_pcr = GPIOPin(
+                led_fluorescence_pin,
+                chip=chip_rasp,
+                consumer="test_pcr",
+                active_low=False,
+            )
             # Preconfigura como salida en bajo
-            self.pin_pcr.set_output(initial_high=False)     # pyrefly: ignore
-            self.pin_pcr.write(True)       # pyrefly: ignore
-            time.sleep(1)
-            self.pin_pcr.write(False)       # pyrefly: ignore
-            # pin_pcr.close()       # pyrefly: ignore
-            time.sleep(1)
-            # spin for cooling
-            stop_event_motor.clear()
-            spinMotorRPMTime("CW", 500, ts, time_low)
-            time.sleep(1)
+            self.pin_pcr.set_output(initial_high=False)  # pyrefly: ignore
+            self.pin_pcr.write(True)  # pyrefly: ignore
+            time.sleep(1)   # tiempo encedido el led de fluorescencia
+            self.pin_pcr.write(False)  # pyrefly: ignore
+            
             sistemaMotor.limpiar()
         except Exception as e:
             print(f"exception in experiment: {e}")
@@ -372,10 +416,10 @@ class PCRFrame(ttk.Frame):
         if sistemaMotor is not None:
             sistemaMotor.limpiar()
         if self.pin_heating is not None:
-            self.pin_heating.write(False)       # pyrefly: ignore
-            self.pin_heating.close()       # pyrefly: ignore
+            self.pin_heating.write(False)  # pyrefly: ignore
+            self.pin_heating.close()  # pyrefly: ignore
         if self.pin_pcr is not None:
-            self.pin_pcr.write(False)       # pyrefly: ignore
-            self.pin_pcr.close()       # pyrefly: ignore
+            self.pin_pcr.write(False)  # pyrefly: ignore
+            self.pin_pcr.close()  # pyrefly: ignore
         self.pin_heating = None
         self.pin_pcr = None
