@@ -9,7 +9,7 @@ __author__ = "Edisson Naula"
 __date__ = "$ 28/11/2025 at 15:59 $"
 
 
-sistemaMotor = DriverEncoderSys(en_l=12, en_r=13, uart_port=serial_port_encoder, baudrate=115200)
+sistemaMotor = DriverEncoderSys(en_l=12, en_r=13, uart_port=serial_port_encoder)
 
 def handler(sig, frame):
     sistemaMotor.limpiar()

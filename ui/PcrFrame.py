@@ -323,7 +323,7 @@ class PCRFrame(ttk.Frame):
             ts = 0.01
             if sistemaMotor is None:
                 sistemaMotor = DriverEncoderSys(
-                    en_l=12, en_r=13, uart_port=serial_port_encoder, baudrate=57600
+                    en_l=12, en_r=13, uart_port=serial_port_encoder
                 )
             stop_event_motor.clear()
             # initial spin with expecific time
