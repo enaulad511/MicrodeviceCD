@@ -161,7 +161,7 @@ def spinMotorRPM(direction, rpm, ts):
         rpm_actual = sistemaMotor.get_rpm() # pyrefly:ignore
         estado =  sistemaMotor.get_estado()
         # print(raw_data)
-        print(f"rpm: {estado['RPM']:2f}, counter: {estado['COUNTER']}")
+        print(f"rpm: {round(rpm_actual, 2)}, estado['RPM'], counter: {estado['COUNTER']}")
         control_signal = round(pid.compute(rpm_actual), 2)
         # control_signal = 10
         if direction == "CW":
