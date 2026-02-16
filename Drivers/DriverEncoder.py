@@ -150,15 +150,12 @@ class DriverEncoderSys:
             parts = line.split("|")
             for part in parts:
                 part = part.strip()
-                if part.startswith("RPM:"):
-                    # self.rpm = float(part.replace("RPM:", "").strip())
-                    encoder_rpm = float(part.replace("RPM:", "").strip())
-                elif part.startswith("COUNTER:"):
-                    self.counter = int(part.replace("COUNTER:", "").strip())
+                if part.startswith("COU:"):
+                    self.counter = int(part.split(":")[1])
                     delta_counter = self.counter - self.old_count
                     self.rpm = (delta_counter / 600) * (60 / ts)  # Convertir a RPM 
                     self.old_count = self.counter
-                elif "Dirección" in part:
+                elif "Dir" in part:
                     self.direction = part.split(":")[1].strip()
         except Exception as e:
             print("Error al parsear línea:", e)
