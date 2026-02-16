@@ -141,7 +141,7 @@ class DriverEncoderSys:
             lines = all_data.decode('utf-8').split("\n")
             # raw_data = self.ser.readline()
             # self.raw_data = raw_data.decode('utf-8').strip()
-            raw_data = lines[-2]
+            raw_data = lines[0]
             self.raw_data = raw_data.strip()
             if raw_data:
                 line = raw_data
