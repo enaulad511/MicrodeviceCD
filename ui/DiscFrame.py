@@ -161,7 +161,7 @@ def spinMotorRPM(direction, rpm, ts):
         rpm_actual = sistemaMotor.get_rpm() # pyrefly:ignore
         estado =  sistemaMotor.get_estado()
         # print(raw_data)
-        print(f"rpm: {round(rpm_actual, 2)}, estado['RPM'], counter: {estado['COUNTER']}")
+        print(f"rpm: {round(rpm_actual, 2)}, counter: {estado['COUNTER']}")
         control_signal = round(pid.compute(rpm_actual), 2)
         # control_signal = 10
         if direction == "CW":
@@ -176,7 +176,7 @@ def spinMotorRPM(direction, rpm, ts):
 
         while (time.perf_counter() - current_time) < ts:
             pass
-        print(f"current passed time: {(time.perf_counter() - current_time):.4f}s")
+        print(f"current passed time: {(time.perf_counter() - current_time):.2f}s")
         current_time = time.perf_counter()
 
     sistemaMotor.detener() # pyrefly: ignore
@@ -216,7 +216,7 @@ class ControlDiscFrame(ttk.Frame):
                 return
             direction = self.entries[0].get()
             rpm_setpoint = float(self.entries[1].get())
-            ts = 0.01
+            ts = 0.005
             if sistemaMotor is None:
                 sistemaMotor = DriverEncoderSys(en_l=12, en_r=13, uart_port=serial_port_encoder, baudrate=57600)
             stop_event.clear()
