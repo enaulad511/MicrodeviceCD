@@ -1,12 +1,18 @@
-
-import gpiod   # pyrefly: ignore
+import gpiod  # pyrefly: ignore
 from time import sleep
-from gpiod.line import Direction, Value # pyrefly: ignore
+from gpiod.line import Direction, Value  # pyrefly: ignore
 import serial
 
 
 class DriverEncoderSys:
-    def __init__(self, en_l=16, en_r=26, uart_port="/dev/ttyAMA0", baudrate=921600, chip="/dev/gpiochip0"):
+    def __init__(
+        self,
+        en_l=16,
+        en_r=26,
+        uart_port="/dev/ttyAMA0",
+        baudrate=921600,
+        chip="/dev/gpiochip0",
+    ):
         """
         Control seguro de motor BTS7960 con habilitación selectiva de medio puente
         y comunicación UART con Raspberry Pi Pico para PWM y lectura de encoder.
@@ -17,18 +23,24 @@ class DriverEncoderSys:
 
         # Configuración GPIO para EN_L y EN_R
         config = {
-            self.en_l: gpiod.LineSettings(direction=Direction.OUTPUT, output_value=Value.INACTIVE),
-            self.en_r: gpiod.LineSettings(direction=Direction.OUTPUT, output_value=Value.INACTIVE),
+            self.en_l: gpiod.LineSettings(
+                direction=Direction.OUTPUT, output_value=Value.INACTIVE
+            ),
+            self.en_r: gpiod.LineSettings(
+                direction=Direction.OUTPUT, output_value=Value.INACTIVE
+            ),
         }
 
-        self.request = gpiod.request_lines(chip, consumer="motor-control", config=config)
+        self.request = gpiod.request_lines(
+            chip, consumer="motor-control", config=config
+        )
 
         # UART para comunicación con Pico
         self.ser = serial.Serial(uart_port, baudrate, timeout=0.5, stopbits=2)
         self.ser.reset_input_buffer()
-        
+
         # Variables del encoder
-        self.raw_data: str|None = None
+        self.raw_data: str | None = None
         self.rpm = 0.0
         self.counter = 0
         self.direction = "UNKNOWN"
@@ -60,9 +72,9 @@ class DriverEncoderSys:
         self.habilitar_avance()
         if not ignore_answer:
             count = 0
-            while count<5:
+            while count < 5:
                 self.ser.write(f"RPWM:{velocidad}\n".encode())
-                answer = self.ser.readline().decode('utf-8').strip()
+                answer = self.ser.readline().decode("utf-8").strip()
                 print("Respuesta del Pico:", answer)
                 if "ok" in answer.lower():
                     break
@@ -79,9 +91,9 @@ class DriverEncoderSys:
         self.habilitar_retroceso()
         count = 0
         if not ignore_answer:
-            while count<5:
+            while count < 5:
                 self.ser.write(f"LPWM:{velocidad}\n".encode())
-                answer = self.ser.readline().decode('utf-8').strip()
+                answer = self.ser.readline().decode("utf-8").strip()
                 print("Respuesta del Pico:", answer)
                 if "ok" in answer.lower():
                     break
@@ -97,22 +109,22 @@ class DriverEncoderSys:
         # self.ser.write(b"RPWM:0\n")
         # self.ser.write(b"LPWM:0\n")
         count = 0
-        while count<5:
+        while count < 5:
             self.ser.write(b"STOP\n")
-            answer = self.ser.readline().decode('utf-8').strip()
+            answer = self.ser.readline().decode("utf-8").strip()
             print("Respuesta del Pico:", answer)
             if "ok" in answer.lower():
                 break
             count += 1
         sleep(1)
         self.deshabilitar_motor()
-    
+
     def frenar_pasivo(self):
         """Freno pasivo: ambos medios puentes habilitados pero PWM = 0."""
         count = 0
-        while count<5:
+        while count < 5:
             self.ser.write(b"STOP\n")
-            answer = self.ser.readline().decode('utf-8').strip()
+            answer = self.ser.readline().decode("utf-8").strip()
             print("Respuesta del Pico:", answer)
             if "ok" in answer.lower():
                 break
@@ -138,7 +150,7 @@ class DriverEncoderSys:
             self.ser.write(b"GET\n")
             all_data = self.ser.read_all()
             print("Datos recibidos:", all_data)
-            lines = all_data.decode('utf-8').split("\n")
+            lines = all_data.decode("utf-8").split("\n")
             # raw_data = self.ser.readline()
             # self.raw_data = raw_data.decode('utf-8').strip()
             raw_data = lines[0]
@@ -159,7 +171,7 @@ class DriverEncoderSys:
                 if part.startswith("COU:"):
                     self.counter = int(part.split(":")[1])
                     delta_counter = self.counter - self.old_count
-                    self.rpm = (delta_counter / 600) * (60 / ts)  # Convertir a RPM 
+                    self.rpm = (delta_counter / 600) * (60 / ts) * 2  # Convertir a RPM
                     self.old_count = self.counter
                 elif "Dir" in part:
                     self.direction = part.split(":")[1].strip()
@@ -174,6 +186,7 @@ class DriverEncoderSys:
 
     def get_rpm(self) -> float:
         return self.rpm
+
     # =========================
     # Limpieza
     # =========================
