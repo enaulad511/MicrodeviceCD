@@ -159,7 +159,9 @@ def spinMotorRPM(direction, rpm, ts):
     while not stop_event.is_set():
         raw_data = sistemaMotor.leer_encoder(ts)  # pyrefly:ignore
         rpm_actual = sistemaMotor.get_rpm() # pyrefly:ignore
-        print(raw_data)
+        estado =  sistemaMotor.get_estado()
+        # print(raw_data)
+        print(f"rpm: {estado['RPM']:2f}, counter: {estado['COUNTER']}")
         control_signal = round(pid.compute(rpm_actual), 2)
         # control_signal = 10
         if direction == "CW":
