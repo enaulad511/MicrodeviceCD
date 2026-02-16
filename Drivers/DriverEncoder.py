@@ -134,11 +134,17 @@ class DriverEncoderSys:
     def leer_encoder(self, ts):
         """Solicita datos al Pico y los parsea."""
         try:
+            # self.ser.flush()
             self.ser.write(b"GET\n")
-            raw_data = self.ser.readline()
-            self.raw_data = raw_data.decode('utf-8').strip()
+            all_data = self.ser.read_all()
+            print("Datos recibidos:", all_data)
+            lines = all_data.decode('utf-8').split("\n")
+            # raw_data = self.ser.readline()
+            # self.raw_data = raw_data.decode('utf-8').strip()
+            raw_data = lines[-1]
+            self.raw_data = raw_data.strip()
             if raw_data:
-                line = raw_data.decode('utf-8').strip()
+                line = raw_data
                 self._parse_line(line, ts)
                 return line
         except Exception as e:
