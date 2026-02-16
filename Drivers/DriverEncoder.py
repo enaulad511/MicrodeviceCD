@@ -1,4 +1,5 @@
 
+from test.curve_motor import rpm_actual
 import gpiod   # pyrefly: ignore
 from time import sleep
 from gpiod.line import Direction, Value # pyrefly: ignore
@@ -32,6 +33,7 @@ class DriverEncoderSys:
         self.rpm = 0.0
         self.counter = 0
         self.direction = "UNKNOWN"
+        self.old_count = 0.0
 
     # =========================
     # Control seguro del motor
@@ -130,7 +132,7 @@ class DriverEncoderSys:
     # =========================
     # Lectura del encoder
     # =========================
-    def leer_encoder(self):
+    def leer_encoder(self, ts|):
         """Solicita datos al Pico y los parsea."""
         try:
             self.ser.write(b"GET\n")
@@ -138,21 +140,25 @@ class DriverEncoderSys:
             self.raw_data = raw_data.decode('utf-8').strip()
             if raw_data:
                 line = raw_data.decode('utf-8').strip()
-                self._parse_line(line)
+                self._parse_line(line, ts)
                 return line
         except Exception as e:
             print("Error al leer UART:", e)
             return None
 
-    def _parse_line(self, line):
+    def _parse_line(self, line, ts):
         try:
             parts = line.split("|")
             for part in parts:
                 part = part.strip()
                 if part.startswith("RPM:"):
-                    self.rpm = float(part.replace("RPM:", "").strip())
+                    # self.rpm = float(part.replace("RPM:", "").strip())
+                    encoder_rpm = float(part.replace("RPM:", "").strip())
                 elif part.startswith("COUNTER:"):
                     self.counter = int(part.replace("COUNTER:", "").strip())
+                    delta_counter = self.counter - self.old_count
+                    self.rpm = (delta_counter / 600) * (60 / ts)  # Convertir a RPM 
+                    self.old_count = self.counter
                 elif "Dirección" in part:
                     self.direction = part.split(":")[1].strip()
         except Exception as e:

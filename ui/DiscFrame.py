@@ -157,7 +157,7 @@ def spinMotorRPM(direction, rpm, ts):
     current_time = time.perf_counter()
     sistemaMotor.avanzar(10) # pyrefly: ignore
     while not stop_event.is_set():
-        raw_data = sistemaMotor.leer_encoder()  # pyrefly:ignore
+        raw_data = sistemaMotor.leer_encoder(ts)  # pyrefly:ignore
         rpm_actual = sistemaMotor.get_rpm() # pyrefly:ignore
         print(raw_data)
         control_signal = round(pid.compute(rpm_actual), 2)
