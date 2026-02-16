@@ -158,7 +158,7 @@ def spinMotorRPM(direction, rpm, ts):
     sistemaMotor.avanzar(10) # pyrefly: ignore
     while not stop_event.is_set():
         raw_data = sistemaMotor.leer_encoder(ts)  # pyrefly:ignore
-        print(f"current passed time: {(time.perf_counter() - current_time):.2f}s, ts: {ts}")
+        # print(f"current passed time: {(time.perf_counter() - current_time):.2f}s, ts: {ts}")
         rpm_actual = sistemaMotor.get_rpm() # pyrefly:ignore
         estado =  sistemaMotor.get_estado()
         # print(raw_data)
@@ -177,7 +177,7 @@ def spinMotorRPM(direction, rpm, ts):
 
         while (time.perf_counter() - current_time) < ts:
             pass
-        print(f"current passed time: {(time.perf_counter() - current_time):.2f}s, ts: {ts}")
+        # print(f"current passed time: {(time.perf_counter() - current_time):.2f}s, ts: {ts}")
         current_time = time.perf_counter()
 
     sistemaMotor.detener() # pyrefly: ignore
