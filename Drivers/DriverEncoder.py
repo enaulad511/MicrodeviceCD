@@ -1,5 +1,4 @@
 
-from test.curve_motor import rpm_actual
 import gpiod   # pyrefly: ignore
 from time import sleep
 from gpiod.line import Direction, Value # pyrefly: ignore
