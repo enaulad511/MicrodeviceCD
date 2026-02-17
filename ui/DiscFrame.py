@@ -151,7 +151,7 @@ def spinMotorRPM(direction, rpm, ts):
         ki=pid_cfg["ki"],
         kd=pid_cfg["kd"],
         setpoint=rpm,
-        output_limits=(pid_cfg.get(min, 10), pid_cfg.get("max", 50)),
+        output_limits=(pid_cfg.get(min, 14), pid_cfg.get("max", 50)),
         ts=ts,
     )
     current_time = time.perf_counter()
