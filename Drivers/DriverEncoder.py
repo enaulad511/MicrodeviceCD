@@ -117,6 +117,8 @@ class DriverEncoderSys:
                 break
             count += 1
         sleep(1)
+        self.counter = 0
+        self.old_count = 0.0
         self.deshabilitar_motor()
 
     def frenar_pasivo(self):
