@@ -209,10 +209,10 @@ if __name__ == "__main__":
     try:
         sistema.avanzar(50)
         sleep(2)
-        print(sistema.leer_encoder())
+        print(sistema.leer_encoder(2))
         sistema.retroceder(70)
         sleep(2)
-        print(sistema.leer_encoder())
+        print(sistema.leer_encoder(2))
         sistema.frenar_activo()
         sistema.detener()
     finally:
