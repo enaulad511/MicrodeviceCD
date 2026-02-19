@@ -108,7 +108,7 @@ class DriverStepperSys:
         else:
             # Activo en bajo: active=True => línea a 0 (INACTIVE), active=False => 1 (ACTIVE)
             val = Value.INACTIVE if active else Value.ACTIVE
-        self._gpio_request.set_value({self.en_pin: val})
+        self._gpio_request.set_value(self.en_pin, val)
 
     # --------------------- Comunicación UART ---------------------
     def _send_line(self, s: str):
