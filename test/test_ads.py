@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-from Drivers.ReaderADS import Ads1115Reader
+from ../Drivers.ReaderADS import Ads1115Reader
 from ui.PcrFrame import ads
 
 __author__ = "Edisson Naula"
