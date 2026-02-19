@@ -78,7 +78,9 @@ def create_widgets_disco_input(parent, callbacks: dict):
         row=2, column=0, padx=5, pady=5, sticky="w"
     )
     svar_target_rpm = ttk.StringVar()
-    target_rpm_entry = ttk.Entry(frame2, font=font_entry, textvariable=svar_target_rpm, width=5)
+    target_rpm_entry = ttk.Entry(
+        frame2, font=font_entry, textvariable=svar_target_rpm, width=5
+    )
     target_rpm_entry.grid(row=2, column=1, padx=5, pady=5, sticky="w")
     entries.append(svar_target_rpm)
 
@@ -137,61 +139,129 @@ def create_widgets_disco_input(parent, callbacks: dict):
 
 
 # Variables globales
-sistemaMotor = None
+drv = None
 thread_motor = None
 thread_lock = threading.Lock()
 
 
-def spinMotorRPM(direction, rpm, ts):
-    global sistemaMotor
-    settings: dict = read_settings_from_file()
-    pid_cfg: dict = settings.get("pidControllerRPM", {"kp": 0.1, "ki": 0.01, "kd": 0.005}) 
-    pid = PIDController(
-        kp=pid_cfg["kp"],
-        ki=pid_cfg["ki"],
-        kd=pid_cfg["kd"],
-        setpoint=rpm,
-        output_limits=(pid_cfg.get(min, 14), pid_cfg.get("max", 50)),
-        ts=ts,
-    )
-    current_time = time.perf_counter()
-    sistemaMotor.avanzar(10) # pyrefly: ignore
+# def spinMotorRPM(direction, rpm, ts):
+#     global sistemaMotor
+#     settings: dict = read_settings_from_file()
+#     pid_cfg: dict = settings.get("pidControllerRPM", {"kp": 0.1, "ki": 0.01, "kd": 0.005})
+#     pid = PIDController(
+#         kp=pid_cfg["kp"],
+#         ki=pid_cfg["ki"],
+#         kd=pid_cfg["kd"],
+#         setpoint=rpm,
+#         output_limits=(pid_cfg.get(min, 14), pid_cfg.get("max", 50)),
+#         ts=ts,
+#     )
+#     current_time = time.perf_counter()
+#     sistemaMotor.avanzar(10) # pyrefly: ignore
+#     while not stop_event.is_set():
+#         raw_data = sistemaMotor.leer_encoder(ts)  # pyrefly:ignore
+#         # print(f"current passed time: {(time.perf_counter() - current_time):.2f}s, ts: {ts}")
+#         rpm_actual = sistemaMotor.get_rpm() # pyrefly:ignore
+#         estado =  sistemaMotor.get_estado()
+#         # print(raw_data)
+#         print(f"rpm: {round(rpm_actual, 2)}, counter: {estado['COUNTER']}")
+#         control_signal = round(pid.compute(rpm_actual), 2)
+#         # control_signal = 10
+#         if direction == "CW":
+#             print(f"Control signal CW: {control_signal}")
+#             sistemaMotor.avanzar(control_signal) # pyrefly: ignore
+#         elif direction == "CCW":
+#             print(f"Control signal CCW: {control_signal}")
+#             sistemaMotor.retroceder(control_signal) # pyrefly: ignore
+#         else:
+#             print("Dirección no válida")
+#             break
+
+#         while (time.perf_counter() - current_time) < ts:
+#             pass
+#         # print(f"current passed time: {(time.perf_counter() - current_time):.2f}s, ts: {ts}")
+#         current_time = time.perf_counter()
+
+#     sistemaMotor.detener() # pyrefly: ignore
+#     print("Motor detenido correctamente")
+
+
+def spinMotorRPM_ramped(
+    direction: str,
+    setpoint_rpm: float,
+    ts: float,
+    accel_rpm_s: float = 800.0,  # aceleración (RPM por segundo)
+    max_rpm: float = 1000.0,  # límite absoluto
+    soft_stop: bool = True,  # rampa suave a 0 cuando paran
+):
+    """
+    Gira el motor con rampa de aceleración en RPM hasta 'setpoint_rpm' (limitado a 1000 RPM).
+    direction: "CW" o "CCW"
+    setpoint_rpm: objetivo en RPM (valor positivo; la dirección fija el signo)
+    ts: periodo de actualización en segundos (ej. 0.02 a 0.05)
+    accel_rpm_s: aceleración/deceleración en RPM/s
+    """
+    global drv, stop_event
+
+    # Validación de dirección
+    d = direction.strip().upper()
+    if d not in ("CW", "CCW"):
+        print("Dirección no válida. Usa 'CW' o 'CCW'.")
+        return
+
+    # Define el signo por dirección y limita objetivo
+    sign = 1 if d == "CW" else -1
+    target_abs = min(abs(setpoint_rpm), max_rpm)
+    target = sign * target_abs
+
+    # Punto de arranque (intenta leer del estado, si no asume 0)
+    try:
+        cur = float(drv.get_status().get("rpm", 0.0))  # pyrefly: ignore
+    except Exception:
+        cur = 0.0
+
+    # Parametrización
+    ts = float(ts)
+    if ts <= 0:
+        ts = 0.02  # fallback
+    step = float(accel_rpm_s) * ts  # incremento/decremento por ciclo
+
+    # Bucle principal: acelera hasta objetivo y mantén
     while not stop_event.is_set():
-        raw_data = sistemaMotor.leer_encoder(ts)  # pyrefly:ignore
-        # print(f"current passed time: {(time.perf_counter() - current_time):.2f}s, ts: {ts}")
-        rpm_actual = sistemaMotor.get_rpm() # pyrefly:ignore
-        estado =  sistemaMotor.get_estado()
-        # print(raw_data)
-        print(f"rpm: {round(rpm_actual, 2)}, counter: {estado['COUNTER']}")
-        control_signal = round(pid.compute(rpm_actual), 2)
-        # control_signal = 10
-        if direction == "CW":
-            print(f"Control signal CW: {control_signal}")
-            sistemaMotor.avanzar(control_signal) # pyrefly: ignore
-        elif direction == "CCW":
-            print(f"Control signal CCW: {control_signal}")
-            sistemaMotor.retroceder(control_signal) # pyrefly: ignore
+        # Aproximación por rampa
+        diff = target - cur
+        if abs(diff) <= step:
+            cur = target
         else:
-            print("Dirección no válida")
-            break
+            cur += step if diff > 0 else -step
 
-        while (time.perf_counter() - current_time) < ts:
-            pass
-        # print(f"current passed time: {(time.perf_counter() - current_time):.2f}s, ts: {ts}")
-        current_time = time.perf_counter()
+        # Enviar comando
+        drv.run_rpm(cur)  # pyrefly: ignore
+        # Si ya estamos en target, mantiene velocidad y sigue escuchando stop_event
+        time.sleep(ts)
 
-    sistemaMotor.detener() # pyrefly: ignore
-    print("Motor detenido correctamente")
+    # Al salir por stop_event, opcionalmente desacelera suave a 0
+    if soft_stop:
+        while abs(cur) > 0.1:
+            if abs(cur) <= step:
+                cur = 0.0
+            else:
+                cur += -step if cur > 0 else step
+            drv.run_rpm(cur)  # pyrefly: ignore
+            time.sleep(ts)
+
+    drv.stop()  # pyrefly: ignore
+    print("Parado:", drv.get_status())  # pyrefly: ignore
 
 
 class ControlDiscFrame(ttk.Frame):
     """UI class for manual disc control.
 
-        :param parent: parent frame to be placed
-        :type parent: ttk.Frame
+    :param parent: parent frame to be placed
+    :type parent: ttk.Frame
     """
+
     def __init__(self, parent):
-        
         ttk.Frame.__init__(self, parent)
         self.parent = parent
         self.columnconfigure(0, weight=1)
@@ -208,21 +278,45 @@ class ControlDiscFrame(ttk.Frame):
         }
         self.entries = create_widgets_disco_input(content_frame, callbacks)
 
+    # def callback_spin(self):
+    #     global thread_motor, sistemaMotor
+    #     from Drivers.DriverEncoder import DriverEncoderSys
+    #     with thread_lock:
+    #         if thread_motor and thread_motor.is_alive():
+    #             print("Ya hay un hilo activo, no se puede iniciar otro.")
+    #             return
+    #         direction = self.entries[0].get()
+    #         rpm_setpoint = float(self.entries[1].get())
+    #         ts = 0.01
+    #         if sistemaMotor is None:
+    #             sistemaMotor = DriverEncoderSys(en_l=12, en_r=13, uart_port=serial_port_encoder)
+    #         stop_event.clear()
+    #         thread_motor = threading.Thread(
+    #             target=spinMotorRPM, args=(direction, rpm_setpoint, ts)
+    #         )
+    #         thread_motor.start()
+    #         print(f"Motor {direction} a {rpm_setpoint} RPM iniciado")
+
     def callback_spin(self):
-        global thread_motor, sistemaMotor
-        from Drivers.DriverEncoder import DriverEncoderSys
+        global thread_motor, drv
+        from Drivers.DriverStepperSys import DriverStepperSys
+
         with thread_lock:
             if thread_motor and thread_motor.is_alive():
                 print("Ya hay un hilo activo, no se puede iniciar otro.")
                 return
             direction = self.entries[0].get()
             rpm_setpoint = float(self.entries[1].get())
-            ts = 0.01
-            if sistemaMotor is None:
-                sistemaMotor = DriverEncoderSys(en_l=12, en_r=13, uart_port=serial_port_encoder)
+            ts = 0.2
+            if drv is None:
+                drv = DriverStepperSys(
+                    en_pin=12, enable_active_high=False, uart_port=serial_port_encoder
+                )
+                drv.enable_driver(True)
             stop_event.clear()
             thread_motor = threading.Thread(
-                target=spinMotorRPM, args=(direction, rpm_setpoint, ts)
+                target=spinMotorRPM_ramped,
+                args=(direction, rpm_setpoint, ts, 1000.0, 1000.0, True),
             )
             thread_motor.start()
             print(f"Motor {direction} a {rpm_setpoint} RPM iniciado")

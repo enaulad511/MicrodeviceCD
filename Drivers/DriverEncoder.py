@@ -4,6 +4,10 @@ from gpiod.line import Direction, Value  # pyrefly: ignore
 import serial
 
 
+__author__ = "Edisson A. Naula"
+__date__ = "$ 19/02/2026  at 11:11 a.m. $"
+
+
 class DriverEncoderSys:
     def __init__(
         self,
