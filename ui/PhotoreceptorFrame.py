@@ -11,8 +11,10 @@ import time
 
 from ttkbootstrap.scrolled import ScrolledFrame
 
+from Drivers.ReaderADS import Ads1115Reader
 from templates.constants import font_entry
 
+ads = Ads1115Reader(address=0x48, fsr=4.096, sps=128, single_shot=True)
 
 class PhotoreceptorFrame(ttk.Frame):
     def __init__(self, parent):
@@ -92,7 +94,7 @@ class PhotoreceptorFrame(ttk.Frame):
         if not self.running:
             return
 
-        intensidad = random.uniform(0, 100)
+        intensidad = ads.read_voltage(0, averages=4)
         timestamp = time.time()
 
         self.data.append(intensidad)

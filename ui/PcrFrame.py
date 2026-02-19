@@ -1,5 +1,8 @@
 # -*- coding: utf-8 -*-
 from tracemalloc import start
+
+from PIL.ImageShow import im
+from Drivers.ReaderADS import Ads1115Reader
 from templates.constants import chip_rasp
 from Drivers.ClientUDP import UdpClient
 from templates.constants import serial_port_encoder
@@ -15,7 +18,7 @@ from templates.constants import font_entry
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
-from ui.DiscFrame import spinMotorRPM
+from ui.DiscFrame import spinMotorRPM, spinMotorRPM_ramped
 
 __author__ = "Edisson A. Naula"
 __date__ = "$ 21/10/2025 at 11:30 a.m. $"
@@ -24,43 +27,21 @@ __date__ = "$ 21/10/2025 at 11:30 a.m. $"
 # Variables globales
 sistemaMotor = None
 thread_motor = None
+ads = None
 thread_lock = threading.Lock()
 stop_event_motor = threading.Event()
 
 
-def spinMotorRPMTime(direction, rpm, ts, t_experiment):
+def spinMotorRPMTime(direction, rpm_setpoint, ts, t_experiment):
     global sistemaMotor
-    settings: dict = read_settings_from_file()
-    pid_cfg: dict = settings.get(
-        "pidControllerRPM", {"kp": 0.1, "ki": 0.01, "kd": 0.005}
-    )
-    pid = PIDController(
-        kp=pid_cfg["kp"],
-        ki=pid_cfg["ki"],
-        kd=pid_cfg["kd"],
-        setpoint=rpm,
-        output_limits=(pid_cfg.get(min, 10), pid_cfg.get("max", 50)),
-        ts=ts,
-    )
     start_time = time.perf_counter()
-    current_time = time.perf_counter()
-    sistemaMotor.avanzar(7, ignore_answer=False)  # pyrefly: ignore
+    spinMotorRPM_ramped(direction, rpm_setpoint, ts, 1000.0, 1000.0, True)
     while not stop_event_motor.is_set():
-        raw_data = sistemaMotor.leer_encoder()  # pyrefly:ignore
-        rpm_actual = sistemaMotor.get_rpm()  # pyrefly:ignore
-        # print(raw_data)
-        control_signal = round(pid.compute(rpm_actual), 2)
-        # print(f"Control signal: {control_signal}")
-        while (time.perf_counter() - current_time) < ts:
-            pass
         if (time.perf_counter() - start_time) > t_experiment:
             stop_event_motor.set()
             break
-        current_time = time.perf_counter()
-
-    sistemaMotor.frenar_pasivo()  # pyrefly: ignore
-    time.sleep(1)
-    print("Motor detenido correctamente")
+        time.sleep(1)
+    
 
 
 def create_widgets_pcr(parent, callbacks: dict):
@@ -301,7 +282,7 @@ class PCRFrame(ttk.Frame):
         thread_experiment.start()
 
     def experiment_pcr(self, high_temp, low_temp, time_high, time_low, rpm):
-        global thread_motor, sistemaMotor
+        global thread_motor, sistemaMotor, ads
 
         # cliente temperature
         self.client_temperature = UdpClient(
@@ -315,16 +296,18 @@ class PCRFrame(ttk.Frame):
         )
         self.client_temperature.start()
         # rotate motor ar rpm
-        from Drivers.DriverEncoder import DriverEncoderSys
+        from Drivers.DriverStepperSys import DriverStepperSys
 
         try:
             direction = "CW"
             rpm_setpoint = rpm
             ts = 0.01
             if sistemaMotor is None:
-                sistemaMotor = DriverEncoderSys(
-                    en_l=12, en_r=13, uart_port=serial_port_encoder
+                sistemaMotor = DriverStepperSys(
+                    en_pin=12, enable_active_high=False, uart_port=serial_port_encoder
                 )
+            if ads is None:
+                ads = Ads1115Reader(address=0x48, fsr=4.096, sps=128, single_shot=True)
             stop_event_motor.clear()
             # initial spin with expecific time
             spinMotorRPMTime(direction, rpm_setpoint, ts, 5)
@@ -364,7 +347,7 @@ class PCRFrame(ttk.Frame):
                     current_time = time.time()
                 # cool down with motor spin
                 stop_event_motor.clear()
-                spinMotorRPM("CW", 500, ts)
+                spinMotorRPM_ramped(direction, rpm_setpoint, ts, 1000.0, 1000.0, True)
                 while self.temp > low_temp:
                     time.sleep(1)
                 stop_event_motor.set()
@@ -394,11 +377,13 @@ class PCRFrame(ttk.Frame):
             self.pin_pcr.write(True)  # pyrefly: ignore
             time.sleep(1)   # tiempo encedido el led de fluorescencia
             self.pin_pcr.write(False)  # pyrefly: ignore
-            
-            sistemaMotor.limpiar()
+            # read fluorescence
+            v_fluo = ads.read_voltage(0, averages=4)
+            print(f"fluorescence voltage: {v_fluo}")
         except Exception as e:
             print(f"exception in experiment: {e}")
         sistemaMotor = None
+        ads = None
         self.client_temperature.stop()
         self.running_experiment = False
         self.pin_heating = None
