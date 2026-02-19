@@ -143,6 +143,9 @@ drv = None
 thread_motor = None
 thread_lock = threading.Lock()
 
+def spinMotorRPM(direction, rpm, ts):
+    print("spin function call")
+    
 
 # def spinMotorRPM(direction, rpm, ts):
 #     global sistemaMotor
