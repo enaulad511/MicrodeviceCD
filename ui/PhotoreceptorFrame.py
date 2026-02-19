@@ -6,21 +6,19 @@ __date__ = "$ 08/10/2025  at 01:07 p.m. $"
 import ttkbootstrap as ttk
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-import random
 import time
 
 from ttkbootstrap.scrolled import ScrolledFrame
 
-from Drivers.ReaderADS import Ads1115Reader
 from templates.constants import font_entry
 
-ads = Ads1115Reader(address=0x4A, fsr=4.096, sps=128, single_shot=True)
 
 class PhotoreceptorFrame(ttk.Frame):
-    def __init__(self, parent):
+    def __init__(self, parent, ads_reader):
         super().__init__(parent)
         self.start_time = 0.0
         self.parent = parent
+        self.ads = ads_reader
         self.columnconfigure(0, weight=1)
         self.rowconfigure((0, 1), weight=1)
         content_frame = ScrolledFrame(self, autohide=True)
@@ -94,7 +92,7 @@ class PhotoreceptorFrame(ttk.Frame):
         if not self.running:
             return
 
-        intensidad = ads.read_voltage(0, averages=4)
+        intensidad = self.ads.read_voltage(0, averages=4)
         timestamp = time.time()
 
         self.data.append(intensidad)

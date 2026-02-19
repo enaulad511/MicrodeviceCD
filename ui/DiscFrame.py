@@ -1,12 +1,10 @@
 # -*- coding: utf-8 -*-
 
-from templates.utils import read_settings_from_file
 from templates.constants import serial_port_encoder
 import ttkbootstrap as ttk
 from ttkbootstrap.scrolled import ScrolledFrame
 
 from templates.constants import font_entry
-from Drivers.PIDController import PIDController
 import threading
 import time
 

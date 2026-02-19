@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+from Drivers.ReaderADS import Ads1115Reader
 from templates.constants import font_text
 from ui.TemperatureFrame import TemperatureFrame
 from templates.constants import font_buttons_small
@@ -97,6 +98,7 @@ class MainGUI(ttk.Window):
         self.protocol("WM_DELETE_WINDOW", self.on_close_window)
         self.option_add('*TCombobox*Listbox.font', font_text)
         self.option_add('*Combobox*Listbox.font', font_text) 
+        self.ads = Ads1115Reader(address=0x4A, fsr=4.096, sps=128, single_shot=True) 
         # --------------------Start Animation -------------------
         # self.show_gif_toplevel()
         self.after(0, self.maximize_window)
@@ -120,7 +122,7 @@ class MainGUI(ttk.Window):
         self.main_notebook.bind("<<NotebookTabChanged>>", self.on_main_tab_changed)
 
         # ------------------PCR tab-------------------
-        self.tab_pcr = PCRFrame(self.main_notebook)
+        self.tab_pcr = PCRFrame(self.main_notebook, self.ads)
         self.main_notebook.add(self.tab_pcr, text=main_tabs_texts[0], padding=10)
         # ------------------Electrochemical tab-------------------
         self.tab_electrochemical = ElectrochemicalFrame(self.main_notebook)
@@ -164,7 +166,7 @@ class MainGUI(ttk.Window):
         self.notebook.add(self.tab3, text=tab_texts[2])
         print("init tabs Disc")
 
-        self.tab4 = PhotoreceptorFrame(self.notebook)
+        self.tab4 = PhotoreceptorFrame(self.notebook, self.ads)
         self.notebook.add(self.tab4, text=tab_texts[3])
         print("init tabs Photoreceptor")
 

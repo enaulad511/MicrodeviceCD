@@ -1,14 +1,11 @@
 # -*- coding: utf-8 -*-
 
-from Drivers.ReaderADS import Ads1115Reader
 from templates.constants import chip_rasp
 from Drivers.ClientUDP import UdpClient
 from templates.constants import serial_port_encoder
 from templates.constants import led_fluorescence_pin
 from templates.constants import led_heatin_pin
 import time
-from Drivers.PIDController import PIDController
-from templates.utils import read_settings_from_file
 import threading
 import ttkbootstrap as ttk
 from ttkbootstrap.scrolled import ScrolledFrame
@@ -89,7 +86,7 @@ def create_widgets_pcr(parent, callbacks: dict):
     ttk.Label(frame1, textvariable=svar_temperature, style="Custom.TLabel").grid(
         row=len(labels) + 1, column=0, padx=5, pady=5, sticky="e"
     )
-    entries.append(svar_temperature)
+    entries.append(svar_temperature)    # pyrefly:ignore
     ttk.Button(
         frame1,
         text="Stop Experiment",
@@ -100,7 +97,7 @@ def create_widgets_pcr(parent, callbacks: dict):
 
 
 class PCRFrame(ttk.Frame):
-    def __init__(self, parent):
+    def __init__(self, parent, ads_reader):
         ttk.Frame.__init__(self, parent)
         self.parent = parent
         self.running_experiment = False
@@ -109,6 +106,7 @@ class PCRFrame(ttk.Frame):
         self.temp = 0.0
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=1)
+        self.ads = ads_reader
 
         content_frame = ScrolledFrame(self, autohide=True)
         content_frame.grid(row=0, column=0, sticky="nsew")
@@ -275,12 +273,12 @@ class PCRFrame(ttk.Frame):
         )
         thread_experiment = threading.Thread(
             target=self.experiment_pcr,
-            args=(high_temp, low_temp, time_high, time_low, rpm),
+            args=(high_temp, low_temp, time_high, time_low, rpm, self.ads),
         )
         thread_experiment.start()
 
-    def experiment_pcr(self, high_temp, low_temp, time_high, time_low, rpm):
-        global thread_motor, sistemaMotor, ads
+    def experiment_pcr(self, high_temp, low_temp, time_high, time_low, rpm, ads):
+        global thread_motor, sistemaMotor
 
         # cliente temperature
         self.client_temperature = UdpClient(
@@ -304,8 +302,6 @@ class PCRFrame(ttk.Frame):
                 sistemaMotor = DriverStepperSys(
                     en_pin=12, enable_active_high=False, uart_port=serial_port_encoder
                 )
-            if ads is None:
-                ads = Ads1115Reader(address=0x4A, fsr=4.096, sps=128, single_shot=True)
             stop_event_motor.clear()
             # initial spin with expecific time
             spinMotorRPMTime(direction, rpm_setpoint, ts, 5)
