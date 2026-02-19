@@ -1,7 +1,5 @@
 # -*- coding: utf-8 -*-
-from tracemalloc import start
 
-from PIL.ImageShow import im
 from Drivers.ReaderADS import Ads1115Reader
 from templates.constants import chip_rasp
 from Drivers.ClientUDP import UdpClient
@@ -18,7 +16,7 @@ from templates.constants import font_entry
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
-from ui.DiscFrame import spinMotorRPM, spinMotorRPM_ramped
+from ui.DiscFrame import spinMotorRPM_ramped
 
 __author__ = "Edisson A. Naula"
 __date__ = "$ 21/10/2025 at 11:30 a.m. $"
