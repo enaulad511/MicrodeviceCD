@@ -14,7 +14,7 @@ from ttkbootstrap.scrolled import ScrolledFrame
 from Drivers.ReaderADS import Ads1115Reader
 from templates.constants import font_entry
 
-ads = Ads1115Reader(address=0x48, fsr=4.096, sps=128, single_shot=True)
+ads = Ads1115Reader(address=0x4a, fsr=4.096, sps=128, single_shot=True)
 
 class PhotoreceptorFrame(ttk.Frame):
     def __init__(self, parent):

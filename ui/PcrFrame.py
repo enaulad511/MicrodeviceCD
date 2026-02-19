@@ -305,7 +305,7 @@ class PCRFrame(ttk.Frame):
                     en_pin=12, enable_active_high=False, uart_port=serial_port_encoder
                 )
             if ads is None:
-                ads = Ads1115Reader(address=0x48, fsr=4.096, sps=128, single_shot=True)
+                ads = Ads1115Reader(address=0x4a, fsr=4.096, sps=128, single_shot=True)
             stop_event_motor.clear()
             # initial spin with expecific time
             spinMotorRPMTime(direction, rpm_setpoint, ts, 5)
