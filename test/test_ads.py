@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 from Drivers.ReaderADS import Ads1115Reader
-from ui.PcrFrame import ads
 
 __author__ = "Edisson Naula"
 __date__ = "$ 19/02/2026 at 15:29 $"
