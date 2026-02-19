@@ -98,7 +98,7 @@ class MainGUI(ttk.Window):
         self.protocol("WM_DELETE_WINDOW", self.on_close_window)
         self.option_add('*TCombobox*Listbox.font', font_text)
         self.option_add('*Combobox*Listbox.font', font_text) 
-        self.ads = Ads1115Reader(address=0x4A, fsr=4.096, sps=128, single_shot=True) 
+        self.ads = Ads1115Reader(address=0x48, fsr=4.096, sps=128, single_shot=True) 
         # --------------------Start Animation -------------------
         # self.show_gif_toplevel()
         self.after(0, self.maximize_window)
