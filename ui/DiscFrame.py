@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 
+from templates.utils import read_settings_from_file
 from templates.constants import serial_port_encoder
 import ttkbootstrap as ttk
 from ttkbootstrap.scrolled import ScrolledFrame
@@ -347,11 +348,6 @@ def spinMotorAngle(angle, rpm, max_rpm, n_times=None, flag_continue=False):
     :param flag_continue: _description_, defaults to False
     :type flag_continue: bool, optional
     """
-    # print(f"Moving motor {angle} degrees at {rpm} RPM with max RPM {max_rpm}")
-    # go_plus_angle_deg(angle_deg=angle, rpm=rpm, rpm_max=max_rpm)
-    # print("Going back")
-    # go_minus_angle_deg(angle_deg=angle, rpm=rpm, rpm_max=max_rpm)
-    # print("Done")
     global stop_event
     if n_times is not None:
         for i in range(n_times):
@@ -365,10 +361,14 @@ def spinMotorAngle(angle, rpm, max_rpm, n_times=None, flag_continue=False):
         if flag_continue:
             while not stop_event.is_set():
                 go_plus_angle_deg(angle_deg=angle, rpm=rpm, rpm_max=max_rpm)
+                print(f"Going back with angle: {angle} and rpm: {rpm} and max {max_rpm}")
                 go_minus_angle_deg(angle_deg=angle, rpm=rpm, rpm_max=max_rpm)
+                print(f"Done continue with angle: {angle} and rpm: {rpm} and max {max_rpm}")
         else:
             go_plus_angle_deg(angle_deg=angle, rpm=rpm, rpm_max=max_rpm)
+            print(f"Going back with angle: {angle} and rpm: {rpm} and max {max_rpm}")
             go_minus_angle_deg(angle_deg=angle, rpm=rpm, rpm_max=max_rpm)
+            print(f"Done with angle: {angle} and rpm: {rpm} and max {max_rpm}")
     drv.stop()  # pyrefly: ignore
     print("Motor detenido")
 
@@ -446,7 +446,8 @@ class ControlDiscFrame(ttk.Frame):
     def callback_oscillator(self):
         global thread_motor, drv
         from Drivers.DriverStepperSys import DriverStepperSys
-
+        settings: dict = read_settings_from_file()
+        max_rpm = settings.get("max_rpm", 700)
         print("Iniciar modo oscilador")
         angle = float(self.entries[6].get())
         speed_percentage = float(self.entries[7].get())
@@ -467,7 +468,7 @@ class ControlDiscFrame(ttk.Frame):
             stop_event.clear()
             thread_motor = threading.Thread(
                 target=spinMotorAngle,
-                args=(angle, speed_percentage * 200 / 100, 200, None, True),
+                args=(angle, speed_percentage * max_rpm / 100, max_rpm, None, True),
             )
             thread_motor.start()
             print("Modo oscilador iniciado")
