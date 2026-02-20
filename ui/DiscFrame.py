@@ -361,14 +361,14 @@ def spinMotorAngle(angle, rpm, max_rpm, n_times=None, flag_continue=False):
     else:
         if flag_continue:
             while not stop_event.is_set():
-                go_plus_angle_deg(angle_deg=angle, rpm=rpm, rpm_max=max_rpm)
+                go_plus_angle_deg(angle_deg=angle, rpm=rpm, rpm_max=max_rpm, wait=True)
                 print(f"Going back with angle: {angle} and rpm: {rpm} and max {max_rpm}")
-                go_minus_angle_deg(angle_deg=angle, rpm=rpm, rpm_max=max_rpm)
+                go_minus_angle_deg(angle_deg=angle, rpm=rpm, rpm_max=max_rpm, wait=True)
                 print(f"Done continue with angle: {angle} and rpm: {rpm} and max {max_rpm}")
         else:
-            go_plus_angle_deg(angle_deg=angle, rpm=rpm, rpm_max=max_rpm)
+            go_plus_angle_deg(angle_deg=angle, rpm=rpm, rpm_max=max_rpm, wait=True)
             print(f"Going back with angle: {angle} and rpm: {rpm} and max {max_rpm}")
-            go_minus_angle_deg(angle_deg=angle, rpm=rpm, rpm_max=max_rpm)
+            go_minus_angle_deg(angle_deg=angle, rpm=rpm, rpm_max=max_rpm, wait=True)
             print(f"Done with angle: {angle} and rpm: {rpm} and max {max_rpm}")
     drv.stop()  # pyrefly: ignore
     print("Motor detenido")
