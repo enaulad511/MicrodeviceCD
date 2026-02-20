@@ -258,7 +258,7 @@ class DriverStepperSys:
 
             if timeout and (time.time() - t0) > timeout:
                 return False
-            time.sleep(0.01)
+            time.sleep(0.1)
 
     def run_rpm(self, rpm: float) -> bool:
         """Velocidad continua en RPM (signo = dirección)."""
@@ -330,20 +330,28 @@ if __name__ == "__main__":
     # Habilitar driver (pone ENABLE a nivel activo según tu hardware)
     drv.enable_driver(True)
 
-    # 1) Movimiento relativo: 2 vueltas (720°) a 800 Hz, esperar a que termine
-    drv.set_default_speed_hz(800)
-    ok = drv.move_degrees(720, wait=True, timeout=10)
-    print("Movimiento completado:", ok, drv.get_status())
+    # # 1) Movimiento relativo: 2 vueltas (720°) a 800 Hz, esperar a que termine
+    # drv.set_default_speed_hz(800)
+    # ok = drv.move_degrees(720, wait=True, timeout=10)
+    # print("Movimiento completado:", ok, drv.get_status())
 
-    # 2) Velocidad continua: +60 RPM por 3 segundos
-    drv.run_rpm(60)
-    sleep(3)
-    print("Estado:", drv.get_status())
+    # # 2) Velocidad continua: +60 RPM por 3 segundos
+    # drv.run_rpm(60)
+    # time.sleep(3)
+    # print("Estado:", drv.get_status())
 
-    # 3) Cambiar a Hz directo: -1200 Hz por 2 segundos
-    drv.run_hz(-1200)
-    sleep(2)
-    print("Estado:", drv.get_status())
+    # # 3) Cambiar a Hz directo: -1200 Hz por 2 segundos
+    # drv.run_hz(-1200)
+    # time.sleep(2)
+    # print("Estado:", drv.get_status())
+
+    n_time = 10
+    #oscilar n veces +-30
+    for i in range(n_time):
+        print(f"Oscilación {i+1}/{n_time}: +30°")
+        drv.move_degrees(30, vel_hz=800, wait=True, timeout=5)
+        print(f"Oscilación {i+1}/{n_time}: -30°")
+        drv.move_degrees(-30, vel_hz=800, wait=True, timeout=5)
 
     # 4) Parar
     drv.stop()
