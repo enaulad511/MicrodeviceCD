@@ -240,6 +240,7 @@ class DriverStepperSys:
         ok &= self._cmd_set(grados) is not None
         
         if not ok or not wait:
+            print("out: ", ok)
             return ok
 
         # Esperar a que termine (heurística por rpm ≈ 0)
