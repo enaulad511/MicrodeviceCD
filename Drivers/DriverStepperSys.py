@@ -258,7 +258,7 @@ class DriverStepperSys:
 
             if timeout and (time.time() - t0) > timeout:
                 return False
-            time.sleep(0.12)
+            time.sleep(0.01)
 
     def run_rpm(self, rpm: float) -> bool:
         """Velocidad continua en RPM (signo = dirección)."""
