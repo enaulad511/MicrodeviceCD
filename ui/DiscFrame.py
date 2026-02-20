@@ -141,9 +141,10 @@ drv = None
 thread_motor = None
 thread_lock = threading.Lock()
 
+
 def spinMotorRPM(direction, rpm, ts):
     print("spin function call")
-    
+
 
 # def spinMotorRPM(direction, rpm, ts):
 #     global sistemaMotor
@@ -260,12 +261,14 @@ def rpm_to_hz(rpm: float, steps_per_rev: int) -> float:
     return (rpm * steps_per_rev) / 60.0
 
 
-def go_plus_angle_deg(angle_deg: float,
-                      rpm: float | None = None,
-                      hz: float | None = None,
-                      wait: bool = True,
-                      timeout: float | None = None,
-                      rpm_max: int=200) -> bool:
+def go_plus_angle_deg(
+    angle_deg: float,
+    rpm: float | None = None,
+    hz: float | None = None,
+    wait: bool = True,
+    timeout: float | None = None,
+    rpm_max: int = 200,
+) -> bool:
     """
     Mueve +angle_deg grados (CW) SIN RAMPA usando el modo POS del firmware:
       - Si se pasa 'hz', se usa directamente (recomendado si ya trabajas en Hz).
@@ -290,16 +293,20 @@ def go_plus_angle_deg(angle_deg: float,
         rpm = rpm_max
         hz = rpm_to_hz(rpm, STEPS_PER_REV)
     # Ejecutar movimiento
-    ok = drv.move_degrees(angle_deg, wait=wait, timeout=timeout, vel_hz=hz)
+    ok = drv.move_degrees(
+        angle_deg, wait=wait, timeout=timeout, vel_hz=hz
+    )  # pyrefly:ignore
     return bool(ok)
 
 
-def go_minus_angle_deg(angle_deg: float,
-                       rpm: float | None = None,
-                       hz: float | None = None,
-                       wait: bool = True,
-                       timeout: float | None = None,
-                       rpm_max: int=200) -> bool:
+def go_minus_angle_deg(
+    angle_deg: float,
+    rpm: float | None = None,
+    hz: float | None = None,
+    wait: bool = True,
+    timeout: float | None = None,
+    rpm_max: int = 200,
+) -> bool:
     """
     Mueve -angle_deg grados (CCW) SIN RAMPA usando el modo POS del firmware.
     Misma lógica que go_plus_angle_deg pero con ángulo negativo.
@@ -317,15 +324,16 @@ def go_minus_angle_deg(angle_deg: float,
     else:
         rpm = rpm_max
         hz = rpm_to_hz(rpm, STEPS_PER_REV)
-    ok = drv.move_degrees(angle_deg, wait=wait, timeout=timeout, vel_hz=hz)
+    ok = drv.move_degrees(
+        angle_deg, wait=wait, timeout=timeout, vel_hz=hz
+    )  # pyrefly: ignore
     return bool(ok)
-
 
 
 def spinMotorAngle(angle, rpm, max_rpm, n_times=None, flag_continue=False):
     """
-    Spin the motor +- degrees at certain rpm wiht max rpm. 
-    When n_times is not None the motor goes back and forth n_times times. 
+    Spin the motor +- degrees at certain rpm wiht max rpm.
+    When n_times is not None the motor goes back and forth n_times times.
     If flag_continue is True, the motor will goes back and forth until the stop_event is set..
 
     :param angle: _description_
@@ -345,12 +353,12 @@ def spinMotorAngle(angle, rpm, max_rpm, n_times=None, flag_continue=False):
     # go_minus_angle_deg(angle_deg=angle, rpm=rpm, rpm_max=max_rpm)
     # print("Done")
     global stop_event
-    if n_times is not None :
+    if n_times is not None:
         for i in range(n_times):
             go_plus_angle_deg(angle_deg=angle, rpm=rpm, rpm_max=max_rpm)
-            print(f"Going back {i+1}")
+            print(f"Going back {i + 1}")
             go_minus_angle_deg(angle_deg=angle, rpm=rpm, rpm_max=max_rpm)
-            print(f"Done {i+1}")
+            print(f"Done {i + 1}")
             if stop_event.is_set():
                 break
     else:
