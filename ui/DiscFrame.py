@@ -52,7 +52,7 @@ def create_widgets_disco_input(parent, callbacks: dict):
 
     # Mode 2: On/Off cycle
     frame2 = ttk.LabelFrame(parent, text="On/Off Cycle")
-    frame2.grid(row=1, column=0, padx=10, pady=10, sticky="nswe")
+    # frame2.grid(row=1, column=0, padx=10, pady=10, sticky="nswe")
     frame2.configure(style="Custom.TLabelframe")
     frame2.columnconfigure((0, 1), weight=1)
 
@@ -103,10 +103,10 @@ def create_widgets_disco_input(parent, callbacks: dict):
     frame3.configure(style="Custom.TLabelframe")
     frame3.columnconfigure((0, 1), weight=1)
 
-    ttk.Label(frame3, text="Angle (°, max 45):", style="Custom.TLabel").grid(
+    ttk.Label(frame3, text="Angle (°, max 30):", style="Custom.TLabel").grid(
         row=0, column=0, padx=5, pady=5, sticky="w"
     )
-    svar_angle = ttk.StringVar()
+    svar_angle = ttk.StringVar(value="30")
     angle_entry = ttk.Entry(frame3, font=font_entry, textvariable=svar_angle, width=5)
     angle_entry.grid(row=0, column=1, padx=5, pady=5, sticky="w")
     entries.append(svar_angle)
@@ -114,7 +114,7 @@ def create_widgets_disco_input(parent, callbacks: dict):
     ttk.Label(frame3, text="Speed (%):", style="Custom.TLabel").grid(
         row=1, column=0, padx=5, pady=5, sticky="w"
     )
-    svar_speed = ttk.StringVar()
+    svar_speed = ttk.StringVar(value="50")
     speed_entry = ttk.Entry(frame3, font=font_entry, textvariable=svar_speed, width=5)
     speed_entry.grid(row=1, column=1, padx=5, pady=5, sticky="w")
     entries.append(svar_speed)
