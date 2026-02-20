@@ -9,6 +9,7 @@ from gpiod.line import Direction, Value
 __author__ = "Edisson A. Naula"
 __date__ = "$ 19/02/2026  at 08:11 a.m. $"
 
+STEPS_PER_REV = 400
 
 class DriverStepperSys:
     """

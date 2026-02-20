@@ -111,7 +111,7 @@ def create_widgets_disco_input(parent, callbacks: dict):
     angle_entry.grid(row=0, column=1, padx=5, pady=5, sticky="w")
     entries.append(svar_angle)
 
-    ttk.Label(frame3, text="Speed (°/s):", style="Custom.TLabel").grid(
+    ttk.Label(frame3, text="Speed (%):", style="Custom.TLabel").grid(
         row=1, column=0, padx=5, pady=5, sticky="w"
     )
     svar_speed = ttk.StringVar()
@@ -255,6 +255,116 @@ def spinMotorRPM_ramped(
     print("Parado:", drv.get_status())  # pyrefly: ignore
 
 
+# --- Utilidad: conversión RPM -> Hz (pasos por segundo) ---
+def rpm_to_hz(rpm: float, steps_per_rev: int) -> float:
+    return (rpm * steps_per_rev) / 60.0
+
+
+def go_plus_angle_deg(angle_deg: float,
+                      rpm: float | None = None,
+                      hz: float | None = None,
+                      wait: bool = True,
+                      timeout: float | None = None,
+                      rpm_max: int=200) -> bool:
+    """
+    Mueve +angle_deg grados (CW) SIN RAMPA usando el modo POS del firmware:
+      - Si se pasa 'hz', se usa directamente (recomendado si ya trabajas en Hz).
+      - Si se pasa 'rpm', se convierte a Hz con STEPS_PER_REV y se limita a 1000 RPM.
+      - Si no pasas ni 'rpm' ni 'hz', usa la velocidad por defecto ya seteada en el driver.
+
+    Requiere un 'drv' global (DriverStepperSys) y que ENABLE esté activo.
+    """
+    global drv
+    from Drivers.DriverStepperSys import STEPS_PER_REV
+
+    angle_deg = abs(float(angle_deg))
+
+    # Establecer velocidad si el usuario la provee
+    if hz is not None:
+        hz = float(hz)
+    elif rpm is not None:
+        rpm = float(abs(rpm))
+        rpm = min(rpm, rpm_max)
+        hz = rpm_to_hz(rpm, STEPS_PER_REV)
+    else:
+        rpm = rpm_max
+        hz = rpm_to_hz(rpm, STEPS_PER_REV)
+    # Ejecutar movimiento
+    ok = drv.move_degrees(angle_deg, wait=wait, timeout=timeout, vel_hz=hz)
+    return bool(ok)
+
+
+def go_minus_angle_deg(angle_deg: float,
+                       rpm: float | None = None,
+                       hz: float | None = None,
+                       wait: bool = True,
+                       timeout: float | None = None,
+                       rpm_max: int=200) -> bool:
+    """
+    Mueve -angle_deg grados (CCW) SIN RAMPA usando el modo POS del firmware.
+    Misma lógica que go_plus_angle_deg pero con ángulo negativo.
+    """
+    global drv
+    from Drivers.DriverStepperSys import STEPS_PER_REV
+
+    angle_deg = -abs(float(angle_deg))
+    if hz is not None:
+        hz = float(hz)
+    elif rpm is not None:
+        rpm = float(abs(rpm))
+        rpm = min(rpm, rpm_max)
+        hz = rpm_to_hz(rpm, STEPS_PER_REV)
+    else:
+        rpm = rpm_max
+        hz = rpm_to_hz(rpm, STEPS_PER_REV)
+    ok = drv.move_degrees(angle_deg, wait=wait, timeout=timeout, vel_hz=hz)
+    return bool(ok)
+
+
+
+def spinMotorAngle(angle, rpm, max_rpm, n_times=None, flag_continue=False):
+    """
+    Spin the motor +- degrees at certain rpm wiht max rpm. 
+    When n_times is not None the motor goes back and forth n_times times. 
+    If flag_continue is True, the motor will goes back and forth until the stop_event is set..
+
+    :param angle: _description_
+    :type angle: _type_
+    :param rpm: _description_
+    :type rpm: _type_
+    :param max_rpm: _description_
+    :type max_rpm: _type_
+    :param n_times: _description_, defaults to None
+    :type n_times: _type_, optional
+    :param flag_continue: _description_, defaults to False
+    :type flag_continue: bool, optional
+    """
+    # print(f"Moving motor {angle} degrees at {rpm} RPM with max RPM {max_rpm}")
+    # go_plus_angle_deg(angle_deg=angle, rpm=rpm, rpm_max=max_rpm)
+    # print("Going back")
+    # go_minus_angle_deg(angle_deg=angle, rpm=rpm, rpm_max=max_rpm)
+    # print("Done")
+    global stop_event
+    if n_times is not None :
+        for i in range(n_times):
+            go_plus_angle_deg(angle_deg=angle, rpm=rpm, rpm_max=max_rpm)
+            print(f"Going back {i+1}")
+            go_minus_angle_deg(angle_deg=angle, rpm=rpm, rpm_max=max_rpm)
+            print(f"Done {i+1}")
+            if stop_event.is_set():
+                break
+    else:
+        if flag_continue:
+            while not stop_event.is_set():
+                go_plus_angle_deg(angle_deg=angle, rpm=rpm, rpm_max=max_rpm)
+                go_minus_angle_deg(angle_deg=angle, rpm=rpm, rpm_max=max_rpm)
+        else:
+            go_plus_angle_deg(angle_deg=angle, rpm=rpm, rpm_max=max_rpm)
+            go_minus_angle_deg(angle_deg=angle, rpm=rpm, rpm_max=max_rpm)
+    drv.stop()  # pyrefly: ignore
+    print("Motor detenido")
+
+
 class ControlDiscFrame(ttk.Frame):
     """UI class for manual disc control.
 
@@ -326,7 +436,33 @@ class ControlDiscFrame(ttk.Frame):
         print("Ejecutar ciclo de encendido/apagado")
 
     def callback_oscillator(self):
+        global thread_motor, drv
+        from Drivers.DriverStepperSys import DriverStepperSys
+
         print("Iniciar modo oscilador")
+        angle = float(self.entries[4].get())
+        speed_percentage = float(self.entries[5].get())
+        print(f"Ángulo: {angle}°, Velocidad: {speed_percentage:2f}%")
+        if angle > 45:
+            print("El ángulo máximo es 45°")
+            return
+        with thread_lock:
+            if thread_motor and thread_motor.is_alive():
+                print("Ya hay un hilo activo, no se puede iniciar otro.")
+                return
+            # Aquí se iniciaría el modo oscilador con los parámetros dados
+            if drv is None:
+                drv = DriverStepperSys(
+                    en_pin=12, enable_active_high=False, uart_port=serial_port_encoder
+                )
+                drv.enable_driver(True)
+            stop_event.clear()
+            thread_motor = threading.Thread(
+                target=spinMotorAngle,
+                args=(angle, speed_percentage * 200 / 100, 200, None, True),
+            )
+            thread_motor.start()
+            print("Modo oscilador iniciado")
 
     def callback_stop(self):
         global thread_motor
