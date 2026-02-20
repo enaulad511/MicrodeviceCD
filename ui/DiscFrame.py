@@ -293,7 +293,7 @@ def go_plus_angle_deg(
         rpm = rpm_max
         hz = rpm_to_hz(rpm, STEPS_PER_REV)
     # Ejecutar movimiento
-    ok = drv.move_degrees(
+    ok = drv.move_degrees(  # pyrefly: ignore
         angle_deg, wait=wait, timeout=timeout, vel_hz=hz
     )  # pyrefly:ignore
     return bool(ok)
@@ -324,9 +324,9 @@ def go_minus_angle_deg(
     else:
         rpm = rpm_max
         hz = rpm_to_hz(rpm, STEPS_PER_REV)
-    ok = drv.move_degrees(
+    ok = drv.move_degrees(  # pyrefly: ignore
         angle_deg, wait=wait, timeout=timeout, vel_hz=hz
-    )  # pyrefly: ignore
+    )
     return bool(ok)
 
 
@@ -448,8 +448,8 @@ class ControlDiscFrame(ttk.Frame):
         from Drivers.DriverStepperSys import DriverStepperSys
 
         print("Iniciar modo oscilador")
-        angle = float(self.entries[4].get())
-        speed_percentage = float(self.entries[5].get())
+        angle = float(self.entries[6].get())
+        speed_percentage = float(self.entries[7].get())
         print(f"Ángulo: {angle}°, Velocidad: {speed_percentage:2f}%")
         if angle > 45:
             print("El ángulo máximo es 45°")
