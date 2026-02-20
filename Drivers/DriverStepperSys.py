@@ -37,7 +37,7 @@ class DriverStepperSys:
         baudrate=921600,
         chip="/dev/gpiochip0",
         read_timeout=0.20,  # Timeout lectura serial (s)
-        ack_timeout=0.50,  # Timeout espera ACK (s)
+        ack_timeout=0.01,  # Timeout espera ACK (s)
     ):
         self.en_pin = en_pin
         self.enable_active_high = bool(enable_active_high)
