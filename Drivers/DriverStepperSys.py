@@ -247,6 +247,7 @@ class DriverStepperSys:
         quiet_samples = 0
         while True:
             st = self.get_status()
+            print(st)
             rpm = abs(st["rpm"])
             if rpm < 0.01:
                 quiet_samples += 1
