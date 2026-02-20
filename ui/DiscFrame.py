@@ -334,44 +334,82 @@ def go_minus_angle_deg(
 
 def spinMotorAngle(angle, rpm, max_rpm, n_times=None, flag_continue=False):
     """
-    Spin the motor +- degrees at certain rpm wiht max rpm.
-    When n_times is not None the motor goes back and forth n_times times.
-    If flag_continue is True, the motor will goes back and forth until the stop_event is set..
-
-    :param angle: _description_
-    :type angle: _type_
-    :param rpm: _description_
-    :type rpm: _type_
-    :param max_rpm: _description_
-    :type max_rpm: _type_
-    :param n_times: _description_, defaults to None
-    :type n_times: _type_, optional
-    :param flag_continue: _description_, defaults to False
-    :type flag_continue: bool, optional
+    Versión global que usa los helpers del objeto global 'drv':
+      - drv._cmd_mode(4)
+      - drv._cmd_vel(hz)
+      - drv._cmd_set(angle)
+      - drv._cmd_stop()
+    Requiere que 'drv' tenga 'steps_per_rev' o usa 400 por defecto.
+    Requiere 'stop_event' global si se usa modo continuo.
     """
-    global stop_event
-    if n_times is not None:
-        for i in range(n_times):
-            go_plus_angle_deg(angle_deg=angle, rpm=rpm, rpm_max=max_rpm)
-            print(f"Going back {i + 1}")
-            go_minus_angle_deg(angle_deg=angle, rpm=rpm, rpm_max=max_rpm)
-            print(f"Done {i + 1}")
-            if stop_event.is_set():
-                break
-    else:
-        if flag_continue:
-            while not stop_event.is_set():
-                go_plus_angle_deg(angle_deg=angle, rpm=rpm, rpm_max=max_rpm, wait=True)
-                print(f"Going back with angle: {angle} and rpm: {rpm} and max {max_rpm}")
-                go_minus_angle_deg(angle_deg=angle, rpm=rpm, rpm_max=max_rpm, wait=True)
-                print(f"Done continue with angle: {angle} and rpm: {rpm} and max {max_rpm}")
+    import time as _t
+    from Drivers.DriverStepperSys import STEPS_PER_REV
+    global stop_event, drv  # asumiendo que existen en tu entorno
+
+
+    try:
+        angle = float(angle)
+        rpm   = float(rpm)
+        max_rpm = float(max_rpm)
+    except Exception as e:
+        raise ValueError(f"Parámetros inválidos: {e}")
+
+    if angle <= 0:
+        drv._cmd_stop()
+        print("[spinMotorAngle] angle <= 0; STOP.")
+        return
+
+    rpm_eff = max(min(abs(rpm), abs(max_rpm)), 0.0)
+    speed_hz = rpm_eff * (STEPS_PER_REV / 60.0)
+    if speed_hz <= 0.0:
+        drv._cmd_stop()
+        print("[spinMotorAngle] Velocidad resultante = 0 Hz; STOP.")
+        return
+
+    ok = True
+    ok &= bool(drv._cmd_mode(4))
+    ok &= bool(drv._cmd_vel(f"{speed_hz:.3f}"))
+    ok &= bool(drv._cmd_set(f"{float(angle):.3f}"))
+    # if not ok:
+    #     drv._cmd_stop()
+    #     raise RuntimeError("No se recibió ACK en MODO/VEL/SET.")
+
+    vel_deg_s = speed_hz * (360.0 / STEPS_PER_REV)
+    if vel_deg_s <= 0:
+        drv._cmd_stop()
+        return
+
+    T_cycle = (4.0 * abs(angle)) / vel_deg_s
+    T_cycle *= 1.03  # 3% de margen
+
+    try:
+        if n_times is not None:
+            n_times = int(n_times)
+            if n_times <= 0:
+                print("[spinMotorAngle] n_times<=0; STOP.")
+            else:
+                total_time = n_times * T_cycle
+                print(f"[spinMotorAngle] SWEEP {n_times} ciclos: ±{angle}°, "
+                      f"Hz={speed_hz:.1f}, T_ciclo≈{T_cycle:.3f}s, T_total≈{total_time:.3f}s")
+                elapsed = 0.0
+                step = 0.01
+                while elapsed < total_time:
+                    if stop_event.is_set():
+                        print("[spinMotorAngle] stop_event detectado; abortando.")
+                        break
+                    _t.sleep(step)
+                    elapsed += step
         else:
-            go_plus_angle_deg(angle_deg=angle, rpm=rpm, rpm_max=max_rpm, wait=True)
-            print(f"Going back with angle: {angle} and rpm: {rpm} and max {max_rpm}")
-            go_minus_angle_deg(angle_deg=angle, rpm=rpm, rpm_max=max_rpm, wait=True)
-            print(f"Done with angle: {angle} and rpm: {rpm} and max {max_rpm}")
-    drv.stop()  # pyrefly: ignore
-    print("Motor detenido")
+            if flag_continue:
+                print(f"[spinMotorAngle] SWEEP continuo: ±{angle}° @ {rpm_eff} rpm (Hz={speed_hz:.1f})")
+                while not stop_event.is_set():
+                    _t.sleep(0.02)
+            else:
+                print(f"[spinMotorAngle] SWEEP 1 ciclo: ±{angle}°, T≈{T_cycle:.3f}s")
+                _t.sleep(T_cycle)
+    finally:
+        drv._cmd_stop()
+        print("Motor detenido")
 
 
 class ControlDiscFrame(ttk.Frame):

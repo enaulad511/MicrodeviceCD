@@ -239,7 +239,7 @@ class DriverStepperSys:
         # SET grados
         ok &= self._cmd_set(grados) is not None
         
-        if not wait:
+        if not ok or not wait:
             print("out: ", ok)
             return ok
 
