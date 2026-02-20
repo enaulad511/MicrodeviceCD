@@ -226,7 +226,7 @@ def spinMotorRPM_ramped(
     # Parametrización
     ts = float(ts)
     if ts <= 0:
-        ts = 0.02  # fallback
+        ts = 0.1  # fallback
     step = float(accel_rpm_s) * ts  # incremento/decremento por ciclo
 
     # Bucle principal: acelera hasta objetivo y mantén
@@ -256,80 +256,6 @@ def spinMotorRPM_ramped(
     drv.stop()  # pyrefly: ignore
     print("Parado:", drv.get_status())  # pyrefly: ignore
 
-
-# --- Utilidad: conversión RPM -> Hz (pasos por segundo) ---
-def rpm_to_hz(rpm: float, steps_per_rev: int) -> float:
-    return (rpm * steps_per_rev) / 60.0
-
-
-def go_plus_angle_deg(
-    angle_deg: float,
-    rpm: float | None = None,
-    hz: float | None = None,
-    wait: bool = False,
-    timeout: float | None = None,
-    rpm_max: int = 200,
-) -> bool:
-    """
-    Mueve +angle_deg grados (CW) SIN RAMPA usando el modo POS del firmware:
-      - Si se pasa 'hz', se usa directamente (recomendado si ya trabajas en Hz).
-      - Si se pasa 'rpm', se convierte a Hz con STEPS_PER_REV y se limita a 1000 RPM.
-      - Si no pasas ni 'rpm' ni 'hz', usa la velocidad por defecto ya seteada en el driver.
-
-    Requiere un 'drv' global (DriverStepperSys) y que ENABLE esté activo.
-    """
-    global drv
-    from Drivers.DriverStepperSys import STEPS_PER_REV
-
-    angle_deg = abs(float(angle_deg))
-
-    # Establecer velocidad si el usuario la provee
-    if hz is not None:
-        hz = float(hz)
-    elif rpm is not None:
-        rpm = float(abs(rpm))
-        rpm = min(rpm, rpm_max)
-        hz = rpm_to_hz(rpm, STEPS_PER_REV)
-    else:
-        rpm = rpm_max
-        hz = rpm_to_hz(rpm, STEPS_PER_REV)
-    # Ejecutar movimiento
-    ok = drv.move_degrees(  # pyrefly: ignore
-        angle_deg, wait=wait, timeout=timeout, vel_hz=hz
-    )  # pyrefly:ignore
-    print(f"Moving plus {angle_deg} degrees at {hz} Hz")
-    return bool(ok)
-
-
-def go_minus_angle_deg(
-    angle_deg: float,
-    rpm: float | None = None,
-    hz: float | None = None,
-    wait: bool = True,
-    timeout: float | None = None,
-    rpm_max: int = 200,
-) -> bool:
-    """
-    Mueve -angle_deg grados (CCW) SIN RAMPA usando el modo POS del firmware.
-    Misma lógica que go_plus_angle_deg pero con ángulo negativo.
-    """
-    global drv
-    from Drivers.DriverStepperSys import STEPS_PER_REV
-
-    angle_deg = -abs(float(angle_deg))
-    if hz is not None:
-        hz = float(hz)
-    elif rpm is not None:
-        rpm = float(abs(rpm))
-        rpm = min(rpm, rpm_max)
-        hz = rpm_to_hz(rpm, STEPS_PER_REV)
-    else:
-        rpm = rpm_max
-        hz = rpm_to_hz(rpm, STEPS_PER_REV)
-    ok = drv.move_degrees(  # pyrefly: ignore
-        angle_deg, wait=wait, timeout=timeout, vel_hz=hz
-    )
-    return bool(ok)
 
 
 def spinMotorAngle(angle, rpm, max_rpm, n_times=None, flag_continue=False):
