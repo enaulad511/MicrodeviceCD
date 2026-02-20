@@ -266,7 +266,7 @@ def go_plus_angle_deg(
     angle_deg: float,
     rpm: float | None = None,
     hz: float | None = None,
-    wait: bool = True,
+    wait: bool = False,
     timeout: float | None = None,
     rpm_max: int = 200,
 ) -> bool:
@@ -297,6 +297,7 @@ def go_plus_angle_deg(
     ok = drv.move_degrees(  # pyrefly: ignore
         angle_deg, wait=wait, timeout=timeout, vel_hz=hz
     )  # pyrefly:ignore
+    print(f"Moving plus {angle_deg} degrees at {hz} Hz")
     return bool(ok)
 
 
