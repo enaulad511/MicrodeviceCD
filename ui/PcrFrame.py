@@ -390,8 +390,9 @@ class PCRFrame(ttk.Frame):
             print(f"fluorescence voltage: {v_fluo}")
         except Exception as e:
             print(f"exception in experiment: {e}")
-        sistemaMotor.stop()
-        sistemaMotor.close()
+        if sistemaMotor is not None:
+            sistemaMotor.stop() 
+            sistemaMotor.close()
         sistemaMotor = None
         ads = None
         self.client_temperature.stop()
