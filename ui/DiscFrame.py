@@ -446,4 +446,8 @@ class ControlDiscFrame(ttk.Frame):
         stop_event.set()
         if thread_motor:
             thread_motor.join()
+        if drv is not None:
+            drv.enable_driver(False)
+            drv.close()
+            print("released resources")
         print("Hilo detenido")
