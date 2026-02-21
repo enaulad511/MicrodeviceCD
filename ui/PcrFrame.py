@@ -392,7 +392,7 @@ class PCRFrame(ttk.Frame):
         except Exception as e:
             print(f"exception in experiment: {e}")
         if sistemaMotor is not None:
-            sistemaMotor.stop()
+            # sistemaMotor.stop()
             sistemaMotor.close()
         sistemaMotor = None
         ads = None
