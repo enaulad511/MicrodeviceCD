@@ -28,9 +28,12 @@ stop_event_motor = threading.Event()
 
 
 def spinMotorRPMTime(direction, rpm_setpoint, ts, t_experiment):
-    global sistemaMotor
+    global sistemaMotor, thread_motor, stop_event_motor
+    thread_motor = threading.Thread(
+            target=spinMotorRPM_ramped,
+            args=(direction, rpm_setpoint, ts, 1000.0, 1000.0, True, sistemaMotor))
+    thread_motor.start()
     start_time = time.perf_counter()
-    spinMotorRPM_ramped(direction, rpm_setpoint, ts, 1000.0, 1000.0, True, sistemaMotor)
     while not stop_event_motor.is_set():
         if (time.perf_counter() - start_time) > t_experiment:
             print("Tiempo de experimento terminado: ", time.perf_counter() - start_time)
