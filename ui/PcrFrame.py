@@ -270,7 +270,7 @@ class PCRFrame(ttk.Frame):
         thread_experiment.start()
 
     def experiment_pcr(self, high_temp, low_temp, time_high, time_low, rpm, ads):
-        global thread_motor, sistemaMotor
+        global thread_motor, sistemaMotor, stop_event_motor
 
         # cliente temperature
         self.client_temperature = UdpClient(
@@ -300,7 +300,15 @@ class PCRFrame(ttk.Frame):
             print(f"Starting motor spin at {rpm_setpoint} RPM for 5 seconds")
             # initial spin with expecific time
             spinMotorRPM_ramped(
-                direction, rpm_setpoint, ts, 500.0, 700.0, True, sistemaMotor, 5
+                direction,
+                rpm_setpoint,
+                ts,
+                500.0,
+                700.0,
+                True,
+                sistemaMotor,
+                5,
+                stop_func=lambda: stop_event_motor.is_set(),
             )
             time.sleep(1)
             from Drivers.DriverGPIO import GPIOPin
@@ -403,7 +411,7 @@ class PCRFrame(ttk.Frame):
         self.pin_pcr = None
 
     def callback_stop_experiment(self):
-        global sistemaMotor
+        global sistemaMotor, stop_event_motor
         print("Experimento detenido")
         stop_event_motor.set()
         # stop motor
