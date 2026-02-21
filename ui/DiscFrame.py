@@ -445,7 +445,7 @@ class ControlDiscFrame(ttk.Frame):
         print("Ejecutar ciclo de encendido/apagado")
 
     def callback_oscillator(self):
-        global thread_motor, drv
+        global thread_motor, drv, stop_event
         from Drivers.DriverStepperSys import DriverStepperSys
 
         settings: dict = read_settings_from_file()
