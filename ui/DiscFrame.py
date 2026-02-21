@@ -487,3 +487,4 @@ class ControlDiscFrame(ttk.Frame):
             drv = None
             print("released resources")
         print("Hilo detenido")
+        stop_event.clear()
