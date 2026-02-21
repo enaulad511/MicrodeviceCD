@@ -286,7 +286,7 @@ def spinMotorRPM_ramped(
     if drv is not None:
         drv.stop()  
         print("Parado:", drv.get_status())
-        drv.close()
+        drv = None if drv_motor is not None else drv
     
 
 
