@@ -291,6 +291,7 @@ class PCRFrame(ttk.Frame):
             rpm_setpoint = rpm
             ts = 0.01
             if sistemaMotor is None:
+                print("Creating new driver instance")
                 sistemaMotor = DriverStepperSys(
                     en_pin=12, enable_active_high=False, uart_port=serial_port_encoder
                 )
