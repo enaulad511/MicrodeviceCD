@@ -1,5 +1,6 @@
 
 # -*- coding: utf-8 -*-
+import json
 import socket
 import threading
 import time
@@ -26,7 +27,7 @@ class UdpClient:
         local_ip: str = "",  # "" => all interfaces; or set to your wlan0 IP
         decode: str = "utf-8",
         recv_timeout_sec: Optional[float] = None,
-        on_message: Optional[Callable[[str, tuple], None]] = None,
+        on_message: Optional[Callable[[str, tuple, dict], None]] = None,
         parse_float: bool = False,
     ):
         """
@@ -54,6 +55,14 @@ class UdpClient:
         self._latest_text = None
         self._latest_float = None
         self._latest_addr = None
+        self.data_temps = {
+                    "type": "unknown",
+                    "timestamp_ms": time.time_ns() // 1_000_000,
+                    "mlx_ambient": 0.0,
+                    "mlx_object": 0.0,
+                    "max31855": None,
+                    "unit": "unknown",
+                }
 
     def _create_socket(self):
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -130,11 +139,30 @@ class UdpClient:
             except Exception as e:
                 print(f"[UdpClient] recv error: {e}")
                 continue
+                
+            
+            # payload = {
+            #             "type": "temperature",
+            #             "unit": "C",
+            #             "mlx_ambient": None if t_amb is None else round(t_amb, 2),
+            #             "mlx_object": None if t_obj is None else round(t_obj, 2),
+            #             "max31855": None if t_tc is None else round(t_tc, 2),
+            #             "timestamp_ms": time.ticks_ms(),
+            #         }
 
             try:
                 text = data.decode(self.decode, errors="replace").strip()
+                self.data_temps = json.loads(data.decode())
             except Exception:
                 text = str(data)
+                self.data_temps = {
+                    "type": "unknown",
+                    "timestamp_ms": time.time_ns() // 1_000_000,
+                    "mlx_ambient": 0.0,
+                    "mlx_object": 0.0,
+                    "max31855": None,
+                    "unit": "unknown",
+                }
 
             self._latest_text = text    # pyrefly: ignore
             self._latest_addr = addr
@@ -154,7 +182,7 @@ class UdpClient:
             # Call user callback if provided
             if self.on_message:
                 try:
-                    self.on_message(text, addr)
+                    self.on_message(text, addr, self.data_temps)
                 except Exception as e:
                     print(f"[UdpClient] on_message error: {e}")
 
@@ -170,6 +198,8 @@ class UdpClient:
 
     def latest_addr(self) -> Optional[tuple]:
         return self._latest_addr
+    def latest_temps(self):
+        return self.data_temps
 
 
 # Example usage

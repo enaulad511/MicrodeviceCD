@@ -238,12 +238,14 @@ class PCRFrame(ttk.Frame):
         except ValueError:
             print("Error: Verifique los valores ingresados.")
 
-    def update_displayed_temperature(self, text, address):
-        msg = f"Temperature: {text} °C"
+    def update_displayed_temperature(self, text, address, temps_dict):
+        temps = [temps_dict["mlx_object"], temps_dict["mlx_ambient"], temps_dict["max31855"]]
+        msg = f"Temperature: {temps} °C"
+
         # print(msg)
         self.entries[-1].set(msg)  # pyrefly: ignore
         try:
-            self.temp = float(text)
+            self.temp = float(temps[2])  # Usamos la temperatura del objeto como referencia
         except Exception as e:
             print(e)
             self.temp = 0.0
@@ -279,7 +281,7 @@ class PCRFrame(ttk.Frame):
             allow_broadcast=True,  # Important for broadcast payloads
             local_ip="",  # "" listens on all interfaces (wlan0, eth0, etc.)
             recv_timeout_sec=1.0,  # lets loop check stop flag periodically
-            on_message=lambda t, a: self.update_displayed_temperature(t, a),
+            on_message=lambda t, a, t_d: self.update_displayed_temperature(t, a, t_d),
             parse_float=True,  # Arduino sends a numeric string
         )
         self.client_temperature.start()
