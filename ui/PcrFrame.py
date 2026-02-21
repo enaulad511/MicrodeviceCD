@@ -27,6 +27,10 @@ thread_lock = threading.Lock()
 stop_event_motor = threading.Event()
 
 
+def check_temp_higher(temp, target_temp):
+    return temp >= target_temp
+
+
 def create_widgets_pcr(parent, callbacks: dict):
     entries = []
 
@@ -74,7 +78,7 @@ def create_widgets_pcr(parent, callbacks: dict):
     ttk.Label(frame1, textvariable=svar_temperature, style="Custom.TLabel").grid(
         row=len(labels) + 1, column=0, padx=5, pady=5, sticky="e"
     )
-    entries.append(svar_temperature)    # pyrefly:ignore
+    entries.append(svar_temperature)  # pyrefly:ignore
     ttk.Button(
         frame1,
         text="Stop Experiment",
@@ -293,9 +297,12 @@ class PCRFrame(ttk.Frame):
             stop_event_motor.clear()
             print(f"Starting motor spin at {rpm_setpoint} RPM for 5 seconds")
             # initial spin with expecific time
-            spinMotorRPM_ramped(direction, rpm_setpoint, ts, 300.0, 700.0, True, sistemaMotor, 5)
+            spinMotorRPM_ramped(
+                direction, rpm_setpoint, ts, 300.0, 700.0, True, sistemaMotor, 5
+            )
             time.sleep(1)
             from Drivers.DriverGPIO import GPIOPin
+
             print("Motor stopped")
             self.pin_heating = GPIOPin(
                 led_heatin_pin,
@@ -309,8 +316,8 @@ class PCRFrame(ttk.Frame):
             cycles = 2
             current_cycle = 0
             print(f"start cycle {current_cycle}")
-            while current_cycle< cycles:
-                # init cycle 
+            while current_cycle < cycles:
+                # init cycle
                 # start heating to reach high_temp value
                 self.pin_heating.write(True)  # pyrefly: ignore
                 print(f"Heating to reach {high_temp} °C")
@@ -334,10 +341,20 @@ class PCRFrame(ttk.Frame):
                 print(f"Hold complete, cooling down to {low_temp} °C with motor spin")
                 # cool down with motor spin
                 stop_event_motor.clear()
-                spinMotorRPM_ramped(direction, rpm_setpoint, ts, 300.0, 700.0, True, sistemaMotor)
-                while self.temp > low_temp:
-                    time.sleep(1)
-                stop_event_motor.set()
+                spinMotorRPM_ramped(
+                    direction,
+                    rpm_setpoint,
+                    ts,
+                    300.0,
+                    700.0,
+                    True,
+                    sistemaMotor,
+                    stop_func=lambda: stop_event_motor.is_set()
+                    or self.temp <= low_temp,
+                )
+                # while self.temp > low_temp:
+                #     time.sleep(1)
+                # stop_event_motor.set()
                 print(f"Temperature reached: {self.temp} °C")
                 # hold temperature for 10 sec with led only
                 time_hold = 10
@@ -353,7 +370,7 @@ class PCRFrame(ttk.Frame):
                     current_time = time.time()
                 print(f"Hold complete, end of cycle {current_cycle}")
                 current_cycle += 1
-                #end of cycle
+                # end of cycle
             self.pin_heating.close()  # pyrefly: ignore
             print("PCR cycles complete, reading fluorescence")
             # turn on fluorescen LED
@@ -367,7 +384,7 @@ class PCRFrame(ttk.Frame):
             self.pin_pcr.set_output(initial_high=False)  # pyrefly: ignore
             self.pin_pcr.write(True)  # pyrefly: ignore
             print("Reading fluorescence...")
-            time.sleep(1)   # tiempo encedido el led de fluorescencia
+            time.sleep(1)  # tiempo encedido el led de fluorescencia
             self.pin_pcr.write(False)  # pyrefly: ignore
             # read fluorescence
             v_fluo = ads.read_voltage(0, averages=4)
@@ -375,7 +392,7 @@ class PCRFrame(ttk.Frame):
         except Exception as e:
             print(f"exception in experiment: {e}")
         if sistemaMotor is not None:
-            sistemaMotor.stop() 
+            sistemaMotor.stop()
             sistemaMotor.close()
         sistemaMotor = None
         ads = None
