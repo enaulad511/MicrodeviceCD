@@ -33,6 +33,7 @@ def spinMotorRPMTime(direction, rpm_setpoint, ts, t_experiment):
     spinMotorRPM_ramped(direction, rpm_setpoint, ts, 1000.0, 1000.0, True, sistemaMotor)
     while not stop_event_motor.is_set():
         if (time.perf_counter() - start_time) > t_experiment:
+            print("Tiempo de experimento terminado: ", time.perf_counter() - start_time)
             stop_event_motor.set()
             break
         time.sleep(1)
