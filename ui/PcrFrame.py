@@ -396,7 +396,6 @@ class PCRFrame(ttk.Frame):
             # sistemaMotor.stop()
             sistemaMotor.close()
         sistemaMotor = None
-        ads = None
         self.client_temperature.stop()
         self.running_experiment = False
         self.pin_heating = None
@@ -422,3 +421,4 @@ class PCRFrame(ttk.Frame):
             self.pin_pcr.close()  # pyrefly: ignore
         self.pin_heating = None
         self.pin_pcr = None
+        sistemaMotor = None
