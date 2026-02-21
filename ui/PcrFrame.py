@@ -289,7 +289,7 @@ class PCRFrame(ttk.Frame):
         try:
             direction = "CW"
             rpm_setpoint = rpm
-            ts = 0.01
+            ts = 0.2
             if sistemaMotor is None:
                 print("Creating new driver instance")
                 sistemaMotor = DriverStepperSys(
