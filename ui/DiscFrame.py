@@ -418,7 +418,7 @@ class ControlDiscFrame(ttk.Frame):
     #         print(f"Motor {direction} a {rpm_setpoint} RPM iniciado")
 
     def callback_spin(self):
-        global thread_motor, drv
+        global thread_motor, drv, stop_event
         from Drivers.DriverStepperSys import DriverStepperSys
 
         with thread_lock:
@@ -476,7 +476,7 @@ class ControlDiscFrame(ttk.Frame):
             print("Modo oscilador iniciado")
 
     def callback_stop(self):
-        global thread_motor, drv
+        global thread_motor, drv, stop_event
         print("Deteniendo motor...")
         stop_event.set()
         if thread_motor:
