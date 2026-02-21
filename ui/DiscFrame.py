@@ -206,7 +206,7 @@ def spinMotorRPM_ramped(
     accel_rpm_s: aceleración/deceleración en RPM/s
     """
     global drv, stop_event
-    if drv_motor is not None:
+    if drv_motor is not None and drv is not None:
         drv = drv_motor
     # Validación de dirección
     d = direction.strip().upper()
