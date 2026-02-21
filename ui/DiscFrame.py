@@ -197,7 +197,8 @@ def spinMotorRPM_ramped(
     max_rpm: float = 1000.0,  # límite absoluto
     soft_stop: bool = True,  # rampa suave a 0 cuando paran
     drv_motor=None,
-    time_exp=None
+    time_exp=None,
+    stop_func = None    # stop function for checking if stop is required, return boolean
 ):
     """
     Gira el motor con rampa de aceleración en RPM hasta 'setpoint_rpm' (limitado a 1000 RPM).
@@ -249,6 +250,10 @@ def spinMotorRPM_ramped(
             elapsed = time.perf_counter() - star_time
             if elapsed >= time_exp:
                 print(f"Tiempo de ejecución {time_exp}s alcanzado, deteniendo motor.")
+                break
+        if stop_func is not None:
+            if stop_func():
+                print("stop_func indicó que se debe detener, iniciando parada...")
                 break
         time.sleep(ts)
     print("stop_event detectado, iniciando parada suave..." if soft_stop else "stop_event detectado, deteniendo motor...")
