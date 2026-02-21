@@ -283,9 +283,11 @@ def spinMotorRPM_ramped(
                 cur += -step if cur > 0 else step
             drv.run_rpm(cur)  # pyrefly: ignore
             time.sleep(ts)
-
-    drv.stop()  # pyrefly: ignore
-    print("Parado:", drv.get_status())  # pyrefly: ignore
+    if drv is not None:
+        drv.stop()  
+        print("Parado:", drv.get_status())
+        drv.close()
+    
 
 
 def spinMotorAngle(angle, rpm, max_rpm, n_times=None, flag_continue=False):
