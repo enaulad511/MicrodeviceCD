@@ -196,6 +196,7 @@ def spinMotorRPM_ramped(
     accel_rpm_s: float = 800.0,  # aceleración (RPM por segundo)
     max_rpm: float = 1000.0,  # límite absoluto
     soft_stop: bool = True,  # rampa suave a 0 cuando paran
+    drv_motor=None
 ):
     """
     Gira el motor con rampa de aceleración en RPM hasta 'setpoint_rpm' (limitado a 1000 RPM).
@@ -205,7 +206,8 @@ def spinMotorRPM_ramped(
     accel_rpm_s: aceleración/deceleración en RPM/s
     """
     global drv, stop_event
-
+    if drv_motor is not None:
+        drv = drv_motor
     # Validación de dirección
     d = direction.strip().upper()
     if d not in ("CW", "CCW"):
