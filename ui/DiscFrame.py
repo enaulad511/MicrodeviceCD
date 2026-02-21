@@ -244,7 +244,7 @@ def spinMotorRPM_ramped(
         drv.run_rpm(cur)  # pyrefly: ignore
         # Si ya estamos en target, mantiene velocidad y sigue escuchando stop_event
         time.sleep(ts)
-
+    print("stop_event detectado, iniciando parada suave..." if soft_stop else "stop_event detectado, deteniendo motor...")
     # Al salir por stop_event, opcionalmente desacelera suave a 0
     if soft_stop:
         while abs(cur) > 0.1:
