@@ -476,7 +476,7 @@ class ControlDiscFrame(ttk.Frame):
             print("Modo oscilador iniciado")
 
     def callback_stop(self):
-        global thread_motor
+        global thread_motor, drv
         print("Deteniendo motor...")
         stop_event.set()
         if thread_motor:
@@ -484,5 +484,6 @@ class ControlDiscFrame(ttk.Frame):
         if drv is not None:
             drv.enable_driver(False)
             drv.close()
+            drv = None
             print("released resources")
         print("Hilo detenido")
