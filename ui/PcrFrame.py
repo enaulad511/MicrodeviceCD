@@ -295,6 +295,7 @@ class PCRFrame(ttk.Frame):
                 sistemaMotor = DriverStepperSys(
                     en_pin=12, enable_active_high=False, uart_port=serial_port_encoder
                 )
+                print(sistemaMotor.get_status())
             stop_event_motor.clear()
             print(f"Starting motor spin at {rpm_setpoint} RPM for 5 seconds")
             # initial spin with expecific time
