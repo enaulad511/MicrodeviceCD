@@ -198,7 +198,7 @@ def spinMotorRPM_ramped(
     soft_stop: bool = True,  # rampa suave a 0 cuando paran
     drv_motor=None,
     time_exp=None,
-    stop_func = None    # stop function for checking if stop is required, return boolean
+    stop_func=None,  # stop function for checking if stop is required, return boolean
 ):
     """
     Gira el motor con rampa de aceleración en RPM hasta 'setpoint_rpm' (limitado a 1000 RPM).
@@ -208,7 +208,19 @@ def spinMotorRPM_ramped(
     accel_rpm_s: aceleración/deceleración en RPM/s
     """
     global drv, stop_event
-    print(direction, setpoint_rpm, ts, accel_rpm_s, max_rpm, soft_stop, drv, stop_event)
+    print(
+        direction,
+        setpoint_rpm,
+        ts,
+        accel_rpm_s,
+        max_rpm,
+        soft_stop,
+        drv_motor,
+        time_exp,
+        stop_func,
+        drv,
+        stop_event,
+    )
     if drv_motor is not None and drv is None:
         drv = drv_motor
     # Validación de dirección
@@ -257,7 +269,11 @@ def spinMotorRPM_ramped(
                 print("stop_func indicó que se debe detener, iniciando parada...")
                 break
         time.sleep(ts)
-    print("stop_event detectado, iniciando parada suave..." if soft_stop else "stop_event detectado, deteniendo motor...")
+    print(
+        "stop_event detectado, iniciando parada suave..."
+        if soft_stop
+        else "stop_event detectado, deteniendo motor..."
+    )
     # Al salir por stop_event, opcionalmente desacelera suave a 0
     if soft_stop:
         while abs(cur) > 0.1:
@@ -272,7 +288,6 @@ def spinMotorRPM_ramped(
     print("Parado:", drv.get_status())  # pyrefly: ignore
 
 
-
 def spinMotorAngle(angle, rpm, max_rpm, n_times=None, flag_continue=False):
     """
     Versión global que usa los helpers del objeto global 'drv':
@@ -285,12 +300,12 @@ def spinMotorAngle(angle, rpm, max_rpm, n_times=None, flag_continue=False):
     """
     import time as _t
     from Drivers.DriverStepperSys import STEPS_PER_REV
-    global stop_event, drv  # asumiendo que existen en tu entorno
 
+    global stop_event, drv  # asumiendo que existen en tu entorno
 
     try:
         angle = float(angle)
-        rpm   = float(rpm)
+        rpm = float(rpm)
         max_rpm = float(max_rpm)
     except Exception as e:
         raise ValueError(f"Parámetros inválidos: {e}")
@@ -330,8 +345,10 @@ def spinMotorAngle(angle, rpm, max_rpm, n_times=None, flag_continue=False):
                 print("[spinMotorAngle] n_times<=0; STOP.")
             else:
                 total_time = n_times * T_cycle
-                print(f"[spinMotorAngle] SWEEP {n_times} ciclos: ±{angle}°, "
-                      f"Hz={speed_hz:.1f}, T_ciclo≈{T_cycle:.3f}s, T_total≈{total_time:.3f}s")
+                print(
+                    f"[spinMotorAngle] SWEEP {n_times} ciclos: ±{angle}°, "
+                    f"Hz={speed_hz:.1f}, T_ciclo≈{T_cycle:.3f}s, T_total≈{total_time:.3f}s"
+                )
                 elapsed = 0.0
                 step = 0.01
                 while elapsed < total_time:
@@ -342,7 +359,9 @@ def spinMotorAngle(angle, rpm, max_rpm, n_times=None, flag_continue=False):
                     elapsed += step
         else:
             if flag_continue:
-                print(f"[spinMotorAngle] SWEEP continuo: ±{angle}° @ {rpm_eff} rpm (Hz={speed_hz:.1f})")
+                print(
+                    f"[spinMotorAngle] SWEEP continuo: ±{angle}° @ {rpm_eff} rpm (Hz={speed_hz:.1f})"
+                )
                 while not stop_event.is_set():
                     _t.sleep(0.02)
             else:
@@ -426,6 +445,7 @@ class ControlDiscFrame(ttk.Frame):
     def callback_oscillator(self):
         global thread_motor, drv
         from Drivers.DriverStepperSys import DriverStepperSys
+
         settings: dict = read_settings_from_file()
         max_rpm = settings.get("max_rpm", 700)
         print("Iniciar modo oscilador")
