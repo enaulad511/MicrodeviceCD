@@ -27,22 +27,6 @@ thread_lock = threading.Lock()
 stop_event_motor = threading.Event()
 
 
-def spinMotorRPMTime(direction, rpm_setpoint, ts, t_experiment):
-    global sistemaMotor, thread_motor, stop_event_motor
-    thread_motor = threading.Thread(
-            target=spinMotorRPM_ramped,
-            args=(direction, rpm_setpoint, ts, 1000.0, 1000.0, True, sistemaMotor))
-    thread_motor.start()
-    start_time = time.perf_counter()
-    while not stop_event_motor.is_set():
-        if (time.perf_counter() - start_time) > t_experiment:
-            print("Tiempo de experimento terminado: ", time.perf_counter() - start_time)
-            stop_event_motor.set()
-            break
-        time.sleep(1)
-    
-
-
 def create_widgets_pcr(parent, callbacks: dict):
     entries = []
 
@@ -309,7 +293,7 @@ class PCRFrame(ttk.Frame):
             stop_event_motor.clear()
             print(f"Starting motor spin at {rpm_setpoint} RPM for 5 seconds")
             # initial spin with expecific time
-            spinMotorRPMTime(direction, rpm_setpoint, ts, 5)
+            spinMotorRPM_ramped(direction, rpm_setpoint, ts, 300.0, 700.0, True, sistemaMotor, 5)
             time.sleep(1)
             from Drivers.DriverGPIO import GPIOPin
             print("Motor stopped")

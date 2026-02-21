@@ -196,7 +196,8 @@ def spinMotorRPM_ramped(
     accel_rpm_s: float = 800.0,  # aceleración (RPM por segundo)
     max_rpm: float = 1000.0,  # límite absoluto
     soft_stop: bool = True,  # rampa suave a 0 cuando paran
-    drv_motor=None
+    drv_motor=None,
+    time_exp=None
 ):
     """
     Gira el motor con rampa de aceleración en RPM hasta 'setpoint_rpm' (limitado a 1000 RPM).
@@ -232,6 +233,7 @@ def spinMotorRPM_ramped(
     step = float(accel_rpm_s) * ts  # incremento/decremento por ciclo
 
     # Bucle principal: acelera hasta objetivo y mantén
+    star_time = time.perf_counter()
     while not stop_event.is_set():
         # Aproximación por rampa
         diff = target - cur
@@ -243,6 +245,11 @@ def spinMotorRPM_ramped(
         # Enviar comando
         drv.run_rpm(cur)  # pyrefly: ignore
         # Si ya estamos en target, mantiene velocidad y sigue escuchando stop_event
+        if time_exp is not None:
+            elapsed = time.perf_counter() - star_time
+            if elapsed >= time_exp:
+                print(f"Tiempo de ejecución {time_exp}s alcanzado, deteniendo motor.")
+                break
         time.sleep(ts)
     print("stop_event detectado, iniciando parada suave..." if soft_stop else "stop_event detectado, deteniendo motor...")
     # Al salir por stop_event, opcionalmente desacelera suave a 0
