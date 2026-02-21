@@ -299,7 +299,7 @@ class PCRFrame(ttk.Frame):
             print(f"Starting motor spin at {rpm_setpoint} RPM for 5 seconds")
             # initial spin with expecific time
             spinMotorRPM_ramped(
-                direction, rpm_setpoint, ts, 300.0, 700.0, True, sistemaMotor, 5
+                direction, rpm_setpoint, ts, 500.0, 700.0, True, sistemaMotor, 5
             )
             time.sleep(1)
             from Drivers.DriverGPIO import GPIOPin
