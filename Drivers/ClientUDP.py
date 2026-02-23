@@ -153,6 +153,8 @@ class UdpClient:
             try:
                 text = data.decode(self.decode, errors="replace").strip()
                 self.data_temps = json.loads(data.decode())
+                self.latest_text = text
+                self._latest_float = float(self.data_temps["mlx_object"])
             except Exception:
                 text = str(data)
                 self.data_temps = {
@@ -163,15 +165,17 @@ class UdpClient:
                     "max31855": None,
                     "unit": "unknown",
                 }
+                self._latest_float = None
+
 
             self._latest_text = text    # pyrefly: ignore
             self._latest_addr = addr
 
-            if self.parse_float:
-                try:
-                    self._latest_float = float(text)    # pyrefly: ignore
-                except Exception:
-                    self._latest_float = None   # pyrefly: ignore
+            # if self.parse_float:
+            #     try:
+            #         self._latest_float = float(text)    # pyrefly: ignore
+            #     except Exception:
+            #         self._latest_float = None   # pyrefly: ignore
 
             # Print basic info
             # if self.parse_float and self._latest_float is not None:
