@@ -154,7 +154,7 @@ class UdpClient:
                 text = data.decode(self.decode, errors="replace").strip()
                 self.data_temps = json.loads(data.decode())
                 self.latest_text = text
-                self._latest_float = float(self.data_temps["mlx_object"])
+                self._latest_float = float(self.data_temps["max31855"])
             except Exception:
                 text = str(data)
                 self.data_temps = {

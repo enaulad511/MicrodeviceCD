@@ -123,12 +123,12 @@ class MainGUI(ttk.Window):
 
         # ------------------PCR tab-------------------
         self.tab_pcr = PCRFrame(self.main_notebook, self.ads)
-        self.main_notebook.add(self.tab_pcr, text=main_tabs_texts[0], padding=10)
+        # self.main_notebook.add(self.tab_pcr, text=main_tabs_texts[0], padding=10)
         # ------------------Electrochemical tab-------------------
         self.tab_electrochemical = ElectrochemicalFrame(self.main_notebook)
-        self.main_notebook.add(
-            self.tab_electrochemical, text=main_tabs_texts[1], padding=10
-        )
+        # self.main_notebook.add(
+        #     self.tab_electrochemical, text=main_tabs_texts[1], padding=10
+        # )
         # ------------------Manual Control tab-------------------
         self.tab_manual_control = ttk.Frame(self.main_notebook)
         self.main_notebook.add(
