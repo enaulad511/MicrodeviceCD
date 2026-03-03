@@ -46,9 +46,11 @@ def create_widgets_pcr(parent, callbacks: dict):
         "Time Low (s):",
         "Number of Cycles:",
         "RPM Cooling:",
+        "Denaturing time (s):",
+        "Denaturing Temp:",
     ]
     columns = 2
-    default_values = ["60", "40", "8", "5", "1", "500"]
+    default_values = ["60", "40", "10", "10", "1", "500", "180", "68"]
     for i, lbl in enumerate(labels):
         row = i // columns
         col = i % columns
@@ -239,13 +241,19 @@ class PCRFrame(ttk.Frame):
             print("Error: Verifique los valores ingresados.")
 
     def update_displayed_temperature(self, text, address, temps_dict):
-        temps = [temps_dict["mlx_object"], temps_dict["mlx_ambient"], temps_dict["max31855"]]
+        temps = [
+            temps_dict["mlx_object"],
+            temps_dict["mlx_ambient"],
+            temps_dict["max31855"],
+        ]
         msg = f"Temperature: {temps} °C"
 
         # print(msg)
         self.entries[-1].set(msg)  # pyrefly: ignore
         try:
-            self.temp = float(temps[2])  # Usamos la temperatura del objeto como referencia
+            self.temp = float(
+                temps[2]
+            )  # Usamos la temperatura del objeto como referencia
         except Exception as e:
             print(e)
             self.temp = 0.0
@@ -262,16 +270,21 @@ class PCRFrame(ttk.Frame):
         time_low = float(self.entries[3].get())
         cycles = int(self.entries[4].get())
         rpm = float(self.entries[5].get())
+        denat_time = float(self.entries[6].get())
+        denat_temp = float(self.entries[7].get())
         print(
-            f"High Temp: {high_temp}, Low Temp: {low_temp}, Time High: {time_high}, Time Low: {time_low}, Cycles: {cycles}, RPM: {rpm}"
+            f"High Temp: {high_temp}, Low Temp: {low_temp}, Time High: {time_high}, Time Low: {time_low}, Cycles: {cycles}, RPM: {rpm}",
+            f"Denaturing Time: {denat_time}, Denaturing Temp: {denat_temp}",
         )
         thread_experiment = threading.Thread(
             target=self.experiment_pcr,
-            args=(high_temp, low_temp, time_high, time_low, rpm, self.ads),
+            args=(high_temp, low_temp, time_high, time_low, rpm,denat_time, denat_temp, cycles, self.ads),
         )
         thread_experiment.start()
 
-    def experiment_pcr(self, high_temp, low_temp, time_high, time_low, rpm, ads):
+    def experiment_pcr(
+        self, high_temp, low_temp, time_high, time_low, rpm, denat_time, denat_temp, cycles, ads
+    ):
         global thread_motor, sistemaMotor, stop_event_motor
 
         # cliente temperature
@@ -322,28 +335,43 @@ class PCRFrame(ttk.Frame):
                 consumer="led-heating-ui",
                 active_low=False,
             )
-            # Preconfigura como salida en bajo
             self.pin_heating.set_output(initial_high=False)  # pyrefly: ignore
-
-            cycles = 2
+            # denaturization  process
+            # heat to temp
+            self.pin_heating.write(True)  # pyrefly: ignore
+            # hold temperature for denat_time seconds
+            start_time = time.time()
+            current_time = time.time()
+            while current_time - start_time < denat_time:
+                if self.temp > denat_temp:  # si se pasa de la temperatura objetivo
+                    self.pin_heating.write(False)  # apagar calor
+                else:
+                    self.pin_heating.write(True)  # encender calor
+                time.sleep(0.5)
+                current_time = time.time()
+            self.pin_heating.write(False)  # pyrefly: ignore
+            print(f"Denaturation complete, temperature: {self.temp} °C")
+            # Preconfigura como salida en bajo
             current_cycle = 0
             print(f"start cycle {current_cycle}")
             while current_cycle < cycles:
                 # init cycle
-                # start heating to reach high_temp value
-                self.pin_heating.write(True)  # pyrefly: ignore
-                print(f"Heating to reach {high_temp} °C")
-                # time.sleep(time_high)
-                while self.temp < high_temp:
-                    time.sleep(1)
+                # reach high temp
+                while True:
+                    if self.temp > high_temp +1:  # si se pasa de la temperatura objetivo
+                        self.pin_heating.write(False)  # apagar calor
+                    elif self.temp < high_temp-1:
+                        self.pin_heating.write(True)  # encender calor
+                    else:
+                        break
+                    time.sleep(0.5)
                 self.pin_heating.write(False)  # pyrefly: ignore
                 print(f"Temperature reached: {self.temp} °C")
-                # hold temperature for 10 sec only with heating led
-                time_hold = 10
-                print(f"Holding temperature for {time_hold} seconds")
+                # hold temperature
+                print(f"Holding temperature for {time_high} seconds")
                 start_time = time.time()
                 current_time = time.time()
-                while current_time - start_time < time_hold:
+                while current_time - start_time < time_high:
                     if self.temp > high_temp:  # si se pasa de la temperatura objetivo
                         self.pin_heating.write(False)  # apagar calor
                     else:
@@ -364,16 +392,12 @@ class PCRFrame(ttk.Frame):
                     stop_func=lambda: stop_event_motor.is_set()
                     or self.temp <= low_temp,
                 )
-                # while self.temp > low_temp:
-                #     time.sleep(1)
-                # stop_event_motor.set()
                 print(f"Temperature reached: {self.temp} °C")
-                # hold temperature for 10 sec with led only
-                time_hold = 10
-                print(f"Holding temperature for {time_hold} seconds")
+                # hold temperature 
+                print(f"Holding temperature for {time_low} seconds")
                 start_time = time.time()
                 current_time = time.time()
-                while current_time - start_time < time_hold:
+                while current_time - start_time < time_low:
                     if self.temp < low_temp:  # si se pasa de la temperatura objetivo
                         self.pin_heating.write(False)  # apagar calor
                     else:

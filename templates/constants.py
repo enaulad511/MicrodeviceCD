@@ -1,4 +1,7 @@
 # -*- coding: utf-8 -*-
+
+from dotenv import dotenv_values
+
 __author__ = "Edisson A. Naula"
 __date__ = "$ 08/10/2025  at 09:46 a.m. $"
 
@@ -34,3 +37,4 @@ serial_port_encoder = "/dev/ttyAMA0"
 led_heatin_pin = 25
 led_fluorescence_pin = 24
 chip_rasp: str = "/dev/gpiochip0"
+secrets = dotenv_values(".env")

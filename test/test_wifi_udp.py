@@ -18,7 +18,7 @@ def graph_data(data):
     # print(data)
     v_s = []
     i_s = []
-    for time, values in data.items():
+    for times, values in data.items():
         v_s.append(values["voltage"])
         i_s.append(values["current"])
     plt.figure(figsize=(10, 6))

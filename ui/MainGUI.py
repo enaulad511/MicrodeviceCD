@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-from Drivers.ReaderADS import Ads1115Reader
+from templates.constants import secrets
 from templates.constants import font_text
 from ui.TemperatureFrame import TemperatureFrame
 from templates.constants import font_buttons_small
@@ -98,7 +98,10 @@ class MainGUI(ttk.Window):
         self.protocol("WM_DELETE_WINDOW", self.on_close_window)
         self.option_add('*TCombobox*Listbox.font', font_text)
         self.option_add('*Combobox*Listbox.font', font_text) 
-        self.ads = Ads1115Reader(address=0x48, fsr=4.096, sps=128, single_shot=True) 
+        self.ads = None
+        if secrets.get("environment", "") != "dev":
+            from Drivers.ReaderADS import Ads1115Reader
+            self.ads = Ads1115Reader(address=0x48, fsr=4.096, sps=128, single_shot=True) 
         # --------------------Start Animation -------------------
         # self.show_gif_toplevel()
         self.after(0, self.maximize_window)
@@ -123,12 +126,12 @@ class MainGUI(ttk.Window):
 
         # ------------------PCR tab-------------------
         self.tab_pcr = PCRFrame(self.main_notebook, self.ads)
-        # self.main_notebook.add(self.tab_pcr, text=main_tabs_texts[0], padding=10)
+        self.main_notebook.add(self.tab_pcr, text=main_tabs_texts[0], padding=10)
         # ------------------Electrochemical tab-------------------
         self.tab_electrochemical = ElectrochemicalFrame(self.main_notebook)
-        # self.main_notebook.add(
-        #     self.tab_electrochemical, text=main_tabs_texts[1], padding=10
-        # )
+        self.main_notebook.add(
+            self.tab_electrochemical, text=main_tabs_texts[1], padding=10
+        )
         # ------------------Manual Control tab-------------------
         self.tab_manual_control = ttk.Frame(self.main_notebook)
         self.main_notebook.add(
