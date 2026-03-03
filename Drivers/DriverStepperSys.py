@@ -34,7 +34,7 @@ class DriverStepperSys:
         en_pin=None,  # GPIO para ENABLE del driver (opcional)
         enable_active_high=False,  # True si ENABLE activo en alto; default False (activo en bajo)
         uart_port="/dev/ttyAMA0",  # En RPi 4 puedes usar "/dev/ttyAMA0" o "/dev/serial0"
-        baudrate=115200,
+        baudrate=921600,
         chip="/dev/gpiochip0",
         read_timeout=0.20,  # Timeout lectura serial (s)
         ack_timeout=0.01,  # Timeout espera ACK (s)
