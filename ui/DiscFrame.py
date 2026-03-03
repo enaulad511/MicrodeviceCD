@@ -301,7 +301,8 @@ def spinMotorRPM_ramped(
     
     if drv is not None:
         drv.stop()  
-        print("Parado:", drv.get_status())
+        status = drv.get_status()  # pyrefly: ignore
+        print(f"Parado--> pos: {status.get('pos_deg') % 360:.2f}°, rpm: {status.get('rpm'):.2f}")
         drv = None if drv_motor is not None else drv
     
 
