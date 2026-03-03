@@ -245,7 +245,7 @@ def spinMotorRPM_ramped(
     if ts <= 0:
         ts = 0.1  # fallback
     step = float(accel_rpm_s) * ts  # incremento/decremento por ciclo
-
+    print(f"Rampa: {step:.2f} RPM/ciclo, objetivo: {target} RPM")
     # Bucle principal: acelera hasta objetivo y mantén
     star_time = time.perf_counter()
     while not stop_event.is_set():
@@ -441,7 +441,7 @@ class ControlDiscFrame(ttk.Frame):
                 return
             direction = self.entries[0].get()
             rpm_setpoint = float(self.entries[1].get())
-            ts = 0.1
+            ts = 0.5
             if drv is None:
                 drv = DriverStepperSys(
                     en_pin=12, enable_active_high=False, uart_port=serial_port_encoder
