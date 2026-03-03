@@ -146,7 +146,7 @@ class DriverStepperSys:
 
         # Telemetría: STAT:<pos>:<rpm>
         if line.startswith("STAT:"):
-            print("STAT recibido:", line)
+            
             try:
                 _, pos_s, rpm_s = line.split(":")
                 pos = float(pos_s)
@@ -187,6 +187,7 @@ class DriverStepperSys:
                 except Exception:
                     line = ""
                 self._handle_line(line)
+                print(line)
             except Exception:
                 # Evitar romper el hilo por un error transitorio de lectura
                 time.sleep(0.01)
