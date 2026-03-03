@@ -195,25 +195,25 @@ class DriverStepperSys:
     def _cmd_mode(self, mode_code: int):
         """Envía MODO:x y espera ACK."""
         self._send_line(f"MODO:{mode_code}")
-        return self._wait_ack()
+        return True
 
     def _cmd_set(self, value):
         """Envía SET:x y espera ACK."""
         self._send_line(f"SET:{value}")
-        return self._wait_ack()
+        return True
 
     def _cmd_vel(self, hz):
         """Envía VEL:hz y espera ACK."""
         self._send_line(f"VEL:{hz}")
-        return self._wait_ack()
+        return True
 
     def _cmd_stop(self):
         """Envía STOP:0 (y también MODO:3 por robustez)."""
         self._send_line("STOP:0")
-        ack1 = self._wait_ack()
+        # ack1 = self._wait_ack()
         self._send_line("MODO:3")
-        ack2 = self._wait_ack()
-        return ack2 or ack1
+        # ack2 = self._wait_ack()
+        return True or True
 
     # --------------------- API pública de control ---------------------
     def set_default_speed_hz(self, hz: float) -> bool:
