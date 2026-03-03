@@ -283,14 +283,14 @@ def spinMotorRPM_ramped(
                 cur += -step if cur > 0 else step
             drv.run_rpm(cur)  # pyrefly: ignore
             time.sleep(ts)
-    # detec position and go to 0°
-    status = drv.get_status()  # pyrefly: ignore
-    print("status ", status)
-    if status.get('pos_deg') != 0:
-        complete_rotation = int(360 - status.get('pos_deg') % 360)
-        print(f"Rotación completa para volver a 0°: {complete_rotation}°")
-        drv.move_degrees(complete_rotation, vel_hz=50)  # pyrefly: ignore
-        print("Posición corregida a 0°")
+    # # detec position and go to 0°
+    # status = drv.get_status()  # pyrefly: ignore
+    # print("status ", status)
+    # if status.get('pos_deg') != 0:
+    #     complete_rotation = int(360 - status.get('pos_deg') % 360)
+    #     print(f"Rotación completa para volver a 0°: {complete_rotation}°")
+    #     drv.move_degrees(complete_rotation, vel_hz=50)  # pyrefly: ignore
+    #     print("Posición corregida a 0°")
     
     if drv is not None:
         drv.stop()  
