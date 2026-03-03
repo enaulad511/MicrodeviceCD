@@ -156,7 +156,7 @@ class DriverStepperSys:
                     self._last_status.update(
                         {"pos_deg": pos, "rpm": rpm, "ts": time.time()}
                     )
-                print("Estado actualizado:", self._last_status)
+                # print("Estado actualizado:", self._last_status)
             except Exception:
                 pass
             return

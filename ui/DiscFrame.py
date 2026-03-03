@@ -276,6 +276,7 @@ def spinMotorRPM_ramped(
     )
     # Al salir por stop_event, opcionalmente desacelera suave a 0
     if soft_stop:
+        print("cur:", cur)
         while abs(cur) > 0.1:
             if abs(cur) <= step:
                 cur = 0.0
@@ -284,8 +285,12 @@ def spinMotorRPM_ramped(
             drv.run_rpm(cur)  # pyrefly: ignore
             time.sleep(ts)
     # # detec position and go to 0°
-    # status = drv.get_status()  # pyrefly: ignore
-    # print("status ", status)
+    status = drv.get_status()  # pyrefly: ignore
+    print("status ", status)
+    while abs(status.get("rpm", 11)) > 10:
+        time.sleep(0.5)
+    status = drv.get_status()  # pyrefly: ignore
+    print("rpm actual: ", status.get("rpm"))
     # if status.get('pos_deg') != 0:
     #     complete_rotation = int(360 - status.get('pos_deg') % 360)
     #     print(f"Rotación completa para volver a 0°: {complete_rotation}°")
