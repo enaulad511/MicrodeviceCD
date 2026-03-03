@@ -208,19 +208,19 @@ def spinMotorRPM_ramped(
     accel_rpm_s: aceleración/deceleración en RPM/s
     """
     global drv, stop_event
-    print(
-        direction,
-        setpoint_rpm,
-        ts,
-        accel_rpm_s,
-        max_rpm,
-        soft_stop,
-        drv_motor,
-        time_exp,
-        stop_func,
-        drv,
-        stop_event,
-    )
+    # print(
+    #     direction,
+    #     setpoint_rpm,
+    #     ts,
+    #     accel_rpm_s,
+    #     max_rpm,
+    #     soft_stop,
+    #     drv_motor,
+    #     time_exp,
+    #     stop_func,
+    #     drv,
+    #     stop_event,
+    # )
     if drv_motor is not None and drv is None:
         drv = drv_motor
     # Validación de dirección
@@ -243,7 +243,7 @@ def spinMotorRPM_ramped(
     # Parametrización
     ts = float(ts)
     if ts <= 0:
-        ts = 0.05  # fallback
+        ts = 0.1  # fallback
     step = float(accel_rpm_s) * ts  # incremento/decremento por ciclo
 
     # Bucle principal: acelera hasta objetivo y mantén
@@ -441,7 +441,7 @@ class ControlDiscFrame(ttk.Frame):
                 return
             direction = self.entries[0].get()
             rpm_setpoint = float(self.entries[1].get())
-            ts = 0.05
+            ts = 0.1
             if drv is None:
                 drv = DriverStepperSys(
                     en_pin=12, enable_active_high=False, uart_port=serial_port_encoder
