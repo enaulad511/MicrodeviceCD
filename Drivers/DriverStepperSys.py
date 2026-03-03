@@ -148,7 +148,7 @@ class DriverStepperSys:
         if line.startswith("STAT:"):
             try:
                 _, pos_s, rpm_s = line.split(":")
-                pos = float(pos_s)
+                pos = float(pos_s % 360)
                 rpm = float(rpm_s)
                 with self._stat_lock:
                     self._last_status.update(
