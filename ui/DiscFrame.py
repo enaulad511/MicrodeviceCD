@@ -283,6 +283,10 @@ def spinMotorRPM_ramped(
                 cur += -step if cur > 0 else step
             drv.run_rpm(cur)  # pyrefly: ignore
             time.sleep(ts)
+    # detec position and go to 0°
+    status = drv.get_status()  # pyrefly: ignore
+    complete_rotation = int(360 - status.get('pos_deg'))
+    drv.move_degrees(complete_rotation, wait=True)  # pyrefly: ignore
     if drv is not None:
         drv.stop()  
         print("Parado:", drv.get_status())
