@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+from numpy import True_
 import serial
 import threading
 import time
@@ -232,18 +233,17 @@ class DriverStepperSys:
         Movimiento relativo en grados (no bloqueante por defecto).
         Si 'wait=True', espera hasta que la velocidad reported (|rpm|) sea ~0 (fin del movimiento).
         """
-        ok = True
         # MODO POS
-        ok &= self._cmd_mode(0) is not None
+        self._cmd_mode(0) 
         # VEL opcional
         if vel_hz is not None:
-            ok &= self._cmd_vel(vel_hz) is not None
+            self._cmd_vel(vel_hz)
         # SET grados
-        ok &= self._cmd_set(grados) is not None
+        self._cmd_set(grados)
         
-        if not ok or not wait:
-            print("out: ", ok)
-            return ok
+        if not wait:
+            print("out: ", True)
+            return True
 
         # Esperar a que termine (heurística por rpm ≈ 0)
         t0 = time.time()
@@ -265,21 +265,19 @@ class DriverStepperSys:
 
     def run_rpm(self, rpm: float) -> bool:
         """Velocidad continua en RPM (signo = dirección)."""
-        ok = True
-        ok &= self._cmd_mode(1) is not None
-        ok &= self._cmd_set(rpm) is not None
-        return ok
+        self._cmd_mode(1) 
+        self._cmd_set(rpm) 
+        return True
 
     def run_hz(self, hz_signed: float) -> bool:
         """Velocidad continua en Hz (signo = dirección)."""
-        ok = True
-        ok &= self._cmd_mode(2) is not None
-        ok &= self._cmd_set(hz_signed) is not None
-        return ok
+        self._cmd_mode(2)
+        self._cmd_set(hz_signed)
+        return True
 
     def stop(self) -> bool:
         """Detiene el movimiento."""
-        return self._cmd_stop() is not None
+        return self._cmd_stop()
 
     def get_status(self) -> dict:
         """
