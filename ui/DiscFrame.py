@@ -405,7 +405,7 @@ class ControlDiscFrame(ttk.Frame):
                 drv.enable_driver(True)
             stop_event.clear()
             settings = read_settings_from_file()
-            acceleration = settings.get('acceleration_spin', 200.0)
+            acceleration = settings.get('acceleration_spin', 100.0)
             thread_motor = threading.Thread(
                 target=spinMotorRPM_ramped,
                 args=(direction, rpm_setpoint, ts, acceleration, 1000.0, True),

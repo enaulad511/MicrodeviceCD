@@ -149,7 +149,7 @@ class DriverStepperSys:
 
         # Telemetría: STAT:<pos>:<rpm>
         if line.startswith("STAT:"):
-            
+            print(line)
             try:
                 _, pos_s, rpm_s = line.split(":")
                 pos = float(pos_s)
