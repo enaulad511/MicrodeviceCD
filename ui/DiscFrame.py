@@ -368,25 +368,6 @@ class ControlDiscFrame(ttk.Frame):
         }
         self.entries = create_widgets_disco_input(content_frame, callbacks)
 
-    # def callback_spin(self):
-    #     global thread_motor, sistemaMotor
-    #     from Drivers.DriverEncoder import DriverEncoderSys
-    #     with thread_lock:
-    #         if thread_motor and thread_motor.is_alive():
-    #             print("Ya hay un hilo activo, no se puede iniciar otro.")
-    #             return
-    #         direction = self.entries[0].get()
-    #         rpm_setpoint = float(self.entries[1].get())
-    #         ts = 0.01
-    #         if sistemaMotor is None:
-    #             sistemaMotor = DriverEncoderSys(en_l=12, en_r=13, uart_port=serial_port_encoder)
-    #         stop_event.clear()
-    #         thread_motor = threading.Thread(
-    #             target=spinMotorRPM, args=(direction, rpm_setpoint, ts)
-    #         )
-    #         thread_motor.start()
-    #         print(f"Motor {direction} a {rpm_setpoint} RPM iniciado")
-
     def callback_spin(self):
         global thread_motor, drv, stop_event
         from Drivers.DriverStepperSys import DriverStepperSys
@@ -395,9 +376,11 @@ class ControlDiscFrame(ttk.Frame):
             if thread_motor and thread_motor.is_alive():
                 print("Ya hay un hilo activo, no se puede iniciar otro.")
                 return
+            settings = read_settings_from_file()
+            
             direction = self.entries[0].get()
             rpm_setpoint = float(self.entries[1].get())
-            ts = 0.5
+            ts = settings.get('ts_spin', 0.1)
             if drv is None:
                 drv = DriverStepperSys(
                     en_pin=12, enable_active_high=False, uart_port=serial_port_encoder
