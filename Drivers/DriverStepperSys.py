@@ -193,7 +193,7 @@ class DriverStepperSys:
                 self._handle_line(line)
             except Exception:
                 # Evitar romper el hilo por un error transitorio de lectura
-                time.sleep(0.1)
+                time.sleep(0.05)
 
     # --------------------- Helpers de protocolo ---------------------
     def _cmd_mode(self, mode_code: int):
