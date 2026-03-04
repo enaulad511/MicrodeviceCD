@@ -147,7 +147,7 @@ def spinMotorRPM_ramped(
     direction: str,
     setpoint_rpm: float,
     ts: float,
-    accel_rpm_s: float = 100.0,  # aceleración (RPM por segundo)
+    accel_rpm_s: float = 200.0,  # aceleración (RPM por segundo)
     max_rpm: float = 1000.0,  # límite absoluto
     soft_stop: bool = True,  # rampa suave a 0 cuando paran
     drv_motor=None,
