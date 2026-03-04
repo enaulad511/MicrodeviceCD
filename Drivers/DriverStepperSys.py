@@ -293,7 +293,7 @@ class DriverStepperSys:
             else:
                 pos = self._last_status["pos_deg"] % 360
             data_out = {
-                "pos": pos,
+                "pos_deg": pos,
                 "rpm": self._last_status["rpm"],
                 "ts": self._last_status["ts"],
             }
