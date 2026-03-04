@@ -306,7 +306,7 @@ def spinMotorRPM_ramped(
     if status.get('pos_deg')% 360 != 0:
         drv.run_rpm(1)
         print(f"Posición actual: {abs(status.get('pos_deg')% 360):.2f}°")
-        while abs(status.get('pos_deg')% 360) <= 2:
+        while abs(status.get('pos_deg')% 360) >= 2:
             status = drv.get_status() 
             print(f"Posición actual: {abs(status.get('pos_deg')% 360):.2f}°")
             time.sleep(ts)
