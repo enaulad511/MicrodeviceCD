@@ -317,6 +317,7 @@ def spinMotorRPM_ramped(
             if sign != current_sign:
                 current_sign = sign
                 drv.run_rpm(-1*sign*5)
+            current_pos = status.get('pos_deg')
             time.sleep(ts)
         print("Posición corregida a 0°")
         drv.run_rpm(0)
