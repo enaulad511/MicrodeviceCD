@@ -188,7 +188,7 @@ def spinMotorRPM_ramped(
     ts = float(ts)
     if ts <= 0:
         ts = 0.1  # fallback
-    step = float(accel_rpm_s) * ts  # incremento/decremento por ciclo
+    step = float(accel_rpm_s) / 2  # incremento/decremento por ciclo
     # Bucle principal: acelera hasta objetivo y mantén
     star_time = time.perf_counter()
     while not stop_event.is_set():
