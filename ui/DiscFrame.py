@@ -305,15 +305,14 @@ def spinMotorRPM_ramped(
     print("rpm actual: ", status.get("rpm"), "pos actual: ", status.get("pos_deg"))
     if status.get('pos_deg') != 0:
         current_pos = status.get('pos_deg')
-        target_post = 0
-        current_sign = 1 if target_post - current_pos > 0 else -1
+        current_sign = current_pos / abs(current_pos) if current_pos != 0 else 0
         drv.run_rpm(-1*current_sign*5)
         while True:
             status = drv.get_status() 
             print(f"Posición actual: {status.get('pos_deg'):.2f}°")
             if abs(status.get('pos_deg')) <= 5:
                 break
-            sign = current_pos % current_pos
+            sign = status.get('pos_deg') / abs(status.get('pos_deg')) if status.get('pos_deg') != 0 else 0
             if sign != current_sign:
                 current_sign = sign
                 drv.run_rpm(-1*sign*5)
