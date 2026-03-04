@@ -302,22 +302,22 @@ def spinMotorRPM_ramped(
         print("status ", status)
         time.sleep(ts)
     status = drv.get_status()  # pyrefly: ignore
-    print("rpm actual: ", status.get("rpm"), "pos actual: ", status.get("pos_deg")%360)
-    if status.get('pos_deg')% 360 != 0:
+    print("rpm actual: ", status.get("rpm"), "pos actual: ", status.get("pos_deg"))
+    if status.get('pos_deg') != 0:
         drv.run_rpm(5)
-        print(f"Posición actual: {abs(status.get('pos_deg')% 360):.2f}°")
-        current_pos = status.get('pos_deg')% 360
+        print(f"Posición actual: {abs(status.get('pos_deg')):.2f}°")
+        current_pos = status.get('pos_deg')
         target_post = 0
         current_sign = -1
         while True:
             status = drv.get_status() 
-            print(f"Posición actual: {abs(status.get('pos_deg')% 360):.2f}°")
-            if abs(status.get('pos_deg')% 360) <= 5:
+            print(f"Posición actual: {abs(status.get('pos_deg')):.2f}°")
+            if abs(status.get('pos_deg')) <= 5:
                 break
             sign = 1 if target_post - current_pos > 0 else -1
             if sign != current_sign:
                 current_sign = sign
-                drv.run_rpm(sign*5)
+                drv.run_rpm(-1*sign*5)
             time.sleep(ts)
         print("Posición corregida a 0°")
         drv.run_rpm(0)
@@ -325,7 +325,7 @@ def spinMotorRPM_ramped(
     if drv is not None:
         drv.stop()  
         status = drv.get_status()  # pyrefly: ignore
-        print(f"Parado--> pos: {status.get('pos_deg') % 360:.2f}°, rpm: {status.get('rpm'):.2f}")
+        print(f"Parado--> pos: {status.get('pos_deg'):.2f}°, rpm: {status.get('rpm'):.2f}")
         drv = None if drv_motor is not None else drv
     
 

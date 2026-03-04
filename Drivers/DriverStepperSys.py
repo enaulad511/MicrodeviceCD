@@ -287,7 +287,17 @@ class DriverStepperSys:
         {'pos_deg': float, 'rpm': float, 'ts': epoch_seg}
         """
         with self._stat_lock:
-            return dict(self._last_status)
+            # position with -sign after 180 degrees and + before 180
+            if self._last_status["pos_deg"] % 360 > 180:
+                pos = self._last_status["pos_deg"] % 360 - 360
+            else:
+                pos = self._last_status["pos_deg"] % 360
+            data_out = {
+                "pos": pos,
+                "rpm": self._last_status["rpm"],
+                "ts": self._last_status["ts"],
+            }
+            return data_out
 
     def close(self):
         """Cierra UART y libera recursos GPIO."""
