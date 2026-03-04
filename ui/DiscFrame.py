@@ -193,7 +193,7 @@ def spinMotorRPM_ramped(
     direction: str,
     setpoint_rpm: float,
     ts: float,
-    accel_rpm_s: float = 800.0,  # aceleración (RPM por segundo)
+    accel_rpm_s: float = 100.0,  # aceleración (RPM por segundo)
     max_rpm: float = 1000.0,  # límite absoluto
     soft_stop: bool = True,  # rampa suave a 0 cuando paran
     drv_motor=None,
@@ -476,7 +476,7 @@ class ControlDiscFrame(ttk.Frame):
             stop_event.clear()
             thread_motor = threading.Thread(
                 target=spinMotorRPM_ramped,
-                args=(direction, rpm_setpoint, ts, 1000.0, 1000.0, True),
+                args=(direction, rpm_setpoint, ts, 100.0, 1000.0, True),
             )
             thread_motor.start()
             print(f"Motor {direction} a {rpm_setpoint} RPM iniciado")
