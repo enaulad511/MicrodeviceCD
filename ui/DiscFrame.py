@@ -283,10 +283,13 @@ def spinMotorRPM_ramped(
                 cur += -step if cur > 0 else step
             drv.run_rpm(cur)  # pyrefly: ignore
             status = drv.get_status()  # pyrefly: ignore
-            while abs(status.get("rpm")) >= cur*1.1 or abs(status.get("rpm"))<10:
+            while abs(status.get("rpm")) >= cur*1.1:
                 status = drv.get_status()  # pyrefly: ignore
+                if int(status.get('rpm')) == 0:
+                    break
                 print(f"Desacelerando... rpm actual: {status.get('rpm'):.2f} RPM")
                 time.sleep(ts)
+                
     # # detec position and go to 0°
     status = drv.get_status()  # pyrefly: ignore
     
