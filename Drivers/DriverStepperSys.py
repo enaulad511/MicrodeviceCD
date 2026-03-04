@@ -111,7 +111,9 @@ class DriverStepperSys:
             # Activo en bajo: active=True => línea a 0 (INACTIVE), active=False => 1 (ACTIVE)
             val = Value.INACTIVE if active else Value.ACTIVE
         self._gpio_request.set_value(self.en_pin, val)
-
+    def set_init_vals(self, pos_deg=0.0, rpm=0.0):
+        """Inicializa el estado interno (útil para sincronizar al arrancar)."""
+        self._last_status.update({"pos_deg": pos_deg, "rpm": rpm, "ts": time.time()})
     # --------------------- Comunicación UART ---------------------
     def _send_line(self, s: str):
         if not s.endswith("\n"):

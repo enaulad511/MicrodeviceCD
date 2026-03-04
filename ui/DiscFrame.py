@@ -233,10 +233,13 @@ def spinMotorRPM_ramped(
     sign = 1 if d == "CW" else -1
     target_abs = min(abs(setpoint_rpm), max_rpm)
     target = sign * target_abs
-
+    if drv is None:
+        print("Error: drv no está inicializado.")
+        return
+    drv.set_init_vals(pos_deg=0.0, rpm=0.0) 
     # Punto de arranque (intenta leer del estado, si no asume 0)
     try:
-        cur = float(drv.get_status().get("rpm", 0.0))  # pyrefly: ignore
+        cur = float(drv.get_status().get("rpm", 0.0))  
     except Exception:
         cur = 0.0
 
@@ -302,7 +305,7 @@ def spinMotorRPM_ramped(
     if status.get('pos_deg') != 0:
         complete_rotation = int(360 - status.get('pos_deg') % 360)
         print(f"Rotación completa para volver a 0°: {complete_rotation}°")
-        drv.move_degrees(complete_rotation, vel_hz=50)  # pyrefly: ignore
+        drv.move_degrees(complete_rotation, vel_hz=10)  # pyrefly: ignore
         print("Posición corregida a 0°")
     
     if drv is not None:
