@@ -259,8 +259,9 @@ def spinMotorRPM_ramped(
         else:
             cur += step if diff > 0 else -step
 
-        # Enviar comando
-        drv.run_rpm(cur)  # pyrefly: ignore
+        # Enviar comando solo si aun no estamos en target
+        if diff != 0:
+            drv.run_rpm(cur)
         # Si ya estamos en target, mantiene velocidad y sigue escuchando stop_event
         if time_exp is not None:
             elapsed = time.perf_counter() - star_time
