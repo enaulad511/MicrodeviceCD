@@ -307,19 +307,17 @@ def spinMotorRPM_ramped(
         drv.run_rpm(5)
         print(f"Posición actual: {abs(status.get('pos_deg')% 360):.2f}°")
         current_pos = status.get('pos_deg')% 360
-        last_dir = "positive"
-        while abs(status.get('pos_deg')% 360) >= 5:
+        target_post = 0
+        current_sign = -1
+        while True:
             status = drv.get_status() 
             print(f"Posición actual: {abs(status.get('pos_deg')% 360):.2f}°")
-            # change direction depending on the pos % values increses change to -5 and viceversa
-            if abs(status.get('pos_deg')% 360) > current_pos and last_dir != "positive":
-                drv.run_rpm(-5)
-                last_dir="negative"
-                current_pos = abs(status.get('pos_deg')% 360)
-            elif abs(status.get('pos_deg')% 360) < current_pos and last_dir != "negative":
-                drv.run_rpm(5)
-                current_pos = abs(status.get('pos_deg')% 360)
-                last_dir="positive"
+            if abs(status.get('pos_deg')% 360) <= 5:
+                break
+            sign = 1 if target_post - current_pos > 0 else -1
+            if sign != current_sign:
+                current_sign = sign
+                drv.run_rpm(sign*5)
             time.sleep(ts)
         print("Posición corregida a 0°")
         drv.run_rpm(0)
