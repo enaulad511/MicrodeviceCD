@@ -143,52 +143,6 @@ thread_motor = None
 thread_lock = threading.Lock()
 
 
-def spinMotorRPM(direction, rpm, ts):
-    print("spin function call")
-
-
-# def spinMotorRPM(direction, rpm, ts):
-#     global sistemaMotor
-#     settings: dict = read_settings_from_file()
-#     pid_cfg: dict = settings.get("pidControllerRPM", {"kp": 0.1, "ki": 0.01, "kd": 0.005})
-#     pid = PIDController(
-#         kp=pid_cfg["kp"],
-#         ki=pid_cfg["ki"],
-#         kd=pid_cfg["kd"],
-#         setpoint=rpm,
-#         output_limits=(pid_cfg.get(min, 14), pid_cfg.get("max", 50)),
-#         ts=ts,
-#     )
-#     current_time = time.perf_counter()
-#     sistemaMotor.avanzar(10) # pyrefly: ignore
-#     while not stop_event.is_set():
-#         raw_data = sistemaMotor.leer_encoder(ts)  # pyrefly:ignore
-#         # print(f"current passed time: {(time.perf_counter() - current_time):.2f}s, ts: {ts}")
-#         rpm_actual = sistemaMotor.get_rpm() # pyrefly:ignore
-#         estado =  sistemaMotor.get_estado()
-#         # print(raw_data)
-#         print(f"rpm: {round(rpm_actual, 2)}, counter: {estado['COUNTER']}")
-#         control_signal = round(pid.compute(rpm_actual), 2)
-#         # control_signal = 10
-#         if direction == "CW":
-#             print(f"Control signal CW: {control_signal}")
-#             sistemaMotor.avanzar(control_signal) # pyrefly: ignore
-#         elif direction == "CCW":
-#             print(f"Control signal CCW: {control_signal}")
-#             sistemaMotor.retroceder(control_signal) # pyrefly: ignore
-#         else:
-#             print("Dirección no válida")
-#             break
-
-#         while (time.perf_counter() - current_time) < ts:
-#             pass
-#         # print(f"current passed time: {(time.perf_counter() - current_time):.2f}s, ts: {ts}")
-#         current_time = time.perf_counter()
-
-#     sistemaMotor.detener() # pyrefly: ignore
-#     print("Motor detenido correctamente")
-
-
 def spinMotorRPM_ramped(
     direction: str,
     setpoint_rpm: float,
@@ -208,19 +162,6 @@ def spinMotorRPM_ramped(
     accel_rpm_s: aceleración/deceleración en RPM/s
     """
     global drv, stop_event
-    # print(
-    #     direction,
-    #     setpoint_rpm,
-    #     ts,
-    #     accel_rpm_s,
-    #     max_rpm,
-    #     soft_stop,
-    #     drv_motor,
-    #     time_exp,
-    #     stop_func,
-    #     drv,
-    #     stop_event,
-    # )
     if drv_motor is not None and drv is None:
         drv = drv_motor
     # Validación de dirección
@@ -248,7 +189,6 @@ def spinMotorRPM_ramped(
     if ts <= 0:
         ts = 0.1  # fallback
     step = float(accel_rpm_s) * ts  # incremento/decremento por ciclo
-    print(f"Rampa: {step:.2f} RPM/ciclo, objetivo: {target} RPM")
     # Bucle principal: acelera hasta objetivo y mantén
     star_time = time.perf_counter()
     while not stop_event.is_set():
@@ -258,7 +198,6 @@ def spinMotorRPM_ramped(
             cur = target
         else:
             cur += step if diff > 0 else -step
-
         # Enviar comando solo si aun no estamos en target
         if diff != 0:
             drv.run_rpm(cur)
@@ -273,11 +212,6 @@ def spinMotorRPM_ramped(
                 print("stop_func indicó que se debe detener, iniciando parada...")
                 break
         time.sleep(ts)
-    print(
-        "stop_event detectado, iniciando parada suave..."
-        if soft_stop
-        else "stop_event detectado, deteniendo motor..."
-    )
     # Al salir por stop_event, opcionalmente desacelera suave a 0
     if soft_stop:
         while abs(cur) > 0.1:
@@ -285,46 +219,40 @@ def spinMotorRPM_ramped(
                 cur = 0.0
             else:
                 cur += -step if cur > 0 else step
-            drv.run_rpm(cur)  # pyrefly: ignore
-            status = drv.get_status()  # pyrefly: ignore
+            drv.run_rpm(cur)  
+            status = drv.get_status()  
             while abs(status.get("rpm")) >= cur*1.1:
-                status = drv.get_status()  # pyrefly: ignore
+                status = drv.get_status()  
                 if int(status.get('rpm')) == 0:
                     break
-                print(f"Desacelerando... rpm actual: {status.get('rpm'):.2f} RPM")
                 time.sleep(ts)
                 
     # # detec position and go to 0°
-    status = drv.get_status()  # pyrefly: ignore
-    
+    status = drv.get_status()  
     while abs(status.get("rpm", 11)) > 10:
-        status = drv.get_status()  # pyrefly: ignore
-        print("status ", status)
+        status = drv.get_status()  
         time.sleep(ts)
-    status = drv.get_status()  # pyrefly: ignore
+    status = drv.get_status()  
     print("rpm actual: ", status.get("rpm"), "pos actual: ", status.get("pos_deg"))
     if status.get('pos_deg') != 0:
         current_pos = status.get('pos_deg')
         current_sign = current_pos / abs(current_pos) if current_pos != 0 else 0
-        drv.run_rpm(-1*current_sign*2)
+        drv.run_rpm(-1*current_sign*15)
         while True:
             status = drv.get_status() 
-            print(f"Posición actual: {status.get('pos_deg'):.2f}°")
             if abs(status.get('pos_deg')) <= 5:
                 break
             sign = status.get('pos_deg') / abs(status.get('pos_deg')) if status.get('pos_deg') != 0 else 0
             if sign != current_sign:
                 current_sign = sign
-                drv.run_rpm(-1*sign*2)
-                print("send signal")
+                drv.run_rpm(-1*sign*15)
             current_pos = status.get('pos_deg')
             time.sleep(ts/5)
-        print("Posición corregida a 0°")
         drv.run_rpm(0)
     
     if drv is not None:
         drv.stop()  
-        status = drv.get_status()  # pyrefly: ignore
+        status = drv.get_status()  
         print(f"Parado--> pos: {status.get('pos_deg'):.2f}°, rpm: {status.get('rpm'):.2f}")
         drv = None if drv_motor is not None else drv
     
@@ -344,7 +272,9 @@ def spinMotorAngle(angle, rpm, max_rpm, n_times=None, flag_continue=False):
     from Drivers.DriverStepperSys import STEPS_PER_REV
 
     global stop_event, drv  # asumiendo que existen en tu entorno
-
+    if drv is None:
+        print("[spinMotorAngle] drv no está inicializado.")
+        return 
     try:
         angle = float(angle)
         rpm = float(rpm)

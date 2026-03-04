@@ -73,6 +73,7 @@ if __name__ == "__main__":
                     thread_graph = threading.Thread(target=graph_data, args=(data_cv,))
                     thread_graph.start()                
                 continue
+            time.sleep(0.0001)
     
     except KeyboardInterrupt:
         print("\nStopped.")
