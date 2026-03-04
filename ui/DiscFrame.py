@@ -304,14 +304,13 @@ def spinMotorRPM_ramped(
     status = drv.get_status()  # pyrefly: ignore
     print("rpm actual: ", status.get("rpm"), "pos actual: ", status.get("pos_deg"))
     if status.get('pos_deg') != 0:
-        drv.run_rpm(5)
-        print(f"Posición actual: {abs(status.get('pos_deg')):.2f}°")
         current_pos = status.get('pos_deg')
         target_post = 0
-        current_sign = -1
+        current_sign = 1 if target_post - current_pos > 0 else -1
+        drv.run_rpm(-1*current_sign*5)
         while True:
             status = drv.get_status() 
-            print(f"Posición actual: {abs(status.get('pos_deg')):.2f}°")
+            print(f"Posición actual: {status.get('pos_deg'):.2f}°")
             if abs(status.get('pos_deg')) <= 5:
                 break
             sign = 1 if target_post - current_pos > 0 else -1
