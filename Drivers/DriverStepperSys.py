@@ -182,6 +182,7 @@ class DriverStepperSys:
         buf = bytearray()
         while self._running:
             try:
+                self.ser.reset_input_buffer()    # Asegura que se envíen los comandos sin demora
                 raw = self.ser.readline()  # lee hasta '\n' o timeout
                 if not raw:
                     continue
