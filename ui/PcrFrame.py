@@ -312,7 +312,6 @@ class PCRFrame(ttk.Frame):
                 )
                 print(sistemaMotor.get_status())
             stop_event_motor.clear()
-            print(f"Starting motor spin at {rpm_setpoint} RPM for 5 seconds")
             # initial spin with expecific time
             spinMotorRPM_ramped(
                 direction,
@@ -325,6 +324,11 @@ class PCRFrame(ttk.Frame):
                 5,
                 stop_func=lambda: stop_event_motor.is_set(),
             )
+            status = sistemaMotor.get_status()
+            while abs(status.get("rpm", 0)) > 0:
+                print("Waiting for motor to stabilize at target RPM...")
+                time.sleep(0.5)
+                status = sistemaMotor.get_status()
             time.sleep(1)
             from Drivers.DriverGPIO import GPIOPin
 

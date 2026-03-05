@@ -1,5 +1,6 @@
 
 # -*- coding: utf-8 -*-
+import datetime
 import json
 import socket
 import threading
@@ -29,6 +30,7 @@ class UdpClient:
         recv_timeout_sec: Optional[float] = None,
         on_message: Optional[Callable[[str, tuple, dict], None]] = None,
         parse_float: bool = False,
+        save_data=True
     ):
         """
         :param port: UDP port to bind.
@@ -48,7 +50,9 @@ class UdpClient:
         self.recv_timeout_sec = recv_timeout_sec
         self.on_message = on_message
         self.parse_float = parse_float
-
+        self.save_data = save_data
+        if save_data:
+            self.initial_file()
         self._sock = None
         self._thread = None
         self._stop_evt = threading.Event()
@@ -139,16 +143,6 @@ class UdpClient:
             except Exception as e:
                 print(f"[UdpClient] recv error: {e}")
                 continue
-                
-            
-            # payload = {
-            #             "type": "temperature",
-            #             "unit": "C",
-            #             "mlx_ambient": None if t_amb is None else round(t_amb, 2),
-            #             "mlx_object": None if t_obj is None else round(t_obj, 2),
-            #             "max31855": None if t_tc is None else round(t_tc, 2),
-            #             "timestamp_ms": time.ticks_ms(),
-            #         }
 
             try:
                 text = data.decode(self.decode, errors="replace").strip()
@@ -186,12 +180,27 @@ class UdpClient:
             # Call user callback if provided
             if self.on_message:
                 try:
+                    if self.save_data:
+                        self.save_data_file()
                     self.on_message(text, addr, self.data_temps)
                 except Exception as e:
                     print(f"[UdpClient] on_message error: {e}")
 
             # Small sleep to avoid burning CPU (optional)
             time.sleep(0.005)
+
+    def initial_file(self, filename="data_temps.txt"):
+        # save header in txt
+        header = "temperature\n"
+        with open(filename, "w") as f:
+            f.write(header)
+
+    def save_data_file(self, filename="data_temps.txt"):
+        # save logs temps in txt
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        line = f"{timestamp}-{self.data_temps['max31855']}\n"
+        with open(filename, "w") as f:
+            f.write(line)
 
     # ---- Convenience getters ----
     def latest_text(self) -> Optional[str]:
