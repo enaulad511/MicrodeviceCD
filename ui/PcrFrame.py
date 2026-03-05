@@ -329,20 +329,20 @@ class PCRFrame(ttk.Frame):
                 print("Waiting for motor to stabilize at target RPM...")
                 time.sleep(0.5)
                 status = sistemaMotor.get_status()
-            time.sleep(1)
-            from Drivers.DriverGPIO import GPIOPin
-
             print("Motor stopped")
+            from Drivers.DriverGPIO import GPIOPin
             self.pin_heating = GPIOPin(
                 led_heatin_pin,
                 chip=chip_rasp,
                 consumer="led-heating-ui",
                 active_low=False,
             )
-            self.pin_heating.set_output(initial_high=False)  # pyrefly: ignore
             # denaturization  process
             # heat to temp
             self.pin_heating.write(True)  # pyrefly: ignore
+            while self.temp < denat_temp:
+                print(f"Temperature: {self.temp} °C")
+                time.sleep(0.5)
             # hold temperature for denat_time seconds
             start_time = time.time()
             current_time = time.time()
@@ -394,7 +394,7 @@ class PCRFrame(ttk.Frame):
                     True,
                     sistemaMotor,
                     stop_func=lambda: stop_event_motor.is_set()
-                    or self.temp <= low_temp,
+                    or abs(self.temp - low_temp) <= 1.5 ,
                 )
                 print(f"Temperature reached: {self.temp} °C")
                 # hold temperature 
@@ -406,12 +406,13 @@ class PCRFrame(ttk.Frame):
                         self.pin_heating.write(False)  # apagar calor
                     else:
                         self.pin_heating.write(True)  # encender calor
-                    time.sleep(0.5)
+                    time.sleep(0.25)
                     current_time = time.time()
                 print(f"Hold complete, end of cycle {current_cycle}")
                 current_cycle += 1
                 # end of cycle
-            self.pin_heating.close()  # pyrefly: ignore
+            self.pin_heating.write(False)
+            self.pin_heating.close()
             print("PCR cycles complete, reading fluorescence")
             # turn on fluorescen LED
             self.pin_pcr = GPIOPin(
@@ -421,14 +422,15 @@ class PCRFrame(ttk.Frame):
                 active_low=False,
             )
             # Preconfigura como salida en bajo
-            self.pin_pcr.set_output(initial_high=False)  # pyrefly: ignore
-            self.pin_pcr.write(True)  # pyrefly: ignore
+            self.pin_pcr.set_output(initial_high=False)  
+            self.pin_pcr.write(True)  
             print("Reading fluorescence...")
-            time.sleep(1)  # tiempo encedido el led de fluorescencia
-            self.pin_pcr.write(False)  # pyrefly: ignore
+            time.sleep(2)  # tiempo encedido el led de fluorescencia
+            self.pin_pcr.write(False)  
             # read fluorescence
             v_fluo = ads.read_voltage(0, averages=4)
             print(f"fluorescence voltage: {v_fluo}")
+            self.pin_pcr.close()
         except Exception as e:
             print(f"exception in experiment: {e}")
         if sistemaMotor is not None:
@@ -453,11 +455,11 @@ class PCRFrame(ttk.Frame):
             sistemaMotor.stop()
             sistemaMotor.close()
         if self.pin_heating is not None:
-            self.pin_heating.write(False)  # pyrefly: ignore
-            self.pin_heating.close()  # pyrefly: ignore
+            self.pin_heating.write(False)  
+            self.pin_heating.close()  
         if self.pin_pcr is not None:
-            self.pin_pcr.write(False)  # pyrefly: ignore
-            self.pin_pcr.close()  # pyrefly: ignore
+            self.pin_pcr.write(False)  
+            self.pin_pcr.close() 
         self.pin_heating = None
         self.pin_pcr = None
         sistemaMotor = None
