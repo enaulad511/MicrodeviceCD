@@ -199,7 +199,7 @@ class UdpClient:
         # save logs temps in txt
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         line = f"{timestamp}-{self.data_temps['max31855']}\n"
-        with open(filename, "w") as f:
+        with open(filename, "a") as f:
             f.write(line)
 
     # ---- Convenience getters ----
