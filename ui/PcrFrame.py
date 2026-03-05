@@ -243,7 +243,7 @@ class PCRFrame(ttk.Frame):
     def update_displayed_temperature(self, text, address, temps_dict):
         temps = [
             temps_dict["mlx_object"],
-            temps_dict["mlx_ambient"],
+            0.0,
             temps_dict["max31855"],
         ]
         msg = f"Temperature: {temps} °C"
