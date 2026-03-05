@@ -278,6 +278,12 @@ class DriverStepperSys:
         self._cmd_set(hz_signed)
         return True
 
+    def go_zero(self,rpm:float):
+        self._cmd_mode(6)
+        self._cmd_set(rpm)
+        return True
+
+
     def stop(self) -> bool:
         """Detiene el movimiento."""
         return self._cmd_stop()

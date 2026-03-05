@@ -120,6 +120,8 @@ def create_widgets_disco_input(parent, callbacks: dict):
     speed_entry.grid(row=1, column=1, padx=5, pady=5, sticky="w")
     entries.append(svar_speed)
 
+    
+
     ttk.Button(
         frame3,
         text="Start Oscillation",
@@ -127,13 +129,34 @@ def create_widgets_disco_input(parent, callbacks: dict):
         command=callbacks.get("callback_oscillator", ()),
     ).grid(row=2, column=0, columnspan=2, pady=5, padx=5, sticky="nswe")
 
-    # Mode 4: Stop
+    # mode 4: go to zero require rpm
+    frame4 = ttk.LabelFrame(parent, text="Go to Zero")
+    frame4.grid(row=1, column=0, padx=10, pady=10, sticky="nswe")
+    frame4.configure(style="Custom.TLabelframe")
+    frame4.columnconfigure((0, 1), weight=1)
+    ttk.Label(frame4, text="RPM for zeroing:", style="Custom.TLabel").grid(
+        row=0, column=0, padx=5, pady=5, sticky="w"
+    )
+    svar_zero_rpm = ttk.StringVar(value="50")
+    zero_rpm_entry = ttk.Entry(
+        frame4, font=font_entry, textvariable=svar_zero_rpm, width=5
+    )
+    zero_rpm_entry.grid(row=0, column=1, padx=5, pady=5, sticky="w")
+    entries.append(svar_zero_rpm)
+    ttk.Button(
+        frame4,
+        text="Go to Zero",
+        style="info.TButton",
+        command=callbacks.get("callback_zero", ()),
+    ).grid(row=1, column=0, columnspan=2, pady=5, padx=5, sticky="nswe")
+    # Mode 5: Stop
     ttk.Button(
         parent,
         text="Stop",
         style="danger.TButton",
         command=callbacks.get("callback_stop", ()),
     ).grid(row=1, column=1, pady=10, padx=5, sticky="nswe")
+
     return entries
 
 
@@ -344,6 +367,26 @@ def spinMotorAngle(angle, rpm, max_rpm, n_times=None, flag_continue=False):
         print("Motor detenido")
 
 
+def spinMotorToZero(rpm, drv_motor=None):
+    global drv, stop_event
+    if drv_motor is not None and drv is None:
+        drv = drv_motor
+    if drv is None:
+        print("[spinMotorToZero] drv no está inicializado.")
+        return
+    print(f"Spin to zero a {rpm} RPM...")
+    while not stop_event.is_set():
+        drv.go_zero(rpm)
+        status = drv.get_status()
+        if abs(status.get("rpm", 0)) <= 10:
+            print(f"Posición cerca de cero alcanzada: {status.get('pos_deg'):.2f}°")
+            break
+    if drv is not None:
+        drv.stop()  
+        status = drv.get_status()  
+        print(f"Parado--> pos: {status.get('pos_deg'):.2f}°, rpm: {status.get('rpm'):.2f}")
+        drv = None if drv_motor is not None else drv
+
 class ControlDiscFrame(ttk.Frame):
     """UI class for manual disc control.
 
@@ -365,6 +408,7 @@ class ControlDiscFrame(ttk.Frame):
             "callback_cycle": self.callback_cycle,
             "callback_oscillator": self.callback_oscillator,
             "callback_stop": self.callback_stop,
+            "callback_zero": self.callback_zero,
         }
         self.entries = create_widgets_disco_input(content_frame, callbacks)
 
@@ -395,6 +439,28 @@ class ControlDiscFrame(ttk.Frame):
             )
             thread_motor.start()
             print(f"Motor {direction} a {rpm_setpoint} RPM iniciado")
+
+    def callback_zero(self):
+        print("Ejecutar función de ir a cero")
+        global thread_motor, drv, stop_event
+        from Drivers.DriverStepperSys import DriverStepperSys
+        rpm_zero = float(self.entries[8].get())
+        with thread_lock:
+            if thread_motor and thread_motor.is_alive():
+                print("Ya hay un hilo activo, no se puede iniciar otro.")
+                return
+            if drv is None:
+                drv = DriverStepperSys(
+                    en_pin=12, enable_active_high=False, uart_port=serial_port_encoder
+                )
+                drv.enable_driver(True)
+            stop_event.clear()
+            thread_motor = threading.Thread(
+                target=spinMotorToZero,
+                args=(rpm_zero, None),
+            )
+            thread_motor.start()
+            print(f"Motor a {rpm_zero} RPM iniciado")
 
     def callback_cycle(self):
         print("Ejecutar ciclo de encendido/apagado")
