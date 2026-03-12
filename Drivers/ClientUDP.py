@@ -67,6 +67,7 @@ class UdpClient:
                     "max31855": None,
                     "unit": "unknown",
                 }
+        self.status_disc = False
 
     def _create_socket(self):
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -146,9 +147,19 @@ class UdpClient:
 
             try:
                 text = data.decode(self.decode, errors="replace").strip()
-                self.data_temps = json.loads(data.decode())
-                self.latest_text = text
-                self._latest_float = float(self.data_temps["max31855"])
+                if "UDP" in text:
+                    data = text.split("UDP:", 1)[1]
+
+                    self.data_temps = json.loads(data.decode())
+                    self.latest_text = text
+                    self._latest_float = float(self.data_temps["max31855"])
+                    self.status_disc = True
+                else:
+                    # check if beacon
+                    data = text.split(":")
+                    if len(data) == 2 and data[0].strip() == "WEMOS_DISCOVERY":
+                        self.status_disc = True
+                    self._latest_float = None
             except Exception:
                 text = str(data)
                 self.data_temps = {
@@ -160,23 +171,10 @@ class UdpClient:
                     "unit": "unknown",
                 }
                 self._latest_float = None
-
+                self.status_disc = False
 
             self._latest_text = text    # pyrefly: ignore
             self._latest_addr = addr
-
-            # if self.parse_float:
-            #     try:
-            #         self._latest_float = float(text)    # pyrefly: ignore
-            #     except Exception:
-            #         self._latest_float = None   # pyrefly: ignore
-
-            # Print basic info
-            # if self.parse_float and self._latest_float is not None:
-            #     print(f"From {addr[0]}:{addr[1]} -> {self._latest_float:.2f}")
-            # else:
-            #     print(f"From {addr[0]}:{addr[1]} -> {text}")
-
             # Call user callback if provided
             if self.on_message:
                 try:
@@ -213,6 +211,8 @@ class UdpClient:
         return self._latest_addr
     def latest_temps(self):
         return self.data_temps
+    def get_status_disc(self):
+        return self.status_disc
 
 
 # Example usage
