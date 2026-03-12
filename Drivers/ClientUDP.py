@@ -149,8 +149,8 @@ class UdpClient:
                 text = data.decode(self.decode, errors="replace").strip()
                 if "UDP" in text:
                     data = text.split("UDP:", 1)[1]
-
-                    self.data_temps = json.loads(data.decode())
+                    print(data)
+                    self.data_temps = json.loads(data)
                     self.latest_text = text
                     self._latest_float = float(self.data_temps["max31855"])
                     self.status_disc = True
