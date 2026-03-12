@@ -241,7 +241,7 @@ class PCRFrame(ttk.Frame):
             print("Error: Verifique los valores ingresados.")
 
     def update_displayed_temperature(self, text, address, temps_dict):
-        print("temps: ", temps_dict)
+        # print("temps: ", temps_dict)
         temps = [
             temps_dict["mlx_object"],
             0.0,
