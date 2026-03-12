@@ -366,9 +366,10 @@ def spinMotorToZero(rpm, drv_motor=None):
         status = drv.get_status()
         rpm_status = [1, 1, abs(status.get("rpm", 1))]
         while sum(abs(x) for x in rpm_status) > 0:
-            time.sleep(0.1)
+            time.sleep(0.5)
             status = drv.get_status()
             rpm_status = rpm_status[1:] + [abs(status.get("rpm", 1))]
+            print(rpm_status)
         break        
     if drv is not None:
         drv.stop()  
