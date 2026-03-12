@@ -238,12 +238,13 @@ def spinMotorRPM_ramped(
     # Al salir por stop_event, opcionalmente desacelera suave a 0
     if soft_stop:
         while abs(cur) > 0.1:
+            diff = 0 - cur
             if abs(cur) <= step:
                 cur = 0.0
             else:
                 cur += -step if cur > 0 else step
             drv.run_rpm(cur)  
-            status = drv.get_status()  
+            status = drv.get_status() 
             while abs(status.get("rpm")) >= cur*1.1:
                 status = drv.get_status()  
                 if int(status.get('rpm')) == 0:
@@ -251,34 +252,19 @@ def spinMotorRPM_ramped(
                 time.sleep(ts)
                 
     # # detec position and go to 0°
+    # got to zero position   
+    drv.go_zero(50)
     status = drv.get_status()  
-    while abs(status.get("rpm", 11)) > 10:
-        status = drv.get_status()  
+    rpm_status = [1, 1, abs(status.get("rpm", 1))]
+    while sum(abs(x) for x in rpm_status) > 0:
         time.sleep(ts)
-    status = drv.get_status()  
-    print("rpm actual: ", status.get("rpm"), "pos actual: ", status.get("pos_deg"))
-    if status.get('pos_deg') != 0:
-        current_pos = status.get('pos_deg')
-        current_sign = current_pos / abs(current_pos) if current_pos != 0 else 0
-        drv.run_rpm(-1*current_sign*15)
-        while True:
-            status = drv.get_status() 
-            if abs(status.get('pos_deg')) <= 5:
-                break
-            sign = status.get('pos_deg') / abs(status.get('pos_deg')) if status.get('pos_deg') != 0 else 0
-            if sign != current_sign:
-                current_sign = sign
-                drv.run_rpm(-1*sign*15)
-            current_pos = status.get('pos_deg')
-            time.sleep(ts/5)
-        drv.run_rpm(0)
-    
+        # rotate rpm status
+        rpm_status = rpm_status[1:] + [abs(drv.get_status().get("rpm", 1))] 
     if drv is not None:
         drv.stop()  
         status = drv.get_status()  
         print(f"Parado--> pos: {status.get('pos_deg'):.2f}°, rpm: {status.get('rpm'):.2f}")
         drv = None if drv_motor is not None else drv
-    
 
 
 def spinMotorAngle(angle, rpm, max_rpm, n_times=None, flag_continue=False):
