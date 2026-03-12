@@ -364,9 +364,13 @@ def spinMotorToZero(rpm, drv_motor=None):
     while not stop_event.is_set():
         drv.go_zero(rpm)
         status = drv.get_status()
-        if abs(status.get("rpm", 0)) <= 10:
+        rpm_status = [1, 1, abs(status.get("rpm", 1))]
+        if sum(abs(x) for x in rpm_status) >0 :
+            rpm_status = rpm_status[1:] + [abs(drv.get_status().get("rpm", 1))] 
+        else:
             print(f"Posición cerca de cero alcanzada: {status.get('pos_deg'):.2f}°")
             break
+        
     if drv is not None:
         drv.stop()  
         status = drv.get_status()  
