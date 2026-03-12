@@ -257,7 +257,7 @@ def spinMotorRPM_ramped(
     status = drv.get_status()  
     rpm_status = [1, 1, abs(status.get("rpm", 1))]
     while sum(abs(x) for x in rpm_status) > 0:
-        time.sleep(ts)
+        time.sleep(0.5)
         # rotate rpm status
         rpm_status = rpm_status[1:] + [abs(drv.get_status().get("rpm", 1))] 
     if drv is not None:

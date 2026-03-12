@@ -199,7 +199,7 @@ class MainGUI(ttk.Window):
         ).grid(row=0, column=2, sticky="e", padx=15, pady=15)
 
         # ----------------------after init ----------------------
-        self.after(1000, self.try_connect_disc)
+        self.after(2000, self.try_connect_disc)
 
     def on_tab_changed(self, event):
         selected_index = self.notebook.index(self.notebook.select())

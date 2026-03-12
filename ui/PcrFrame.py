@@ -312,7 +312,9 @@ class PCRFrame(ttk.Frame):
                 )
                 print(sistemaMotor.get_status())
             stop_event_motor.clear()
+            # -------------------------------------------------------------------
             # initial spin with expecific time
+            # -------------------------------------------------------------------
             spinMotorRPM_ramped(
                 direction,
                 rpm_setpoint,
@@ -329,7 +331,7 @@ class PCRFrame(ttk.Frame):
                 print("Waiting for motor to stabilize at target RPM...")
                 time.sleep(0.5)
                 status = sistemaMotor.get_status()
-            print("Motor stopped")
+
             from Drivers.DriverGPIO import GPIOPin
             self.pin_heating = GPIOPin(
                 led_heatin_pin,
@@ -337,7 +339,9 @@ class PCRFrame(ttk.Frame):
                 consumer="led-heating-ui",
                 active_low=False,
             )
+            # -------------------------------------------------------------------
             # denaturization  process
+            # -------------------------------------------------------------------
             # heat to temp
             self.pin_heating.write(True)  # pyrefly: ignore
             while self.temp < denat_temp:
@@ -359,7 +363,10 @@ class PCRFrame(ttk.Frame):
             current_cycle = 0
             print(f"start cycle {current_cycle}")
             while current_cycle < cycles:
+                # -------------------------------------------------------------------
                 # init cycle
+                # -------------------------------------------------------------------
+                # -------------------------------------------------------------------
                 # reach high temp
                 while True:
                     if self.temp > high_temp +1:  # si se pasa de la temperatura objetivo
@@ -371,7 +378,8 @@ class PCRFrame(ttk.Frame):
                     time.sleep(0.5)
                 self.pin_heating.write(False)  # pyrefly: ignore
                 print(f"Temperature reached: {self.temp} °C")
-                # hold temperature
+                # -------------------------------------------------------------------
+                # hold High temperature
                 print(f"Holding temperature for {time_high} seconds")
                 start_time = time.time()
                 current_time = time.time()
@@ -383,6 +391,7 @@ class PCRFrame(ttk.Frame):
                     time.sleep(0.5)
                     current_time = time.time()
                 print(f"Hold complete, cooling down to {low_temp} °C with motor spin")
+                # -------------------------------------------------------------------
                 # cool down with motor spin
                 stop_event_motor.clear()
                 spinMotorRPM_ramped(
@@ -397,8 +406,9 @@ class PCRFrame(ttk.Frame):
                     or abs(self.temp - low_temp) <= 1.5 ,
                 )
                 print(f"Temperature reached: {self.temp} °C")
-                # hold temperature 
-                print(f"Holding temperature for {time_low} seconds")
+                # -------------------------------------------------------------------
+                # hold LOW temperature 
+                print(f"Holding LOW temperature for {time_low} seconds")
                 start_time = time.time()
                 current_time = time.time()
                 while current_time - start_time < time_low:
