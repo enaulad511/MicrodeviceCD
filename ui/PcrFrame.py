@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 
+from templates.utils import read_settings_from_file
 from templates.constants import chip_rasp
 from Drivers.ClientUDP import UdpClient
 from templates.constants import serial_port_encoder
@@ -305,6 +306,8 @@ class PCRFrame(ttk.Frame):
         from Drivers.DriverStepperSys import DriverStepperSys
 
         try:
+            settings = read_settings_from_file()
+            acceleration = settings.get('acceleration_spin', 200.0)
             direction = "CW"
             rpm_setpoint = rpm
             ts = 0.2
@@ -322,7 +325,7 @@ class PCRFrame(ttk.Frame):
                 direction,
                 rpm_setpoint,
                 ts,
-                100.0,
+                acceleration,
                 1000.0,
                 True,
                 sistemaMotor,
@@ -401,7 +404,7 @@ class PCRFrame(ttk.Frame):
                     direction,
                     rpm_setpoint,
                     ts,
-                    100.0,
+                    acceleration,
                     700.0,
                     True,
                     sistemaMotor,
