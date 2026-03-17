@@ -28,9 +28,10 @@ class UdpClient:
         local_ip: str = "",  # "" => all interfaces; or set to your wlan0 IP
         decode: str = "utf-8",
         recv_timeout_sec: Optional[float] = None,
-        on_message: Optional[Callable[[str, tuple, dict], None]] = None,
+        on_message : Callable[[str, tuple, dict], None] | None = None,
         parse_float: bool = False,
-        save_data=True
+        save_data=True,
+        stop_event = None
     ):
         """
         :param port: UDP port to bind.
@@ -55,7 +56,7 @@ class UdpClient:
             self.initial_file()
         self._sock = None
         self._thread = None
-        self._stop_evt = threading.Event()
+        self._stop_evt = threading.Event() if stop_event is None else stop_event
         self._latest_text = None
         self._latest_float = None
         self._latest_addr = None
@@ -190,7 +191,7 @@ class UdpClient:
     def initial_file(self, filename="data_temps.txt"):
         # save header in txt
         header = "temperature\n"
-        with open(filename, "w") as f:
+        with open(filename, "a") as f:
             f.write(header)
 
     def save_data_file(self, filename="data_temps.txt"):
@@ -222,7 +223,7 @@ if __name__ == "__main__":
     # client.listen_forever()
 
     # Option B: threaded listener with callback
-    def handle_message(text: str, addr: tuple):
+    def handle_message(text: str, addr: tuple, temps_dict: dict):
         # You can parse JSON, write to CSV, update a plot, etc.
         # For your Arduino, payload is a temperature string like "23.58"
         try:

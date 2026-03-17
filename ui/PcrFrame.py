@@ -25,6 +25,7 @@ thread_motor = None
 ads = None
 thread_lock = threading.Lock()
 stop_event_motor = threading.Event()
+stop_udp_listenner = threading.Event()
 
 
 def check_temp_higher(temp, target_temp):
@@ -286,7 +287,7 @@ class PCRFrame(ttk.Frame):
     def experiment_pcr(
         self, high_temp, low_temp, time_high, time_low, rpm, denat_time, denat_temp, cycles, ads
     ):
-        global thread_motor, sistemaMotor, stop_event_motor
+        global thread_motor, sistemaMotor, stop_event_motor, stop_udp_listenner
 
         # cliente temperature
         self.client_temperature = UdpClient(
@@ -296,7 +297,8 @@ class PCRFrame(ttk.Frame):
             local_ip="",  # "" listens on all interfaces (wlan0, eth0, etc.)
             recv_timeout_sec=1.0,  # lets loop check stop flag periodically
             on_message=lambda t, a, t_d: self.update_displayed_temperature(t, a, t_d),
-            parse_float=True,  # Arduino sends a numeric string
+            parse_float=True,  # Arduino sends a numeric string,
+            stop_event=stop_udp_listenner
         )
         self.client_temperature.start()
         # rotate motor ar rpm
@@ -345,8 +347,8 @@ class PCRFrame(ttk.Frame):
             # -------------------------------------------------------------------
             # heat to temp
             self.pin_heating.write(True)  # pyrefly: ignore
-            while self.temp < denat_temp:
-                print(f"Temperature: {self.temp} °C")
+            while self.temp < denat_temp and not stop_udp_listenner.is_set():
+                # print(f"Temperature: {self.temp} °C")
                 time.sleep(0.5)
             # hold temperature for denat_time seconds
             start_time = time.time()
@@ -369,7 +371,7 @@ class PCRFrame(ttk.Frame):
                 # -------------------------------------------------------------------
                 # -------------------------------------------------------------------
                 # reach high temp
-                while True:
+                while True and not stop_udp_listenner.is_set():
                     if self.temp > high_temp +1:  # si se pasa de la temperatura objetivo
                         self.pin_heating.write(False)  # apagar calor
                     elif self.temp < high_temp-1:
@@ -384,7 +386,7 @@ class PCRFrame(ttk.Frame):
                 print(f"Holding temperature for {time_high} seconds")
                 start_time = time.time()
                 current_time = time.time()
-                while current_time - start_time < time_high:
+                while current_time - start_time < time_high and not stop_udp_listenner.is_set():
                     if self.temp > high_temp:  # si se pasa de la temperatura objetivo
                         self.pin_heating.write(False)  # apagar calor
                     else:
@@ -412,7 +414,7 @@ class PCRFrame(ttk.Frame):
                 print(f"Holding LOW temperature for {time_low} seconds")
                 start_time = time.time()
                 current_time = time.time()
-                while current_time - start_time < time_low:
+                while current_time - start_time < time_low and not stop_udp_listenner.is_set():
                     if self.temp < low_temp:  # si se pasa de la temperatura objetivo
                         self.pin_heating.write(False)  # apagar calor
                     else:
@@ -453,10 +455,12 @@ class PCRFrame(ttk.Frame):
         self.pin_heating = None
         self.pin_pcr = None
 
+
     def callback_stop_experiment(self):
-        global sistemaMotor, stop_event_motor
+        global sistemaMotor, stop_event_motor, stop_udp_listenner
         print("Experimento detenido")
         stop_event_motor.set()
+        stop_udp_listenner.set()
         # stop motor
         # stop temperature
         self.client_temperature.stop()

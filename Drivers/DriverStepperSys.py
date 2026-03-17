@@ -3,8 +3,8 @@ from numpy import True_
 import serial
 import threading
 import time
-import gpiod
-from gpiod.line import Direction, Value
+import gpiod    # pyrefly: ignore
+from gpiod.line import Direction, Value # pyrefly: ignore
 
 
 __author__ = "Edisson A. Naula"
@@ -195,34 +195,26 @@ class DriverStepperSys:
                 time.sleep(0.05)
 
     # --------------------- Helpers de protocolo ---------------------
-    def _cmd_mode(self, mode_code: int):
+    def _cmd_mode(self, mode_code: int, value_1:float, value_2:float):
         """Envía MODO:x y espera ACK."""
-        self._send_line(f"MODO:{mode_code}")
-        return True
-
-    def _cmd_set(self, value):
-        """Envía SET:x y espera ACK."""
-        self._send_line(f"SET:{value}")
+        self._send_line(f"MODO:{mode_code}:{value_1}:{value_2}")
         return True
 
     def _cmd_vel(self, hz):
         """Envía VEL:hz y espera ACK."""
-        self._send_line(f"VEL:{hz}")
+        self._send_line(f"VEL:{hz}:0:0")
         return True
 
     def _cmd_stop(self):
         """Envía STOP:0 (y también MODO:3 por robustez)."""
-        self._send_line("STOP:0")
-        # ack1 = self._wait_ack()
-        self._send_line("MODO:3")
-        # ack2 = self._wait_ack()
-        return True or True
+        self._send_line("STOP:0:0:0")
+        return True
 
     # --------------------- API pública de control ---------------------
     def set_default_speed_hz(self, hz: float) -> bool:
         """Ajusta la velocidad por defecto (Hz) para movimientos POS."""
         ack = self._cmd_vel(hz)
-        return ack is not None
+        return ack
 
     def move_degrees(
         self,
@@ -236,13 +228,12 @@ class DriverStepperSys:
         Si 'wait=True', espera hasta que la velocidad reported (|rpm|) sea ~0 (fin del movimiento).
         """
         # MODO POS
-        self._cmd_mode(0) 
+        self._cmd_mode(0, grados, 0) 
         # VEL opcional
         if vel_hz is not None:
             self._cmd_vel(vel_hz)
         # SET grados
-        self._cmd_set(grados)
-        
+        # self._cmd_set(grados)
         if not wait:
             print("out: ", True)
             return True
@@ -268,20 +259,30 @@ class DriverStepperSys:
     def run_rpm(self, rpm: float) -> bool:
         """Velocidad continua en RPM (signo = dirección)."""
         self.ser.reset_output_buffer()
-        self._cmd_mode(1) 
-        self._cmd_set(rpm) 
+        self._cmd_mode(1, rpm, 0) 
+        # self._cmd_set(rpm) 
         return True
 
     def run_hz(self, hz_signed: float) -> bool:
         """Velocidad continua en Hz (signo = dirección)."""
-        self._cmd_mode(2)
-        self._cmd_set(hz_signed)
+        self._cmd_mode(2, hz_signed, 0)
+        # self._cmd_set(hz_signed)
         return True
 
     def go_zero(self,rpm:float):
-        self._cmd_mode(6)
-        self._cmd_set(rpm)
+        self._cmd_mode(6, rpm, 0)
+        # self._cmd_set(rpm)
         return True
+
+    def run_sweep(self, angle:float, rpm:float):
+        rpm_eff = max(min(abs(rpm), abs(200)), 0.0)
+        speed_hz = rpm_eff * (STEPS_PER_REV / 60.0)
+        if speed_hz <= 0.0:
+            drv._cmd_stop()
+            print("[spinMotorAngle] Velocidad resultante = 0 Hz; STOP.")
+            return
+        return drv._cmd_mode(4, angle, speed_hz)
+        
 
 
     def stop(self) -> bool:

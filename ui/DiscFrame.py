@@ -292,28 +292,22 @@ def spinMotorAngle(angle, rpm, max_rpm, n_times=None, flag_continue=False):
         raise ValueError(f"Parámetros inválidos: {e}")
 
     if angle <= 0:
-        drv._cmd_stop()
+        drv.stop()  
         print("[spinMotorAngle] angle <= 0; STOP.")
         return
 
     rpm_eff = max(min(abs(rpm), abs(max_rpm)), 0.0)
     speed_hz = rpm_eff * (STEPS_PER_REV / 60.0)
     if speed_hz <= 0.0:
-        drv._cmd_stop()
+        drv.stop()  
         print("[spinMotorAngle] Velocidad resultante = 0 Hz; STOP.")
         return
 
-    ok = True
-    ok &= bool(drv._cmd_mode(4))
-    ok &= bool(drv._cmd_vel(f"{speed_hz:.3f}"))
-    ok &= bool(drv._cmd_set(f"{float(angle):.3f}"))
-    # if not ok:
-    #     drv._cmd_stop()
-    #     raise RuntimeError("No se recibió ACK en MODO/VEL/SET.")
-
+    drv.run_sweep(angle, speed_hz)
+    
     vel_deg_s = speed_hz * (360.0 / STEPS_PER_REV)
     if vel_deg_s <= 0:
-        drv._cmd_stop()
+        drv.stop()  
         return
 
     T_cycle = (4.0 * abs(angle)) / vel_deg_s
@@ -349,7 +343,7 @@ def spinMotorAngle(angle, rpm, max_rpm, n_times=None, flag_continue=False):
                 print(f"[spinMotorAngle] SWEEP 1 ciclo: ±{angle}°, T≈{T_cycle:.3f}s")
                 _t.sleep(T_cycle)
     finally:
-        drv._cmd_stop()
+        drv.stop()  
         print("Motor detenido")
 
 

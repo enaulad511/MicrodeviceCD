@@ -29,6 +29,7 @@ class TemperatureFrame(ttk.Frame):
         self.temps = []        # Temperaturas
         self.timestamps = []   # Tiempos relativos (s)
         self.client = None
+        self.temps_filter = [20, 20, 20, 20]    # temps for filtering
         # Función para leer temperatura (°C). Si no se pasa, usa simulación.
         self.sensor_reader = self._simulated_reader if sensor_reader == "default" else self._thermocouple_reader
         # Layout base
@@ -250,10 +251,13 @@ class TemperatureFrame(ttk.Frame):
         Usa socket to pico
         """
         if self.client is None:
-            return float("nan")
+            return 20.0
         lf = self.client.latest_float()
+        self.temps_filter.pop(0)
+        self.temps_filter.append(lf)
+        lf = sum(self.temps_filter) / len(self.temps_filter)        
         if lf is None:
-            return float("nan")
+            return 20.0
         return lf
 
 
