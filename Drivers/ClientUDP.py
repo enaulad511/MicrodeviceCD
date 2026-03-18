@@ -31,7 +31,8 @@ class UdpClient:
         on_message : Callable[[str, tuple, dict], None] | None = None,
         parse_float: bool = False,
         save_data=True,
-        stop_event = None
+        stop_event = None,
+        debug = False
     ):
         """
         :param port: UDP port to bind.
@@ -65,10 +66,11 @@ class UdpClient:
                     "timestamp_ms": time.time_ns() // 1_000_000,
                     "mlx_ambient": 0.0,
                     "mlx_object": 0.0,
-                    "max31855": None,
+                    "max31855": 0.0,
                     "unit": "unknown",
                 }
         self.status_disc = False
+        self.debug = debug
 
     def _create_socket(self):
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -148,6 +150,9 @@ class UdpClient:
 
             try:
                 text = data.decode(self.decode, errors="replace").strip()
+                if self.debug:
+                    print(f"[UdpClient] Received raw: {data} from {addr}")
+                    print(f"[UdpClient] Decoded text: '{text}'")
                 if "UDP" in text:
                     data = text.split("UDP:", 1)[1]
                     self.data_temps = json.loads(data)
