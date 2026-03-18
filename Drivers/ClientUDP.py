@@ -191,13 +191,14 @@ class UdpClient:
     def initial_file(self, filename="data_temps.txt"):
         # save header in txt
         header = "temperature\n"
-        with open(filename, "a") as f:
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with open(filename, "w") as f:
             f.write(header)
 
     def save_data_file(self, filename="data_temps.txt"):
         # save logs temps in txt
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        line = f"{timestamp}-{self.data_temps['max31855']}\n"
+        line = f"{timestamp} -- {self.data_temps['max31855']}\n"
         with open(filename, "a") as f:
             f.write(line)
 
