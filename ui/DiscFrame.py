@@ -247,7 +247,7 @@ def spinMotorRPM_ramped(
             status = drv.get_status() 
             while abs(status.get("rpm")) >= cur*1.1:
                 status = drv.get_status()  
-                if int(status.get('rpm')) == 0:
+                if int(status.get('rpm')) < 100:
                     break
                 time.sleep(ts)
                 

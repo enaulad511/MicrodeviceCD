@@ -332,11 +332,11 @@ class PCRFrame(ttk.Frame):
                 5,
                 stop_func=lambda: stop_event_motor.is_set(),
             )
-            status = sistemaMotor.get_status()
-            while abs(status.get("rpm", 0)) > 0:
-                print("Waiting for motor to stabilize at target RPM...")
-                time.sleep(0.5)
-                status = sistemaMotor.get_status()
+            # status = sistemaMotor.get_status()
+            # while abs(status.get("rpm", 0)) > 0:
+            #     print("Waiting for motor to stabilize at target RPM...")
+            #     time.sleep(ts*2)
+            #     status = sistemaMotor.get_status()
 
             from Drivers.DriverGPIO import GPIOPin
             self.pin_heating = GPIOPin(
@@ -352,17 +352,19 @@ class PCRFrame(ttk.Frame):
             self.pin_heating.write(True)  # pyrefly: ignore
             while self.temp < denat_temp and not stop_udp_listenner.is_set():
                 # print(f"Temperature: {self.temp} °C")
-                time.sleep(0.5)
-            # hold temperature for denat_time seconds
+                time.sleep(ts)
+            # hold temperature for denat_time seconds only coounting time when temp is over temp target
             start_time = time.time()
             current_time = time.time()
-            while current_time - start_time < denat_time:
+            passed_time = 0
+            while passed_time < denat_time:
                 if self.temp > denat_temp:  # si se pasa de la temperatura objetivo
                     self.pin_heating.write(False)  # apagar calor
+                    passed_time += ts
                 else:
                     self.pin_heating.write(True)  # encender calor
-                time.sleep(0.2)
-                current_time = time.time()
+                time.sleep(ts)
+                # current_time = time.time()
             self.pin_heating.write(False)  # pyrefly: ignore
             print(f"Denaturation complete, temperature: {self.temp} °C")
             # Preconfigura como salida en bajo
@@ -389,13 +391,15 @@ class PCRFrame(ttk.Frame):
                 print(f"Holding temperature for {time_high} seconds")
                 start_time = time.time()
                 current_time = time.time()
-                while current_time - start_time < time_high and not stop_udp_listenner.is_set():
+                passed_time = 0
+                while passed_time < time_high and not stop_udp_listenner.is_set():
                     if self.temp > high_temp:  # si se pasa de la temperatura objetivo
                         self.pin_heating.write(False)  # apagar calor
+                        passed_time += ts
                     else:
                         self.pin_heating.write(True)  # encender calor
-                    time.sleep(0.2)
-                    current_time = time.time()
+                    time.sleep(ts)
+                    # current_time = time.time()
                 print(f"Hold complete, cooling down to {low_temp} °C with motor spin")
                 self.pin_heating.write(False)  # encender calor
                 # -------------------------------------------------------------------
@@ -410,21 +414,23 @@ class PCRFrame(ttk.Frame):
                     True,
                     sistemaMotor,
                     stop_func=lambda: stop_event_motor.is_set()
-                    or abs(self.temp - low_temp) <= 1.5 ,
+                    or abs(self.temp - low_temp) <= 10.5 ,
                 )
                 print(f"Temperature reached: {self.temp} °C")
                 # -------------------------------------------------------------------
                 # hold LOW temperature 
                 print(f"Holding LOW temperature for {time_low} seconds")
-                start_time = time.time()
-                current_time = time.time()
-                while current_time - start_time < time_low and not stop_udp_listenner.is_set():
+                # start_time = time.time()
+                # current_time = time.time()
+                passed_time = 0
+                while passed_time < time_low and not stop_udp_listenner.is_set():
                     if self.temp < low_temp:  # si se pasa de la temperatura objetivo
                         self.pin_heating.write(True)  # encender calor
+                        passed_time += ts
                     else:
                         self.pin_heating.write(False)  # apagar calor
-                    time.sleep(0.2)
-                    current_time = time.time()
+                    time.sleep(ts)
+                    # current_time = time.time()
                 print(f"Hold complete, end of cycle {current_cycle}")
                 current_cycle += 1
                 # end of cycle
