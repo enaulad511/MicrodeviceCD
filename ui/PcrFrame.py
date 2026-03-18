@@ -462,6 +462,8 @@ class PCRFrame(ttk.Frame):
                     passed_time += ts
                 time.sleep(ts)
             self.pin_heating.write(False)
+            v_fluo_final = ads.read_voltage(0, averages=4)
+            print(f"Final fluorescence voltage: {v_fluo_final}")
             self.pin_pcr.write(False)
             self.pin_heating.close()
             self.pin_pcr.close()
