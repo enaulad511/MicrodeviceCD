@@ -329,7 +329,7 @@ class PCRFrame(ttk.Frame):
                 900.0,
                 True,
                 sistemaMotor,
-                5,
+                15,
                 stop_func=lambda: stop_event_motor.is_set(),
             )
             # status = sistemaMotor.get_status()
@@ -345,6 +345,15 @@ class PCRFrame(ttk.Frame):
                 consumer="led-heating-ui",
                 active_low=False,
             )
+            self.pin_pcr = GPIOPin(
+                led_fluorescence_pin,
+                chip=chip_rasp,
+                consumer="test_pcr",
+                active_low=False,
+            )
+            # Preconfigura como salida en bajo
+            self.pin_pcr.set_output(initial_high=False)  
+            
             # -------------------------------------------------------------------
             # denaturization  process
             # -------------------------------------------------------------------
@@ -434,25 +443,27 @@ class PCRFrame(ttk.Frame):
                 print(f"Hold complete, end of cycle {current_cycle}")
                 current_cycle += 1
                 # end of cycle
-            self.pin_heating.write(False)
-            self.pin_heating.close()
+                self.pin_heating.write(False)
+                time.sleep(1)
+                self.pin_pcr.write(True)
+                time.sleep(2)
+                print("Reading fluorescence...")
+                v_fluo = ads.read_voltage(0, averages=4)
+                self.pin_pcr.write(False)  
+                print(f"fluorescence voltage: {v_fluo}")
+            
             print("PCR cycles complete, reading fluorescence")
-            # turn on fluorescen LED
-            self.pin_pcr = GPIOPin(
-                led_fluorescence_pin,
-                chip=chip_rasp,
-                consumer="test_pcr",
-                active_low=False,
-            )
-            # Preconfigura como salida en bajo
-            self.pin_pcr.set_output(initial_high=False)  
-            self.pin_pcr.write(True)  
-            print("Reading fluorescence...")
-            time.sleep(2)  # tiempo encedido el led de fluorescencia
-            self.pin_pcr.write(False)  
-            # read fluorescence
-            v_fluo = ads.read_voltage(0, averages=4)
-            print(f"fluorescence voltage: {v_fluo}")
+            passed_time = 0
+            while passed_time < 30 and not stop_udp_listenner.is_set():
+                if self.temp < low_temp:  # si se pasa de la temperatura objetivo
+                    self.pin_heating.write(True)  # encender calor
+                else:
+                    self.pin_heating.write(False)  # apagar calor
+                    passed_time += ts
+                time.sleep(ts)
+            self.pin_heating.write(False)
+            self.pin_pcr.write(False)
+            self.pin_heating.close()
             self.pin_pcr.close()
         except Exception as e:
             print(f"exception in experiment: {e}")
