@@ -396,6 +396,7 @@ class PCRFrame(ttk.Frame):
                     if self.temp > high_temp:  # si se pasa de la temperatura objetivo
                         self.pin_heating.write(False)  # apagar calor
                         passed_time += ts
+                        print(f"Temperature: {self.temp} °C, passed_time: {passed_time:.2f} s")
                     else:
                         self.pin_heating.write(True)  # encender calor
                     time.sleep(ts)
@@ -427,8 +428,8 @@ class PCRFrame(ttk.Frame):
                     if self.temp < low_temp:  # si se pasa de la temperatura objetivo
                         self.pin_heating.write(True)  # encender calor
                     else:
-                        passed_time += ts
                         self.pin_heating.write(False)  # apagar calor
+                        passed_time += ts
                     time.sleep(ts)
                     # current_time = time.time()
                 print(f"Hold complete, end of cycle {current_cycle}")
