@@ -58,7 +58,7 @@ class UdpClient:
         self._thread = None
         self._stop_evt = threading.Event() if stop_event is None else stop_event
         self._latest_text = None
-        self._latest_float = None
+        self._latest_float = 20.0
         self._latest_addr = None
         self.data_temps = {
                     "type": "unknown",
@@ -153,7 +153,7 @@ class UdpClient:
                     self.data_temps = json.loads(data)
                     # print(self.data_temps)
                     self.latest_text = text
-                    self._latest_float = float(self.data_temps["max31855"])
+                    self._latest_float = float(self.data_temps.get("max31855", 20.0))
                     self.status_disc = True
             except Exception:
                 text = str(data)
