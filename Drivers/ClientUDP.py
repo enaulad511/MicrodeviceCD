@@ -155,12 +155,6 @@ class UdpClient:
                     self.latest_text = text
                     self._latest_float = float(self.data_temps["max31855"])
                     self.status_disc = True
-                else:
-                    # check if beacon
-                    data = text.split(":")
-                    if len(data) == 2 and data[0].strip() == "WEMOS_DISCOVERY":
-                        self.status_disc = True
-                    self._latest_float = None
             except Exception:
                 text = str(data)
                 self.data_temps = {
