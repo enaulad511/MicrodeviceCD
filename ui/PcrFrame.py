@@ -80,7 +80,7 @@ def create_widgets_pcr(parent, callbacks: dict):
     ).grid(row=len(labels), column=2, columnspan=2, pady=10)
     svar_temperature = ttk.StringVar(value="")
     ttk.Label(frame1, textvariable=svar_temperature, style="Custom.TLabel").grid(
-        row=len(labels) + 1, column=0, padx=5, pady=5, sticky="e"
+        row=len(labels) + 1, column=0, padx=5, pady=5, sticky="nswe"
     )
     entries.append(svar_temperature)  # pyrefly:ignore
     ttk.Button(
