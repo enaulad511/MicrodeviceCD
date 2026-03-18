@@ -104,7 +104,7 @@ class PCRFrame(ttk.Frame):
         self.rowconfigure(0, weight=1)
         self.ads = ads_reader
         self.fase = "Initial"
-        self.ts_display = 0.5
+        self.ts_display = 1
         self.last_display = time.time()
 
         content_frame = ScrolledFrame(self, autohide=True)
