@@ -377,13 +377,13 @@ class PCRFrame(ttk.Frame):
                 # -------------------------------------------------------------------
                 # reach high temp
                 while True and not stop_udp_listenner.is_set():
-                    if self.temp > high_temp +0.1:  # si se pasa de la temperatura objetivo
+                    if self.temp > high_temp-1.1:  # si se pasa de la temperatura objetivo
                         self.pin_heating.write(False)  # apagar calor
-                    elif self.temp < high_temp-0.1:
+                    elif self.temp < high_temp:
                         self.pin_heating.write(True)  # encender calor
                     else:
                         break
-                    time.sleep(0.2)
+                    time.sleep(ts)
                 self.pin_heating.write(False)  # pyrefly: ignore
                 print(f"Temperature reached: {self.temp} °C")
                 # -------------------------------------------------------------------
@@ -395,8 +395,8 @@ class PCRFrame(ttk.Frame):
                 while passed_time < time_high and not stop_udp_listenner.is_set():
                     if self.temp > high_temp:  # si se pasa de la temperatura objetivo
                         self.pin_heating.write(False)  # apagar calor
-                        passed_time += ts
                     else:
+                        passed_time += ts
                         self.pin_heating.write(True)  # encender calor
                     time.sleep(ts)
                     # current_time = time.time()
@@ -414,7 +414,7 @@ class PCRFrame(ttk.Frame):
                     True,
                     sistemaMotor,
                     stop_func=lambda: stop_event_motor.is_set()
-                    or abs(self.temp - low_temp) <= 10.5 ,
+                    or abs(self.temp - low_temp) <= 7.5 ,
                 )
                 print(f"Temperature reached: {self.temp} °C")
                 # -------------------------------------------------------------------
@@ -426,8 +426,8 @@ class PCRFrame(ttk.Frame):
                 while passed_time < time_low and not stop_udp_listenner.is_set():
                     if self.temp < low_temp:  # si se pasa de la temperatura objetivo
                         self.pin_heating.write(True)  # encender calor
-                        passed_time += ts
                     else:
+                        passed_time += ts
                         self.pin_heating.write(False)  # apagar calor
                     time.sleep(ts)
                     # current_time = time.time()
