@@ -104,6 +104,8 @@ class PCRFrame(ttk.Frame):
         self.rowconfigure(0, weight=1)
         self.ads = ads_reader
         self.fase = "Initial"
+        self.ts_display = 0.5
+        self.last_display = time.time()
 
         content_frame = ScrolledFrame(self, autohide=True)
         content_frame.grid(row=0, column=0, sticky="nsew")
@@ -250,7 +252,7 @@ class PCRFrame(ttk.Frame):
             0.0,
             temps_dict["max31855"],
         ]
-        
+
         # print(msg)
         try:
             self.temp = float(
@@ -259,8 +261,9 @@ class PCRFrame(ttk.Frame):
         except Exception as e:
             print(e)
             self.temp = 0.0
-        msg = f"Temperature: {self.temp} °C\n" +f"State: {self.fase}"
-        self.entries[-1].set(msg)  # pyrefly: ignore
+        if time.time() - self.last_display > self.ts_display:
+            msg = f"Temperature: {self.temp} °C\n" + f"State: {self.fase}"
+            self.entries[-1].set(msg)  # pyrefly: ignore
 
     def callback_start_experiment(self):
         if self.running_experiment:
@@ -282,12 +285,31 @@ class PCRFrame(ttk.Frame):
         )
         thread_experiment = threading.Thread(
             target=self.experiment_pcr,
-            args=(high_temp, low_temp, time_high, time_low, rpm,denat_time, denat_temp, cycles, self.ads),
+            args=(
+                high_temp,
+                low_temp,
+                time_high,
+                time_low,
+                rpm,
+                denat_time,
+                denat_temp,
+                cycles,
+                self.ads,
+            ),
         )
         thread_experiment.start()
 
     def experiment_pcr(
-        self, high_temp, low_temp, time_high, time_low, rpm, denat_time, denat_temp, cycles, ads
+        self,
+        high_temp,
+        low_temp,
+        time_high,
+        time_low,
+        rpm,
+        denat_time,
+        denat_temp,
+        cycles,
+        ads,
     ):
         global thread_motor, sistemaMotor, stop_event_motor, stop_udp_listenner
 
@@ -300,7 +322,7 @@ class PCRFrame(ttk.Frame):
             recv_timeout_sec=0.1,  # lets loop check stop flag periodically
             on_message=lambda t, a, t_d: self.update_displayed_temperature(t, a, t_d),
             parse_float=True,  # Arduino sends a numeric string,
-            stop_event=stop_udp_listenner
+            stop_event=stop_udp_listenner,
         )
         self.client_temperature.start()
         # rotate motor ar rpm
@@ -308,10 +330,10 @@ class PCRFrame(ttk.Frame):
 
         try:
             settings = read_settings_from_file()
-            acceleration = float(settings.get('acceleration_spin', 200.0))
+            acceleration = float(settings.get("acceleration_spin", 200.0))
             direction = "CW"
             rpm_setpoint = rpm
-            ts = float(settings.get('ts_pcr', 0.1))
+            ts = float(settings.get("ts_pcr", 0.1))
             if sistemaMotor is None:
                 print("Creating new driver instance")
                 sistemaMotor = DriverStepperSys(
@@ -340,6 +362,7 @@ class PCRFrame(ttk.Frame):
             #     status = sistemaMotor.get_status()
 
             from Drivers.DriverGPIO import GPIOPin
+
             self.pin_heating = GPIOPin(
                 led_heatin_pin,
                 chip=chip_rasp,
@@ -353,8 +376,8 @@ class PCRFrame(ttk.Frame):
                 active_low=False,
             )
             # Preconfigura como salida en bajo
-            self.pin_pcr.set_output(initial_high=False)  
-            
+            self.pin_pcr.set_output(initial_high=False)
+
             # -------------------------------------------------------------------
             # denaturization  process
             # -------------------------------------------------------------------
@@ -368,8 +391,10 @@ class PCRFrame(ttk.Frame):
             start_time = time.time()
             current_time = time.time()
             self.fase = "Denaturation Hold"
-            while current_time-start_time < denat_time:
-                if self.temp > denat_temp+0.5:  # si se pasa de la temperatura objetivo
+            while current_time - start_time < denat_time:
+                if (
+                    self.temp > denat_temp + 0.5
+                ):  # si se pasa de la temperatura objetivo
                     self.pin_heating.write(False)  # apagar calor
                 else:
                     self.pin_heating.write(True)  # encender calor
@@ -389,9 +414,11 @@ class PCRFrame(ttk.Frame):
                 # reach high temp
                 self.fase = "High temp"
                 while True and not stop_udp_listenner.is_set():
-                    if self.temp > high_temp+1.1:  # si se pasa de la temperatura objetivo
+                    if (
+                        self.temp > high_temp + 1.1
+                    ):  # si se pasa de la temperatura objetivo
                         self.pin_heating.write(False)  # apagar calor
-                    elif self.temp < high_temp-5:
+                    elif self.temp < high_temp - 5:
                         self.pin_heating.write(True)  # encender calor
                     else:
                         break
@@ -429,12 +456,12 @@ class PCRFrame(ttk.Frame):
                     True,
                     sistemaMotor,
                     stop_func=lambda: stop_event_motor.is_set()
-                    or abs(self.temp - low_temp) <= 7.5 ,
+                    or abs(self.temp - low_temp) <= 7.5,
                 )
                 print(f"Temperature reached: {self.temp} °C")
                 # -------------------------------------------------------------------
                 # hold LOW temperature
-                self.fase = "LOW temp Hold" 
+                self.fase = "LOW temp Hold"
                 print(f"Holding LOW temperature for {time_low} seconds")
                 # start_time = time.time()
                 # current_time = time.time()
@@ -458,9 +485,9 @@ class PCRFrame(ttk.Frame):
                 self.fase = "Reading Fluorescence"
                 v_fluo = ads.read_voltage(0, averages=4)
                 time.sleep(1)
-                self.pin_pcr.write(False)  
+                self.pin_pcr.write(False)
                 print(f"fluorescence voltage: {v_fluo}")
-            
+
             print("PCR cycles complete, reading fluorescence")
             passed_time = 0
             self.fase = "Extension"
@@ -481,7 +508,7 @@ class PCRFrame(ttk.Frame):
             self.pin_pcr.write(False)
             self.pin_heating.close()
             self.pin_pcr.close()
-        
+
         except Exception as e:
             print(f"exception in experiment: {e}")
         if sistemaMotor is not None:
@@ -492,7 +519,6 @@ class PCRFrame(ttk.Frame):
         self.running_experiment = False
         self.pin_heating = None
         self.pin_pcr = None
-
 
     def callback_stop_experiment(self):
         global sistemaMotor, stop_event_motor, stop_udp_listenner
@@ -508,11 +534,11 @@ class PCRFrame(ttk.Frame):
             sistemaMotor.stop()
             sistemaMotor.close()
         if self.pin_heating is not None:
-            self.pin_heating.write(False)  
-            self.pin_heating.close()  
+            self.pin_heating.write(False)
+            self.pin_heating.close()
         if self.pin_pcr is not None:
-            self.pin_pcr.write(False)  
-            self.pin_pcr.close() 
+            self.pin_pcr.write(False)
+            self.pin_pcr.close()
         self.pin_heating = None
         self.pin_pcr = None
         sistemaMotor = None
