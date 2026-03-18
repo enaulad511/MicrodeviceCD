@@ -165,7 +165,7 @@ class UdpClient:
                     "max31855": 0.0,
                     "unit": "unknown",
                 }
-                self._latest_float = None
+                self._latest_float = 20.0
                 self.status_disc = False
 
             self._latest_text = text    # pyrefly: ignore

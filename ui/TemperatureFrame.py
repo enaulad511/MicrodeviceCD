@@ -122,7 +122,7 @@ class TemperatureFrame(ttk.Frame):
             buffer_size=4096,
             allow_broadcast=True,  # Important for broadcast payloads
             local_ip="",  # "" listens on all interfaces (wlan0, eth0, etc.)
-            recv_timeout_sec=1.0,  # lets loop check stop flag periodically
+            recv_timeout_sec=0.1,  # lets loop check stop flag periodically
             on_message=None,
             parse_float=True,  # Arduino sends a numeric string
         )
