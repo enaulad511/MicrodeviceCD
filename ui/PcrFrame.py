@@ -361,7 +361,7 @@ class PCRFrame(ttk.Frame):
                     self.pin_heating.write(False)  # apagar calor
                 else:
                     self.pin_heating.write(True)  # encender calor
-                time.sleep(0.5)
+                time.sleep(0.2)
                 current_time = time.time()
             self.pin_heating.write(False)  # pyrefly: ignore
             print(f"Denaturation complete, temperature: {self.temp} °C")
@@ -375,13 +375,13 @@ class PCRFrame(ttk.Frame):
                 # -------------------------------------------------------------------
                 # reach high temp
                 while True and not stop_udp_listenner.is_set():
-                    if self.temp > high_temp +1:  # si se pasa de la temperatura objetivo
+                    if self.temp > high_temp +0.1:  # si se pasa de la temperatura objetivo
                         self.pin_heating.write(False)  # apagar calor
-                    elif self.temp < high_temp-1:
+                    elif self.temp < high_temp-0.1:
                         self.pin_heating.write(True)  # encender calor
                     else:
                         break
-                    time.sleep(0.5)
+                    time.sleep(0.2)
                 self.pin_heating.write(False)  # pyrefly: ignore
                 print(f"Temperature reached: {self.temp} °C")
                 # -------------------------------------------------------------------
@@ -394,9 +394,10 @@ class PCRFrame(ttk.Frame):
                         self.pin_heating.write(False)  # apagar calor
                     else:
                         self.pin_heating.write(True)  # encender calor
-                    time.sleep(0.5)
+                    time.sleep(0.2)
                     current_time = time.time()
                 print(f"Hold complete, cooling down to {low_temp} °C with motor spin")
+                self.pin_heating.write(False)  # encender calor
                 # -------------------------------------------------------------------
                 # cool down with motor spin
                 stop_event_motor.clear()
@@ -419,10 +420,10 @@ class PCRFrame(ttk.Frame):
                 current_time = time.time()
                 while current_time - start_time < time_low and not stop_udp_listenner.is_set():
                     if self.temp < low_temp:  # si se pasa de la temperatura objetivo
-                        self.pin_heating.write(False)  # apagar calor
-                    else:
                         self.pin_heating.write(True)  # encender calor
-                    time.sleep(0.25)
+                    else:
+                        self.pin_heating.write(False)  # apagar calor
+                    time.sleep(0.2)
                     current_time = time.time()
                 print(f"Hold complete, end of cycle {current_cycle}")
                 current_cycle += 1
