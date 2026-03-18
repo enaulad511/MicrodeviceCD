@@ -307,10 +307,10 @@ class PCRFrame(ttk.Frame):
 
         try:
             settings = read_settings_from_file()
-            acceleration = settings.get('acceleration_spin', 200.0)
+            acceleration = float(settings.get('acceleration_spin', 200.0))
             direction = "CW"
             rpm_setpoint = rpm
-            ts = settings.get('ts_pcr', 0.1)
+            ts = float(settings.get('ts_pcr', 0.1))
             if sistemaMotor is None:
                 print("Creating new driver instance")
                 sistemaMotor = DriverStepperSys(
@@ -410,7 +410,7 @@ class PCRFrame(ttk.Frame):
                     rpm_setpoint,
                     ts,
                     acceleration,
-                    700.0,
+                    900.0,
                     True,
                     sistemaMotor,
                     stop_func=lambda: stop_event_motor.is_set()
