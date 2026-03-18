@@ -310,7 +310,7 @@ class PCRFrame(ttk.Frame):
             acceleration = settings.get('acceleration_spin', 200.0)
             direction = "CW"
             rpm_setpoint = rpm
-            ts = 0.2
+            ts = settings.get('ts_pcr', 0.1)
             if sistemaMotor is None:
                 print("Creating new driver instance")
                 sistemaMotor = DriverStepperSys(
@@ -326,7 +326,7 @@ class PCRFrame(ttk.Frame):
                 rpm_setpoint,
                 ts,
                 acceleration,
-                1000.0,
+                900.0,
                 True,
                 sistemaMotor,
                 5,
@@ -356,14 +356,13 @@ class PCRFrame(ttk.Frame):
             # hold temperature for denat_time seconds only coounting time when temp is over temp target
             start_time = time.time()
             current_time = time.time()
-            passed_time = 0
-            while passed_time < denat_time:
+            while current_time-start_time < denat_time:
                 if self.temp > denat_temp:  # si se pasa de la temperatura objetivo
                     self.pin_heating.write(False)  # apagar calor
-                    passed_time += ts
                 else:
                     self.pin_heating.write(True)  # encender calor
                 time.sleep(ts)
+                current_time = time.time()
                 # current_time = time.time()
             self.pin_heating.write(False)  # pyrefly: ignore
             print(f"Denaturation complete, temperature: {self.temp} °C")
@@ -396,7 +395,7 @@ class PCRFrame(ttk.Frame):
                     if self.temp > high_temp:  # si se pasa de la temperatura objetivo
                         self.pin_heating.write(False)  # apagar calor
                         passed_time += ts
-                        print(f"Temperature: {self.temp} °C, passed_time: {passed_time:.2f} s")
+                        # print(f"Temperature: {self.temp} °C, passed_time: {passed_time:.2f} s")
                     else:
                         self.pin_heating.write(True)  # encender calor
                     time.sleep(ts)
