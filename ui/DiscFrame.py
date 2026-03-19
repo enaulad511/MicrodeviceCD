@@ -443,6 +443,9 @@ class ControlDiscFrame(ttk.Frame):
                     acceleration,
                     1000.0,
                     True,
+                    None,
+                    None,
+                    None,
                     self.stop_event,
                 ),
             )
