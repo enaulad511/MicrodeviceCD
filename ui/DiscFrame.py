@@ -13,9 +13,6 @@ __author__ = "Edisson A. Naula"
 __date__ = "$ 08/10/2025  at 11:11 a.m. $"
 
 
-stop_event = threading.Event()
-
-
 def create_widgets_disco_input(parent, callbacks: dict):
     entries = []
     parent.columnconfigure((0, 1), weight=1)
@@ -120,8 +117,6 @@ def create_widgets_disco_input(parent, callbacks: dict):
     speed_entry.grid(row=1, column=1, padx=5, pady=5, sticky="w")
     entries.append(svar_speed)
 
-    
-
     ttk.Button(
         frame3,
         text="Start Oscillation",
@@ -176,6 +171,7 @@ def spinMotorRPM_ramped(
     drv_motor=None,
     time_exp=None,
     stop_func=None,  # stop function for checking if stop is required, return boolean
+    stop_event=None,
 ):
     """
     Gira el motor con rampa de aceleración en RPM hasta 'setpoint_rpm' (limitado a 1000 RPM).
@@ -184,9 +180,12 @@ def spinMotorRPM_ramped(
     ts: periodo de actualización en segundos (ej. 0.02 a 0.05)
     accel_rpm_s: aceleración/deceleración en RPM/s
     """
-    global drv, stop_event
+    global drv
     if drv_motor is not None and drv is None:
         drv = drv_motor
+    if stop_event is None:
+        print("Error: stop_event no proporcionado, se requiere para control de parada.")
+        return False
     # Validación de dirección
     d = direction.strip().upper()
     if d not in ("CW", "CCW"):
@@ -200,10 +199,10 @@ def spinMotorRPM_ramped(
     if drv is None:
         print("Error: drv no está inicializado.")
         return
-    drv.set_init_vals(pos_deg=0.0, rpm=0.0) 
+    drv.set_init_vals(pos_deg=0.0, rpm=0.0)
     # Punto de arranque (intenta leer del estado, si no asume 0)
     try:
-        cur = float(drv.get_status().get("rpm", 0.0))  
+        cur = float(drv.get_status().get("rpm", 0.0))
     except Exception:
         cur = 0.0
 
@@ -243,31 +242,35 @@ def spinMotorRPM_ramped(
                 cur = 0.0
             else:
                 cur += -step if cur > 0 else step
-            drv.run_rpm(cur)  
-            status = drv.get_status() 
-            while abs(status.get("rpm")) >= cur*1.1:
-                status = drv.get_status()  
-                if int(status.get('rpm')) < 100:
+            drv.run_rpm(cur)
+            status = drv.get_status()
+            while abs(status.get("rpm")) >= cur * 1.1:
+                status = drv.get_status()
+                if int(status.get("rpm")) < 100:
                     break
                 time.sleep(ts)
-                
+
     # # detec position and go to 0°
-    # got to zero position   
+    # got to zero position
     drv.go_zero(50)
-    status = drv.get_status()  
+    status = drv.get_status()
     rpm_status = [1, 1, abs(status.get("rpm", 1))]
     while sum(abs(x) for x in rpm_status) > 0:
         time.sleep(0.5)
         # rotate rpm status
-        rpm_status = rpm_status[1:] + [abs(drv.get_status().get("rpm", 1))] 
+        rpm_status = rpm_status[1:] + [abs(drv.get_status().get("rpm", 1))]
     if drv is not None:
-        drv.stop()  
-        status = drv.get_status()  
-        print(f"Parado--> pos: {status.get('pos_deg'):.2f}°, rpm: {status.get('rpm'):.2f}")
+        drv.stop()
+        status = drv.get_status()
+        print(
+            f"Parado--> pos: {status.get('pos_deg'):.2f}°, rpm: {status.get('rpm'):.2f}"
+        )
         drv = None if drv_motor is not None else drv
 
 
-def spinMotorAngle(angle, rpm, max_rpm, n_times=None, flag_continue=False):
+def spinMotorAngle(
+    angle, rpm, max_rpm, n_times=None, flag_continue=False, stop_event=None
+):
     """
     Versión global que usa los helpers del objeto global 'drv':
       - drv._cmd_mode(4)
@@ -280,10 +283,15 @@ def spinMotorAngle(angle, rpm, max_rpm, n_times=None, flag_continue=False):
     import time as _t
     from Drivers.DriverStepperSys import STEPS_PER_REV
 
-    global stop_event, drv  # asumiendo que existen en tu entorno
+    global drv  # asumiendo que existen en tu entorno
     if drv is None:
         print("[spinMotorAngle] drv no está inicializado.")
-        return 
+        return
+    if stop_event is None:
+        print(
+            "[spinMotorAngle] stop_event no proporcionado, se requiere para control de parada."
+        )
+        return
     try:
         angle = float(angle)
         rpm = float(rpm)
@@ -292,22 +300,22 @@ def spinMotorAngle(angle, rpm, max_rpm, n_times=None, flag_continue=False):
         raise ValueError(f"Parámetros inválidos: {e}")
 
     if angle <= 0:
-        drv.stop()  
+        drv.stop()
         print("[spinMotorAngle] angle <= 0; STOP.")
         return
 
     rpm_eff = max(min(abs(rpm), abs(max_rpm)), 0.0)
     speed_hz = rpm_eff * (STEPS_PER_REV / 60.0)
     if speed_hz <= 0.0:
-        drv.stop()  
+        drv.stop()
         print("[spinMotorAngle] Velocidad resultante = 0 Hz; STOP.")
         return
 
     drv.run_sweep(angle, speed_hz)
-    
+
     vel_deg_s = speed_hz * (360.0 / STEPS_PER_REV)
     if vel_deg_s <= 0:
-        drv.stop()  
+        drv.stop()
         return
 
     T_cycle = (4.0 * abs(angle)) / vel_deg_s
@@ -343,14 +351,17 @@ def spinMotorAngle(angle, rpm, max_rpm, n_times=None, flag_continue=False):
                 print(f"[spinMotorAngle] SWEEP 1 ciclo: ±{angle}°, T≈{T_cycle:.3f}s")
                 _t.sleep(T_cycle)
     finally:
-        drv.stop()  
+        drv.stop()
         print("Motor detenido")
 
 
-def spinMotorToZero(rpm, drv_motor=None):
-    global drv, stop_event
+def spinMotorToZero(rpm, drv_motor=None, stop_event=None):
+    global drv
     if drv_motor is not None and drv is None:
         drv = drv_motor
+    if stop_event is None:
+        print("[spinMotorToZero] stop_event no proporcionado.")
+        return
     if drv is None:
         print("[spinMotorToZero] drv no está inicializado.")
         return
@@ -364,12 +375,15 @@ def spinMotorToZero(rpm, drv_motor=None):
             status = drv.get_status()
             rpm_status = rpm_status[1:] + [abs(status.get("rpm", 1))]
             print(rpm_status)
-        break        
+        break
     if drv is not None:
-        drv.stop()  
-        status = drv.get_status()  
-        print(f"Parado--> pos: {status.get('pos_deg'):.2f}°, rpm: {status.get('rpm'):.2f}")
+        drv.stop()
+        status = drv.get_status()
+        print(
+            f"Parado--> pos: {status.get('pos_deg'):.2f}°, rpm: {status.get('rpm'):.2f}"
+        )
         drv = None if drv_motor is not None else drv
+
 
 class ControlDiscFrame(ttk.Frame):
     """UI class for manual disc control.
@@ -395,9 +409,10 @@ class ControlDiscFrame(ttk.Frame):
             "callback_zero": self.callback_zero,
         }
         self.entries = create_widgets_disco_input(content_frame, callbacks)
+        self.stop_event = None
 
     def callback_spin(self):
-        global thread_motor, drv, stop_event
+        global thread_motor, drv
         from Drivers.DriverStepperSys import DriverStepperSys
 
         with thread_lock:
@@ -405,29 +420,43 @@ class ControlDiscFrame(ttk.Frame):
                 print("Ya hay un hilo activo, no se puede iniciar otro.")
                 return
             settings = read_settings_from_file()
-            
+
             direction = self.entries[0].get()
             rpm_setpoint = float(self.entries[1].get())
-            ts = settings.get('ts_spin', 0.1)
+            ts = settings.get("ts_spin", 0.1)
             if drv is None:
                 drv = DriverStepperSys(
                     en_pin=12, enable_active_high=False, uart_port=serial_port_encoder
                 )
                 drv.enable_driver(True)
-            stop_event.clear()
+            self.stop_event = (
+                threading.Event() if self.stop_event is None else self.stop_event
+            )
             settings = read_settings_from_file()
-            acceleration = settings.get('acceleration_spin', 200.0)
+            acceleration = settings.get("acceleration_spin", 200.0)
             thread_motor = threading.Thread(
                 target=spinMotorRPM_ramped,
-                args=(direction, rpm_setpoint, ts, acceleration, 1000.0, True),
+                args=(
+                    direction,
+                    rpm_setpoint,
+                    ts,
+                    acceleration,
+                    1000.0,
+                    True,
+                    self.stop_event,
+                ),
             )
             thread_motor.start()
-            print(f"Motor {direction} a {rpm_setpoint} RPM iniciado", f"con aceleración {acceleration} RPM/s")
+            print(
+                f"Motor {direction} a {rpm_setpoint} RPM iniciado",
+                f"con aceleración {acceleration} RPM/s",
+            )
 
     def callback_zero(self):
         print("Ejecutar función de ir a cero")
-        global thread_motor, drv, stop_event
+        global thread_motor, drv
         from Drivers.DriverStepperSys import DriverStepperSys
+
         rpm_zero = float(self.entries[8].get())
         with thread_lock:
             if thread_motor and thread_motor.is_alive():
@@ -438,10 +467,12 @@ class ControlDiscFrame(ttk.Frame):
                     en_pin=12, enable_active_high=False, uart_port=serial_port_encoder
                 )
                 drv.enable_driver(True)
-            stop_event.clear()
+            self.stop_event = (
+                threading.Event() if self.stop_event is None else self.stop_event
+            )
             thread_motor = threading.Thread(
                 target=spinMotorToZero,
-                args=(rpm_zero, None),
+                args=(rpm_zero, None, self.stop_event),
             )
             thread_motor.start()
             print(f"Motor a {rpm_zero} RPM iniciado")
@@ -450,7 +481,7 @@ class ControlDiscFrame(ttk.Frame):
         print("Ejecutar ciclo de encendido/apagado")
 
     def callback_oscillator(self):
-        global thread_motor, drv, stop_event
+        global thread_motor, drv
         from Drivers.DriverStepperSys import DriverStepperSys
 
         settings: dict = read_settings_from_file()
@@ -472,18 +503,30 @@ class ControlDiscFrame(ttk.Frame):
                     en_pin=12, enable_active_high=False, uart_port=serial_port_encoder
                 )
                 drv.enable_driver(True)
-            stop_event.clear()
+            self.stop_event = (
+                threading.Event() if self.stop_event is None else self.stop_event
+            )
             thread_motor = threading.Thread(
                 target=spinMotorAngle,
-                args=(angle, speed_percentage * max_rpm / 100, max_rpm, None, True),
+                args=(
+                    angle,
+                    speed_percentage * max_rpm / 100,
+                    max_rpm,
+                    None,
+                    True,
+                    self.stop_event,
+                ),
             )
             thread_motor.start()
             print("Modo oscilador iniciado")
 
     def callback_stop(self):
-        global thread_motor, drv, stop_event
+        global thread_motor, drv
         print("Deteniendo motor...")
-        stop_event.set()
+        if self.stop_event is None:
+            print("No hay evento de parada definido.")
+            return
+        self.stop_event.set()
         if thread_motor:
             thread_motor.join()
         if drv is not None:
@@ -492,4 +535,4 @@ class ControlDiscFrame(ttk.Frame):
             drv = None
             print("released resources")
         print("Hilo detenido")
-        stop_event.clear()
+        self.stop_event = None

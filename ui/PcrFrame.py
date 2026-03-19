@@ -25,8 +25,6 @@ sistemaMotor = None
 thread_motor = None
 ads = None
 thread_lock = threading.Lock()
-stop_event_motor = threading.Event()
-stop_udp_listenner = threading.Event()
 
 
 def check_temp_higher(temp, target_temp):
@@ -106,6 +104,8 @@ class PCRFrame(ttk.Frame):
         self.fase = "Initial"
         self.ts_display = 1
         self.last_display = time.time()
+        self.stop_event_motor = None
+        self.stop_udp_listenner = None
 
         content_frame = ScrolledFrame(self, autohide=True)
         content_frame.grid(row=0, column=0, sticky="nsew")
@@ -311,9 +311,13 @@ class PCRFrame(ttk.Frame):
         cycles,
         ads,
     ):
-        global thread_motor, sistemaMotor, stop_event_motor, stop_udp_listenner
-
+        global thread_motor, sistemaMotor
         # cliente temperature
+        self.stop_udp_listenner = (
+            threading.Event()
+            if self.stop_udp_listenner is None
+            else self.stop_udp_listenner
+        )
         self.client_temperature = UdpClient(
             port=5005,
             buffer_size=4096,
@@ -322,7 +326,7 @@ class PCRFrame(ttk.Frame):
             recv_timeout_sec=0.1,  # lets loop check stop flag periodically
             on_message=lambda t, a, t_d: self.update_displayed_temperature(t, a, t_d),
             parse_float=True,  # Arduino sends a numeric string,
-            stop_event=stop_udp_listenner,
+            stop_event=self.stop_udp_listenner,
         )
         self.client_temperature.start()
         # rotate motor ar rpm
@@ -340,7 +344,11 @@ class PCRFrame(ttk.Frame):
                     en_pin=12, enable_active_high=False, uart_port=serial_port_encoder
                 )
                 print(sistemaMotor.get_status())
-            stop_event_motor.clear()
+            self.stop_event_motor = (
+                threading.Event()
+                if self.stop_event_motor is None
+                else self.stop_event_motor
+            )
             # -------------------------------------------------------------------
             # initial spin with expecific time
             # -------------------------------------------------------------------
@@ -353,14 +361,9 @@ class PCRFrame(ttk.Frame):
                 True,
                 sistemaMotor,
                 15,
-                stop_func=lambda: stop_event_motor.is_set(),
+                stop_func=lambda: self.stop_event_motor.is_set(),
+                stop_event=self.stop_event_motor,
             )
-            # status = sistemaMotor.get_status()
-            # while abs(status.get("rpm", 0)) > 0:
-            #     print("Waiting for motor to stabilize at target RPM...")
-            #     time.sleep(ts*2)
-            #     status = sistemaMotor.get_status()
-
             from Drivers.DriverGPIO import GPIOPin
 
             self.pin_heating = GPIOPin(
@@ -384,7 +387,7 @@ class PCRFrame(ttk.Frame):
             # heat to temp
             self.fase = "Denaturation"
             self.pin_heating.write(True)  # pyrefly: ignore
-            while self.temp < denat_temp and not stop_udp_listenner.is_set():
+            while self.temp < denat_temp and not self.stop_udp_listenner.is_set():
                 # print(f"Temperature: {self.temp} °C")
                 time.sleep(ts)
             # hold temperature for denat_time seconds only coounting time when temp is over temp target
@@ -413,7 +416,7 @@ class PCRFrame(ttk.Frame):
                 # -------------------------------------------------------------------
                 # reach high temp
                 self.fase = "High temp"
-                while True and not stop_udp_listenner.is_set():
+                while True and not self.stop_udp_listenner.is_set():
                     if (
                         self.temp > high_temp + 1.1
                     ):  # si se pasa de la temperatura objetivo
@@ -432,7 +435,7 @@ class PCRFrame(ttk.Frame):
                 start_time = time.time()
                 current_time = time.time()
                 passed_time = 0
-                while passed_time < time_high and not stop_udp_listenner.is_set():
+                while passed_time < time_high and not self.stop_udp_listenner.is_set():
                     if self.temp > high_temp:  # si se pasa de la temperatura objetivo
                         self.pin_heating.write(False)  # apagar calor
                         passed_time += ts
@@ -446,7 +449,7 @@ class PCRFrame(ttk.Frame):
                 # -------------------------------------------------------------------
                 # cool down with motor spin
                 self.fase = "Cooling"
-                stop_event_motor.clear()
+                self.stop_event_motor.clear()
                 spinMotorRPM_ramped(
                     direction,
                     rpm_setpoint,
@@ -455,8 +458,9 @@ class PCRFrame(ttk.Frame):
                     900.0,
                     True,
                     sistemaMotor,
-                    stop_func=lambda: stop_event_motor.is_set()
+                    stop_func=lambda: self.stop_event_motor.is_set()
                     or abs(self.temp - low_temp) <= 7.5,
+                    stop_event=self.stop_event_motor,
                 )
                 print(f"Temperature reached: {self.temp} °C")
                 # -------------------------------------------------------------------
@@ -466,7 +470,7 @@ class PCRFrame(ttk.Frame):
                 # start_time = time.time()
                 # current_time = time.time()
                 passed_time = 0
-                while passed_time < time_low and not stop_udp_listenner.is_set():
+                while passed_time < time_low and not self.stop_udp_listenner.is_set():
                     if self.temp < low_temp:  # si se pasa de la temperatura objetivo
                         self.pin_heating.write(True)  # encender calor
                     else:
@@ -491,7 +495,7 @@ class PCRFrame(ttk.Frame):
             print("PCR cycles complete, reading fluorescence")
             passed_time = 0
             self.fase = "Extension"
-            while passed_time < 30 and not stop_udp_listenner.is_set():
+            while passed_time < 30 and not self.stop_udp_listenner.is_set():
                 if self.temp < low_temp:  # si se pasa de la temperatura objetivo
                     self.pin_heating.write(True)  # encender calor
                 else:
@@ -521,10 +525,16 @@ class PCRFrame(ttk.Frame):
         self.pin_pcr = None
 
     def callback_stop_experiment(self):
-        global sistemaMotor, stop_event_motor, stop_udp_listenner
+        global sistemaMotor
         print("Experimento detenido")
-        stop_event_motor.set()
-        stop_udp_listenner.set()
+        if self.stop_event_motor is None:
+            print("No experiment running")
+            return
+        if self.stop_udp_listenner is None:
+            print("No experiment running")
+            return
+        self.stop_event_motor.set()
+        self.stop_udp_listenner.set()
         # stop motor
         # stop temperature
         self.client_temperature.stop()
@@ -541,4 +551,5 @@ class PCRFrame(ttk.Frame):
             self.pin_pcr.close()
         self.pin_heating = None
         self.pin_pcr = None
-        sistemaMotor = None
+        self.stop_event_motor = None
+        self.stop_udp_listenner = None

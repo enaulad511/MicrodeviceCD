@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-from numpy import True_
 import serial
 import threading
 import time
@@ -87,7 +86,7 @@ class DriverStepperSys:
         }
 
         self._running = True
-        self._rx_thread = threading.Thread(target=self._reader_loop, daemon=True)
+        self._rx_thread = threading.Thread(target=self._reader_loop, daemon=False)
         self._rx_thread.start()
 
         # Si usas ENABLE activo en bajo, al iniciar lo ponemos deshabilitado (HIGH)
@@ -121,24 +120,6 @@ class DriverStepperSys:
         data = s.encode("utf-8", errors="ignore")
         with self._wlock:
             self.ser.write(data)
-
-    def _wait_ack(self, timeout=None):
-        """
-        Espera un ACK (línea que empieza con 'ACK:') hasta timeout.
-        Devuelve la cadena ACK o None si expira.
-        """
-        self._ack_event.clear()
-        # Prevenir caso en que _reader_loop ya leyó un ACK justo antes
-        if self._last_ack is not None:
-            ack = self._last_ack
-            self._last_ack = None
-            return ack
-
-        if not self._ack_event.wait(timeout or self.ack_timeout):
-            return None
-        ack = self._last_ack
-        self._last_ack = None
-        return ack
 
     def _handle_line(self, line: str):
         if not line:
@@ -178,7 +159,6 @@ class DriverStepperSys:
         return
 
     def _reader_loop(self):
-        buf = bytearray()
         while self._running:
             try:
                 self.ser.reset_input_buffer()    # Asegura que se envíen los comandos sin demora
@@ -260,30 +240,25 @@ class DriverStepperSys:
         """Velocidad continua en RPM (signo = dirección)."""
         self.ser.reset_output_buffer()
         self._cmd_mode(1, rpm, 0) 
-        # self._cmd_set(rpm) 
         return True
 
     def run_hz(self, hz_signed: float) -> bool:
         """Velocidad continua en Hz (signo = dirección)."""
         self._cmd_mode(2, hz_signed, 0)
-        # self._cmd_set(hz_signed)
         return True
 
     def go_zero(self,rpm:float):
         self._cmd_mode(6, rpm, 0)
-        # self._cmd_set(rpm)
         return True
 
     def run_sweep(self, angle:float, rpm:float):
         rpm_eff = max(min(abs(rpm), abs(200)), 0.0)
         speed_hz = rpm_eff * (STEPS_PER_REV / 60.0)
         if speed_hz <= 0.0:
-            drv._cmd_stop()
+            self._cmd_stop()
             print("[spinMotorAngle] Velocidad resultante = 0 Hz; STOP.")
             return
-        return drv._cmd_mode(4, angle, speed_hz)
-        
-
+        return self._cmd_mode(4, angle, speed_hz)
 
     def stop(self) -> bool:
         """Detiene el movimiento."""
@@ -307,26 +282,57 @@ class DriverStepperSys:
             }
             return data_out
 
+    # def close(self):
+    #     """Cierra UART y libera recursos GPIO."""
+    #     self._running = False
+    #     try:
+    #         if self._rx_thread.is_alive():
+    #             self._rx_thread.join(timeout=0.5)
+    #     except Exception:
+    #         pass
+    #     try:
+    #         self.ser.close()
+    #     except Exception:
+    #         pass
+    #     try:
+    #         if self._gpio_request is not None:
+    #             # Deshabilitar el driver al cerrar (seguro)
+    #             self.enable_driver(False)
+    #             self._gpio_request.release()
+    #     except Exception:
+    #         pass
     def close(self):
         """Cierra UART y libera recursos GPIO."""
         self._running = False
+        # Señal clara al hilo de RX (si usa Event, setéalo aquí)
+
+        # 1) Esperar fin del hilo de RX determinísticamente
+        t = getattr(self, "_rx_thread", None)
+        if t and t.is_alive():
+            t.join(timeout=2.0)  # más generoso
+        self._rx_thread = None
+
+        # 2) Cerrar serial
+        ser = getattr(self, "ser", None)
+        if ser:
+            try:
+                if getattr(ser, "is_open", False):
+                    ser.close()
+            except Exception:
+                pass
+        self.ser = None
+
+        # 3) GPIO seguro
         try:
-            if self._rx_thread.is_alive():
-                self._rx_thread.join(timeout=0.5)
+            self.enable_driver(False)
         except Exception:
             pass
         try:
-            self.ser.close()
-        except Exception:
-            pass
-        try:
-            if self._gpio_request is not None:
-                # Deshabilitar el driver al cerrar (seguro)
-                self.enable_driver(False)
+            if getattr(self, "_gpio_request", None) is not None and self._gpio_request:
                 self._gpio_request.release()
         except Exception:
             pass
-
+        self._gpio_request = None
     # Context manager
     def __enter__(self):
         return self

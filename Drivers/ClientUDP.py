@@ -151,7 +151,7 @@ class UdpClient:
             try:
                 text = data.decode(self.decode, errors="replace").strip()
                 if self.debug:
-                    print(f"[UdpClient] Received raw: {data} from {addr}")
+                    # print(f"[UdpClient] Received raw: {data} from {addr}")
                     print(f"[UdpClient] Decoded text: '{text}'")
                 if "UDP" in text:
                     data = text.split("UDP:", 1)[1]
@@ -190,7 +190,6 @@ class UdpClient:
     def initial_file(self, filename="data_temps.txt"):
         # save header in txt
         header = "temperature\n"
-        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         with open(filename, "w") as f:
             f.write(header)
 
