@@ -99,7 +99,7 @@ class PhotoreceptorFrame(ttk.Frame):
         self.timestamps.append(timestamp - self.start_time)
 
         self.actualizar_grafico()
-        print(f"Intensity: {intensidad:.2f}, Timestamp: {timestamp:.2f}")
+        # print(f"Intensity: {intensidad:.2f}, Timestamp: {timestamp:.2f}")
 
         try:
             intervalo = int(self.interval_entry.get())
