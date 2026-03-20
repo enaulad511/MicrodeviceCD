@@ -1,38 +1,64 @@
 import time
+from typing import Dict, List, Literal, Optional, Tuple
+
+# --- Compatibilidad de imports según versión de la librería Adafruit ---
+try:
+    # Algunos entornos exponen todo en el paquete raíz:
+    from adafruit_ads1x15 import ADS1115, ads1x15
+    from adafruit_ads1x15.ads1x15 import Mode
+    try:
+        # AnalogIn a veces está en el paquete raíz:
+        from adafruit_ads1x15 import AnalogIn  # type: ignore
+    except ImportError:
+        # O en el submódulo analog_in:
+        from adafruit_ads1x15.analog_in import AnalogIn  # type: ignore
+except Exception:
+    # Alternativa clásica (más común en versiones recientes)
+    from adafruit_ads1x15.ads1115 import ADS1115  # type: ignore
+    from adafruit_ads1x15.ads1x15 import Mode, ads1x15  # type: ignore
+    from adafruit_ads1x15.analog_in import AnalogIn  # type: ignore
+
+# Placas CircuitPython / Blinka
 import board
 import busio
-from typing import List, Literal, Optional
 
-from adafruit_ads1x15 import ADS1115, AnalogIn, ads1x15
-from adafruit_ads1x15.ads1x15 import Mode
+__author__ = "Edisson Naula (actualizado)"
+__date__ = "$ 20/03/2026 $"
 
-__author__ = "Edisson Naula"
-__date__ = "$ 19/02/2026 at 12:51 $"
-
-# Tipo para canal: 0..3
+# Tipos
 Channel = Literal[0, 1, 2, 3]
+DiffPair = Tuple[Channel, Channel]
+
 
 class Ads1115Reader:
     """
-    Envoltura (wrapper) POO sobre adafruit-circuitpython-ads1x15 para ADS1115.
-    - Lecturas single-ended (AIN0..AIN3 vs GND).
-    - Control de ganancia por FSR (±6.144V .. ±0.256V).
-    - Control de data rate (SPS).
-    - Modo single-shot por defecto.
-    - Lecturas crudas y en voltios, con promediado opcional.
+    Envoltura POO para el ADS1115 (Adafruit) con soporte de:
+      - Lecturas single-ended (AINx vs GND) y diferenciales (AINp - AINn).
+      - Control de FSR (ganancia), SPS (data rate) y modo (single/continuous).
+      - Promediado opcional con retardo configurable.
+      - Cache de canales para evitar recreaciones.
+
+    Recomendación para tu TIA con OPA333:
+      - Conecta Vout (TIA) a A0, Vref (~1.65V) a A1 y usa lectura diferencial A0-A1.
+      - Elige fsr pequeño (0.256 o 0.512 V) para máxima resolución, SIEMPRE que
+        |Vout - Vref| no exceda el FSR.
+
+    Notas:
+      - En single-ended se hace clamp a 0.0V (ruido puede dar negativo). En diferencial NO.
+      - El ADS1115 no mide por encima de VDD (tensión de alimentación del propio ADC).
     """
 
     # Mapeo FSR (±V) -> gain (Adafruit)
     _FSR_TO_GAIN = {
-        6.144: 2/3,  # ±6.144 V
-        4.096: 1,    # ±4.096 V
-        2.048: 2,    # ±2.048 V
-        1.024: 4,    # ±1.024 V
-        0.512: 8,    # ±0.512 V
-        0.256: 16,   # ±0.256 V
+        6.144: 2 / 3,  # ±6.144 V
+        4.096: 1,      # ±4.096 V
+        2.048: 2,      # ±2.048 V
+        1.024: 4,      # ±1.024 V
+        0.512: 8,      # ±0.512 V
+        0.256: 16,     # ±0.256 V
     }
 
-    # Mapeo canal entero -> constante Adafruit
+    # Mapeo canal entero -> constante de pin Adafruit
     _CH_TO_PIN = {
         0: ads1x15.Pin.A0,
         1: ads1x15.Pin.A1,
@@ -40,25 +66,29 @@ class Ads1115Reader:
         3: ads1x15.Pin.A3,
     }
 
+    # Pares diferenciales válidos en ADS1115 (por hardware)
+    _VALID_DIFF_PAIRS: List[DiffPair] = [
+        (0, 1),  # A0 - A1
+        (0, 3),  # A0 - A3
+        (1, 3),  # A1 - A3
+        (2, 3),  # A2 - A3
+    ]
+
+    # Conjunto aceptado de SPS (samples per second)
+    _VALID_SPS = [8, 16, 32, 64, 128, 250, 475, 860]
+
     def __init__(
         self,
         address: int = 0x48,
-        fsr: float = 4.096,
+        fsr: float = 0.512,          # Para diferencial típico de TIA alrededor de Vref
         sps: int = 128,
         single_shot: bool = True,
-        i2c: Optional[busio.I2C] = None
+        i2c: Optional[busio.I2C] = None,
     ):
-        """
-        :param address: Dirección I2C del ADS1115 (0x48..0x4B).
-        :param fsr: ±FSR en voltios (clave de _FSR_TO_GAIN). Recomendado 4.096V para señales ~3.3V.
-        :param sps: Samples Per Second (8,16,32,64,128,250,475,860).
-        :param single_shot: True para Mode.SINGLE, False para Mode.CONTINUOUS.
-        :param i2c: Objeto I2C ya creado (opcional). Si None, se crea con board.SCL/SDA.
-        """
         if fsr not in self._FSR_TO_GAIN:
             raise ValueError(f"fsr inválido: {fsr}. Opciones: {list(self._FSR_TO_GAIN.keys())}")
-        if sps not in [8,16,32,64,128,250,475,860]:
-            raise ValueError("sps inválido. Usa uno de: 8,16,32,64,128,250,475,860")
+        if sps not in self._VALID_SPS:
+            raise ValueError(f"sps inválido. Usa uno de: {self._VALID_SPS}")
 
         self._fsr = fsr
         self._gain = self._FSR_TO_GAIN[fsr]
@@ -73,8 +103,16 @@ class Ads1115Reader:
         self._ads.gain = self._gain
         self._ads.mode = self._mode
 
-        # Cache de canales para evitar recrearlos repetidamente
-        self._chan_cache = {}
+        # Aplica data_rate si la versión de la librería lo soporta así (la mayoría)
+        try:
+            self._ads.data_rate = self._sps
+        except Exception:
+            # Algunas versiones requieren enums; si fuese el caso, se puede mapear aquí.
+            pass
+
+        # Cache de canales: single-ended por índice; diferenciales por tupla (p,n)
+        self._chan_cache_se: Dict[Channel, AnalogIn] = {}
+        self._chan_cache_diff: Dict[DiffPair, AnalogIn] = {}
 
     # --- Configuración ---
 
@@ -83,41 +121,52 @@ class Ads1115Reader:
         return self._fsr
 
     def set_fsr(self, fsr: float):
+        """
+        Cambia el FSR (±V) ajustando la ganancia del ADS1115.
+        NOTA: Afecta a TODOS los canales (propiedad global del ADS).
+        """
         if fsr not in self._FSR_TO_GAIN:
-            raise ValueError(f"fsr inválido: {fsr}")
+            raise ValueError(f"fsr inválido: {fsr}. Opciones: {list(self._FSR_TO_GAIN.keys())}")
         self._fsr = fsr
         self._gain = self._FSR_TO_GAIN[fsr]
         self._ads.gain = self._gain
-        # No es necesario recrear canales; la ganancia es global
+        # No hay que recrear canales; la ganancia es global
 
     @property
     def sps(self) -> int:
         return self._sps
 
     def set_sps(self, sps: int):
-        if sps not in [8,16,32,64,128,250,475,860]:
-            raise ValueError("sps inválido. Usa: 8,16,32,64,128,250,475,860")
+        if sps not in self._VALID_SPS:
+            raise ValueError(f"sps inválido. Usa: {self._VALID_SPS}")
         self._sps = sps
-        # self._ads.data_rate = self._to_rate_enum(sps)
+        # Aplica data_rate según disponibilidad de la librería
+        try:
+            self._ads.data_rate = self._sps
+        except Exception:
+            pass
 
     def set_mode(self, single_shot: bool = True):
         self._mode = Mode.SINGLE if single_shot else Mode.CONTINUOUS
         self._ads.mode = self._mode
 
-    # --- Lecturas ---
+    # --- Lecturas: single-ended ---
+
+    def _get_channel_se(self, ch: Channel) -> AnalogIn:
+        if ch not in self._CH_TO_PIN:
+            raise ValueError("Canal inválido. Usa 0,1,2,3.")
+        if ch not in self._chan_cache_se:
+            self._chan_cache_se[ch] = AnalogIn(self._ads, self._CH_TO_PIN[ch])
+        return self._chan_cache_se[ch]
 
     def read_raw(self, ch: Channel = 0, averages: int = 1, delay_s: Optional[float] = None) -> int:
         """
-        Lee el valor crudo (entero 16-bit firmado) del canal.
-        :param ch: 0..3
-        :param averages: promedia N lecturas (>=1).
-        :param delay_s: pausa opcional entre lecturas (si None, se usa 1/(2*SPS) como referencia suave).
+        Lee el valor crudo (16-bit firmado) del canal single-ended AINx vs GND.
         """
-        chan = self._get_channel(ch)
+        chan = self._get_channel_se(ch)
         if averages <= 1:
             return chan.value
 
-        # Promediado simple
         acc = 0
         if delay_s is None:
             delay_s = max(0.0, 1.0 / (2.0 * self._sps))
@@ -129,14 +178,12 @@ class Ads1115Reader:
 
     def read_voltage(self, ch: Channel = 0, averages: int = 1, delay_s: Optional[float] = None) -> float:
         """
-        Lee voltaje del canal (single-ended) en voltios.
-        Aplica el mismo promediado que read_raw.
+        Lee voltaje single-ended (AINx vs GND) en voltios.
+        Clamp mínimo 0.0 V para evitar negativos por ruido.
         """
-        chan = self._get_channel(ch)
+        chan = self._get_channel_se(ch)
         if averages <= 1:
-            v = chan.voltage
-            # Clamp mínimo 0 por ser single-ended (ruido puede dar <0)
-            return max(0.0, v)
+            return max(0.0, chan.voltage)
 
         acc = 0.0
         if delay_s is None:
@@ -145,34 +192,66 @@ class Ads1115Reader:
             acc += chan.voltage
             if delay_s > 0:
                 time.sleep(delay_s)
-        v = acc / averages
-        return max(0.0, v)
+        return max(0.0, acc / averages)
 
-    def read_all_voltages(self, channels: List[Channel] = [0,1,2,3], averages: int = 1, delay_s: Optional[float] = None) -> dict:
+    def read_all_voltages(self, channels: List[Channel] = [0, 1, 2, 3],
+                          averages: int = 1, delay_s: Optional[float] = None) -> Dict[Channel, float]:
         """
-        Lee múltiples canales y devuelve dict {canal: voltios}.
+        Lee múltiples canales single-ended y devuelve dict {canal: voltios}.
         """
         return {ch: self.read_voltage(ch, averages=averages, delay_s=delay_s) for ch in channels}
 
-    # --- Utilidades internas ---
+    # --- Lecturas: diferencial ---
 
-    def _get_channel(self, ch: Channel) -> AnalogIn:
-        if ch not in self._CH_TO_PIN:
-            raise ValueError("Canal inválido. Usa 0,1,2,3.")
-        if ch not in self._chan_cache:
-            self._chan_cache[ch] = AnalogIn(self._ads, self._CH_TO_PIN[ch])
-        return self._chan_cache[ch]
+    def _validate_diff_pair(self, p: Channel, n: Channel):
+        pair = (p, n)
+        if pair not in self._VALID_DIFF_PAIRS:
+            raise ValueError(
+                f"Par diferencial inválido {pair}. Válidos: {self._VALID_DIFF_PAIRS} "
+                "(por limitaciones del multiplexor interno del ADS1115)."
+            )
 
-    # def _to_rate_enum(self, sps: int):
-    #     # Map a los enums de Adafruit (coinciden en nombre)
-    #     mapping = {
-    #         8:   Rate.RATE_8,
-    #         16:  Rate.RATE_16,
-    #         32:  Rate.RATE_32,
-    #         64:  Rate.RATE_64,
-    #         128: Rate.RATE_128,
-    #         250: Rate.RATE_250,
-    #         475: Rate.RATE_475,
-    #         860: Rate.RATE_860,
-    #     }
-    #     return mapping[sps]
+    def _get_channel_diff(self, p: Channel, n: Channel) -> AnalogIn:
+        self._validate_diff_pair(p, n)
+        key = (p, n)
+        if key not in self._chan_cache_diff:
+            self._chan_cache_diff[key] = AnalogIn(self._ads, self._CH_TO_PIN[p], self._CH_TO_PIN[n])
+        return self._chan_cache_diff[key]
+
+    def read_raw_diff(self, p: Channel = 0, n: Channel = 1, averages: int = 1,
+                      delay_s: Optional[float] = None) -> int:
+        """
+        Lee el valor crudo (16-bit firmado) del canal diferencial (AINp - AINn).
+        Úsalo para medir (Vout - Vref) en tu TIA: p=0 (A0), n=1 (A1).
+        """
+        ch = self._get_channel_diff(p, n)
+        if averages <= 1:
+            return ch.value
+
+        acc = 0
+        if delay_s is None:
+            delay_s = max(0.0, 1.0 / (2.0 * self._sps))
+        for _ in range(averages):
+            acc += ch.value
+            if delay_s > 0:
+                time.sleep(delay_s)
+        return int(round(acc / averages))
+
+    def read_voltage_diff(self, p: Channel = 0, n: Channel = 1, averages: int = 1,
+                          delay_s: Optional[float] = None) -> float:
+        """
+        Lee voltaje diferencial (AINp - AINn) en voltios.
+        NO se hace clamp; el resultado puede ser ±FSR.
+        """
+        ch = self._get_channel_diff(p, n)
+        if averages <= 1:
+            return ch.voltage
+
+        acc = 0.0
+        if delay_s is None:
+            delay_s = max(0.0, 1.0 / (2.0 * self._sps))
+        for _ in range(averages):
+            acc += ch.voltage
+            if delay_s > 0:
+                time.sleep(delay_s)
+        return acc / averages
