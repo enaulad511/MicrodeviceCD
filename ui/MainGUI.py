@@ -101,7 +101,7 @@ class MainGUI(ttk.Window):
         self.option_add('*Combobox*Listbox.font', font_text) 
         settings = read_settings_from_file()
         ads_fsr = float(settings.get("ads_fsr", 1.024))
-        print(ads_fsr)
+        print(ads_fsr, settings)
         self.ads = None
         if secrets.get("environment", "") != "dev":
             from Drivers.ReaderADS import Ads1115Reader
