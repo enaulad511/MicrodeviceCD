@@ -255,3 +255,43 @@ class Ads1115Reader:
             if delay_s > 0:
                 time.sleep(delay_s)
         return acc / averages
+
+    # --- Añadir dentro de tu clase Ads1115Reader ---
+
+    def check_diff_health(self, p: int = 0, n: int = 1, fsr: float | None = None, sps: int | None = None, samples: int = 20):
+        """
+        Diagnóstico: imprime lecturas diferencial y single-ended para verificar que
+        de verdad estamos leyendo AINp-AINn y que no hay saturación.
+        """
+        if fsr is not None:
+            self.set_fsr(fsr)
+        if sps is not None:
+            self.set_sps(sps)
+        self.set_mode(single_shot=False)  # continuo para flujo estable
+
+        # Canales
+        ch_diff = self._get_channel_diff(p, n)
+        ch_p = self._get_channel_se(p)
+        ch_n = self._get_channel_se(n)
+
+        print(f"[check] fsr=±{self._fsr} V, sps={self._sps}, pair=({p},{n})")
+        for _ in range(samples):
+            vdiff = ch_diff.voltage
+            vp = ch_p.voltage
+            vn = ch_n.voltage
+            # Aviso de saturación
+            if abs(vdiff) >= 0.98 * self._fsr:
+                print(f"  SAT WARNING: |Vdiff|={abs(vdiff):.6f} ≈ fsr={self._fsr:.3f} (¿par mal? ¿TIA saturado? ¿ganancia demasiado alta?)")
+            print(f"  Vdiff={vdiff:+.6f} V   A{p}={vp:.6f} V   A{n}={vn:.6f} V")
+            time.sleep(0.05)
+
+    def read_voltage_diff_safe(self, p: int = 0, n: int = 1, averages: int = 1, delay_s: float | None = None) -> float:
+        """
+        Igual que read_voltage_diff, pero con aviso si nos acercamos al FSR.
+        """
+        v = self.read_voltage_diff(p, n, averages=averages, delay_s=delay_s)
+        if abs(v) >= 0.98 * self._fsr:
+            # No levanto excepción para no romper flujo, sólo aviso.
+            print(f"[warn] posible saturación diferencial: |{v:.6f}| ≈ fsr={self._fsr:.3f}. "
+                "Reduce FSR sólo si no satura; si satura, súbelo o revisa TIA.")
+        return v

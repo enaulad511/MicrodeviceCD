@@ -105,7 +105,8 @@ class MainGUI(ttk.Window):
         self.ads = None
         if secrets.get("environment", "") != "dev":
             from Drivers.ReaderADS import Ads1115Reader
-            self.ads = Ads1115Reader(address=0x48, fsr=ads_fsr, sps=64, single_shot=True) 
+            self.ads = Ads1115Reader(address=0x48, fsr=ads_fsr, sps=64, single_shot=False) 
+            self.ads.check_diff_health(p=0, n=1, samples=30)
         # --------------------Start Animation -------------------
         # self.show_gif_toplevel()
         self.after(0, self.maximize_window)
