@@ -124,10 +124,8 @@ class DriverStepperSys:
     def _handle_line(self, line: str):
         if not line:
             return
-
         # Normaliza
         line = line.strip()
-
         # Telemetría: STAT:<pos>:<rpm>
         if line.startswith("STAT:"):
             try:

@@ -101,7 +101,7 @@ class MainGUI(ttk.Window):
         self.ads = None
         if secrets.get("environment", "") != "dev":
             from Drivers.ReaderADS import Ads1115Reader
-            self.ads = Ads1115Reader(address=0x48, fsr=4.096, sps=128, single_shot=True) 
+            self.ads = Ads1115Reader(address=0x48, fsr=1.024, sps=128, single_shot=True) 
         # --------------------Start Animation -------------------
         # self.show_gif_toplevel()
         self.after(0, self.maximize_window)
@@ -205,7 +205,7 @@ class MainGUI(ttk.Window):
         selected_index = self.notebook.index(self.notebook.select())
         for i, text in enumerate(tab_texts):
             if i == selected_index:
-                icon = tab_icons[text]
+                icon = tab_icons.get(text, "")
                 self.notebook.tab(i, text=f"{icon} {text}")
             else:
                 self.notebook.tab(i, text=text)
@@ -214,7 +214,7 @@ class MainGUI(ttk.Window):
         selected_index = self.main_notebook.index(self.main_notebook.select())
         for i, text in enumerate(main_tabs_texts):
             if i == selected_index:
-                icon = main_tabs_icons[text]
+                icon = main_tabs_icons.get(text, "")
                 self.main_notebook.tab(i, text=f"{icon} {text}")
             else:
                 self.main_notebook.tab(i, text=text)
