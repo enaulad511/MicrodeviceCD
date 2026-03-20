@@ -39,6 +39,7 @@ def create_widgets_configuration(parent):
             svar = ttk.StringVar(value=str(v))
             entry = ttk.Entry(parent, font=font_entry, textvariable=svar)
             entry.grid(row=index, column=1, padx=5, pady=5, sticky="w")
+            entries[k] = svar
     return entries
 
 
