@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+from numpy import average
 __author__ = "Edisson A. Naula"
 __date__ = "$ 08/10/2025  at 01:07 p.m. $"
 
@@ -92,7 +93,8 @@ class PhotoreceptorFrame(ttk.Frame):
         if not self.running:
             return
 
-        intensidad = self.ads.read_voltage_diff(0, 1, averages=8) 
+        # intensidad = self.ads.read_voltage_diff(0, 1, averages=8) 
+        intensidad = self.ads.read_voltage(0, averages=8)
         timestamp = time.time()
 
         self.data.append(intensidad)
