@@ -82,6 +82,9 @@ class ConfigFrame(ttk.Toplevel):
                 except ValueError:
                     new_settings[k] = v.get()
         write_settings_to_file(new_settings)
+        ads_fsr = new_settings.get("ads_fsr")
+        if ads_fsr is not None:
+            self.parent.ads.set_fsr(ads_fsr)
 
     def on_close(self):
         self.save_settings()
