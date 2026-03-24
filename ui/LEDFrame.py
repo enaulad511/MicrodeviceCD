@@ -74,17 +74,17 @@ def create_widgets_input(parent, callbacks: dict):
     entries.append(svar_pattern)  # index 1
 
     ttk.Label(frame3, text="Cycle duration (ms):", style="Custom.TLabel").grid(
-        row=1, column=0, padx=5, pady=5, sticky="w"
+        row=1, column=0, padx=5, pady=5, sticky="nswe"
     )
     up_duration = ttk.Entry(frame3, font=font_entry, width=7)
-    up_duration.grid(row=1, column=1, padx=5, pady=5, sticky="w")
+    up_duration.grid(row=1, column=1, padx=5, pady=5, sticky="nswe")
     entries.append(up_duration)  # index 2
 
     ttk.Label(frame3, text="Frequency (Hz):", style="Custom.TLabel").grid(
         row=2, column=0, padx=5, pady=5, sticky="w"
     )
     frequency_entry = ttk.Entry(frame3, font=font_entry, width=7)
-    frequency_entry.grid(row=2, column=1, padx=5, pady=5)
+    frequency_entry.grid(row=2, column=1, padx=5, pady=5, sticky="nswe")
     entries.append(frequency_entry)  # index 3
 
     ttk.Button(

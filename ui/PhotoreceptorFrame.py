@@ -36,6 +36,7 @@ class PhotoreceptorFrame(ttk.Frame):
         control_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nswe")
         control_frame.configure(style="Custom.TLabelframe")
         control_frame.rowconfigure((0, 1), weight=1)
+        control_frame.columnconfigure((0, 1, 2), weight=1)
 
         ttk.Label(control_frame, text="Sample time (ms):", style="Custom.TLabel").grid(
             row=0, column=0, padx=5, pady=5, sticky="w"
@@ -49,19 +50,19 @@ class PhotoreceptorFrame(ttk.Frame):
             text="Start",
             command=self.iniciar_lectura,
             style="info.TButton",
-        ).grid(row=1, column=0, padx=5, pady=5)
+        ).grid(row=1, column=0, padx=5, pady=5, sticky="nswe")
         ttk.Button(
             control_frame,
             text="Stop",
             command=self.detener_lectura,
             style="danger.TButton",
-        ).grid(row=1, column=1, padx=5, pady=5)
+        ).grid(row=1, column=1, padx=5, pady=5, sticky="nswe")
         ttk.Button(
             control_frame,
             text="Save",
             command=self.save_data,
             style="success.TButton",
-        ).grid(row=1, column=2, padx=5, pady=5)
+        ).grid(row=1, column=2, padx=5, pady=5, sticky="nswe")
 
         # Gráfico
         graphic_frame = ttk.Frame(content_frame)

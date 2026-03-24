@@ -1,5 +1,6 @@
 
 # -*- coding: utf-8 -*-
+from templates.constants import secrets
 import datetime
 import json
 import socket
@@ -188,6 +189,8 @@ class UdpClient:
             time.sleep(0.005)
 
     def initial_file(self, filename="data_temps.txt"):
+        if secrets.get("environment", "") == "dev":
+            return
         # save header in txt
         header = "temperature\n"
         with open(filename, "w") as f:
