@@ -249,6 +249,8 @@ class MainGUI(ttk.Window):
         # config_frame = ConfigFrame(self)
         if self.config_frame is None:
             self.config_frame = ConfigFrame(self)  # pyrefly: ignore
+            self.config_frame.focus_set()
+            self.config_frame.lift()
         else:
             self.config_frame.lift()
 

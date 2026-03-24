@@ -1,7 +1,4 @@
 # -*- coding: utf-8 -*-
-from numpy import average
-__author__ = "Edisson A. Naula"
-__date__ = "$ 08/10/2025  at 01:07 p.m. $"
 
 
 import ttkbootstrap as ttk
@@ -13,6 +10,9 @@ from ttkbootstrap.scrolled import ScrolledFrame
 
 from templates.constants import font_entry
 
+__author__ = "Edisson A. Naula"
+__date__ = "$ 08/10/2025  at 01:07 p.m. $"
+
 
 class PhotoreceptorFrame(ttk.Frame):
     def __init__(self, parent, ads_reader):
@@ -21,10 +21,11 @@ class PhotoreceptorFrame(ttk.Frame):
         self.parent = parent
         self.ads = ads_reader
         self.columnconfigure(0, weight=1)
-        self.rowconfigure((0, 1), weight=1)
+        self.rowconfigure(0, weight=1)
         content_frame = ScrolledFrame(self, autohide=True)
         content_frame.grid(row=0, column=0, sticky="nsew")
         content_frame.columnconfigure(0, weight=1)
+        content_frame.rowconfigure(1, weight=1)
         # Variables
         self.running = False
         self.data = []
@@ -36,9 +37,9 @@ class PhotoreceptorFrame(ttk.Frame):
         control_frame.configure(style="Custom.TLabelframe")
         control_frame.rowconfigure((0, 1), weight=1)
 
-        ttk.Label(
-            control_frame, text="Sample time (ms):", style="Custom.TLabel"
-        ).grid(row=0, column=0, padx=5, pady=5, sticky="w")
+        ttk.Label(control_frame, text="Sample time (ms):", style="Custom.TLabel").grid(
+            row=0, column=0, padx=5, pady=5, sticky="w"
+        )
         self.interval_entry = ttk.Entry(control_frame, width=10, font=font_entry)
         self.interval_entry.insert(0, "500")
         self.interval_entry.grid(row=0, column=1, padx=5, pady=5, sticky="we")
@@ -55,20 +56,36 @@ class PhotoreceptorFrame(ttk.Frame):
             command=self.detener_lectura,
             style="danger.TButton",
         ).grid(row=1, column=1, padx=5, pady=5)
+        ttk.Button(
+            control_frame,
+            text="Save",
+            command=self.save_data,
+            style="success.TButton",
+        ).grid(row=1, column=2, padx=5, pady=5)
 
         # Gráfico
-        self.fig, self.ax = plt.subplots(figsize=(5, 3))
+        graphic_frame = ttk.Frame(content_frame)
+        graphic_frame.grid(row=1, column=0, sticky="nsew")
+
+        # Muy importante:
+        graphic_frame.columnconfigure(0, weight=1)
+        graphic_frame.rowconfigure(0, weight=1)
+
+        self.fig, self.ax = plt.subplots()
         self.ax.set_title("Measurement")
         self.ax.set_xlabel("Time (s)")
-        self.ax.set_ylabel("Intensity")
-        self.canvas = FigureCanvasTkAgg(self.fig, master=content_frame)
+        self.ax.set_ylabel("Voltage (V)")
+
+        self.canvas = FigureCanvasTkAgg(self.fig, master=graphic_frame)
         canvas_widget = self.canvas.get_tk_widget()
-        canvas_widget.grid(row=1, column=0, padx=10, pady=10, sticky="nsew")
+
+        canvas_widget.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
         canvas_widget.columnconfigure(0, weight=1)
         canvas_widget.rowconfigure(0, weight=1)
         canvas_widget.configure(
             highlightbackground="lightblue", highlightthickness=2
         )  # Solo para pruebas
+        graphic_frame.pack_propagate(False)
 
     def iniciar_lectura(self):
         print("Iniciar lectura del fotoreceptor")
@@ -89,11 +106,23 @@ class PhotoreceptorFrame(ttk.Frame):
         print("Detener lectura del fotoreceptor")
         self.running = False
 
+    def save_data(self):
+        if not self.data:
+            print("No hay datos para guardar")
+            return
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        filename = f"photoreceptor_data_{timestamp}.csv"
+        with open(filename, "w") as f:
+            f.write("Time (s),Intensity\n")
+            for t, d in zip(self.timestamps, self.data):
+                f.write(f"{t:.3f},{d:.3f}\n")
+        print(f"Datos guardados en {filename}")
+
     def adquirir_dato(self):
         if not self.running:
             return
 
-        intensidad = self.ads.read_voltage_diff(0, 1, averages=8) 
+        intensidad = self.ads.read_voltage_diff(0, 1, averages=8)
         # intensidad = self.ads.read_voltage(0, averages=8)
         timestamp = time.time()
 
@@ -117,5 +146,3 @@ class PhotoreceptorFrame(ttk.Frame):
         self.ax.set_xlabel("Time (s)")
         self.ax.set_ylabel("Intensity")
         self.canvas.draw()
-
-

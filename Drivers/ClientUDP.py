@@ -193,12 +193,16 @@ class UdpClient:
         with open(filename, "w") as f:
             f.write(header)
 
-    def save_data_file(self, filename="data_temps.txt"):
+    def save_data_file(self, filename=None):
         # save logs temps in txt
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        line = f"{timestamp} -- {self.data_temps['max31855']}\n"
+        if filename is None:
+            filename = f"data_temps-{timestamp}.csv"
+        # line = f"{timestamp} -- {self.data_temps['max31855']}\n"
         with open(filename, "a") as f:
+            line = f"{timestamp},{self.data_temps['max31855']}\n"
             f.write(line)
+        print(f"[UdpClient] Saved data: {filename}")
 
     # ---- Convenience getters ----
     def latest_text(self) -> Optional[str]:

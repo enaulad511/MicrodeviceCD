@@ -16,6 +16,7 @@ __date__ = "$ 08/10/2025  at 11:11 a.m. $"
 def create_widgets_disco_input(parent, callbacks: dict):
     entries = []
     parent.columnconfigure((0, 1), weight=1)
+    parent.rowconfigure((0, 1), weight=1)
     # Mode 1: Continuous rotation CW or CCW with RPM
     frame1 = ttk.LabelFrame(parent, text="Continuous Rotation")
     frame1.grid(row=0, column=0, padx=10, pady=10, sticky="nswe")
@@ -47,7 +48,7 @@ def create_widgets_disco_input(parent, callbacks: dict):
         style="info.TButton",
         command=callbacks.get("callback_spin", ()),
     ).grid(row=2, column=0, columnspan=2, pady=5, padx=5, sticky="nswe")
-
+    frame1.rowconfigure((0,1,2), weight=1)
     # Mode 2: On/Off cycle
     frame2 = ttk.LabelFrame(parent, text="On/Off Cycle")
     # frame2.grid(row=1, column=0, padx=10, pady=10, sticky="nswe")
@@ -400,6 +401,7 @@ class ControlDiscFrame(ttk.Frame):
         content_frame = ScrolledFrame(self, autohide=True)
         content_frame.grid(row=0, column=0, sticky="nsew")
         content_frame.columnconfigure(0, weight=1)
+        content_frame.rowconfigure(0, weight=1)
 
         callbacks = {
             "callback_spin": self.callback_spin,

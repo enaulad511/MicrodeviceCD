@@ -1,6 +1,6 @@
-
 # -*- coding: utf-8 -*-
 from Drivers.ClientUDP import UdpClient
+
 __author__ = "Edisson A. Naula"
 __date__ = "$ 09/12/2025 at 01:07 p.m. $"
 
@@ -13,6 +13,7 @@ import random
 from ttkbootstrap.scrolled import ScrolledFrame
 from templates.constants import font_entry
 
+
 class TemperatureFrame(ttk.Frame):
     """
     Frame de Tk para leer y graficar temperatura en tiempo real.
@@ -21,24 +22,31 @@ class TemperatureFrame(ttk.Frame):
       que devuelva la temperatura en °C como float.
     """
 
-    def __init__(self, parent, sensor_reader="default", title="Temperature measurement"):
+    def __init__(
+        self, parent, sensor_reader="default", title="Temperature measurement"
+    ):
         super().__init__(parent)
         self.parent = parent
         self.start_time = 0.0
         self.running = False
-        self.temps = []        # Temperaturas
-        self.timestamps = []   # Tiempos relativos (s)
+        self.temps = []  # Temperaturas
+        self.timestamps = []  # Tiempos relativos (s)
         self.client = None
-        self.temps_filter = [20, 20, 20, 20]    # temps for filtering
+        self.temps_filter = [20, 20, 20, 20]  # temps for filtering
         # Función para leer temperatura (°C). Si no se pasa, usa simulación.
-        self.sensor_reader = self._simulated_reader if sensor_reader == "default" else self._thermocouple_reader
+        self.sensor_reader = (
+            self._simulated_reader
+            if sensor_reader == "default"
+            else self._thermocouple_reader
+        )
         # Layout base
         self.columnconfigure(0, weight=1)
-        self.rowconfigure((0, 1), weight=1)
+        self.rowconfigure(0, weight=1)
 
         content_frame = ScrolledFrame(self, autohide=True)
         content_frame.grid(row=0, column=0, sticky="nsew")
         content_frame.columnconfigure(0, weight=1)
+        content_frame.rowconfigure((0, 1), weight=1)
 
         # --- Controles ---
         control_frame = ttk.LabelFrame(content_frame, text="Temperature control")
@@ -46,17 +54,17 @@ class TemperatureFrame(ttk.Frame):
         control_frame.configure(style="Custom.TLabelframe")
         control_frame.columnconfigure((0, 1, 2, 3), weight=1)
 
-        ttk.Label(
-            control_frame, text="Sample time (ms):", style="Custom.TLabel"
-        ).grid(row=0, column=0, padx=5, pady=5, sticky="w")
+        ttk.Label(control_frame, text="Sample time (ms):", style="Custom.TLabel").grid(
+            row=0, column=0, padx=5, pady=5, sticky="w"
+        )
 
         self.interval_entry = ttk.Entry(control_frame, width=10, font=font_entry)
         self.interval_entry.insert(0, "1000")  # Por defecto 1 segundo
         self.interval_entry.grid(row=0, column=1, padx=5, pady=5, sticky="we")
 
-        ttk.Label(
-            control_frame, text="Unidad:", style="Custom.TLabel"
-        ).grid(row=0, column=2, padx=5, pady=5, sticky="e")
+        ttk.Label(control_frame, text="Unidad:", style="Custom.TLabel").grid(
+            row=0, column=2, padx=5, pady=5, sticky="e"
+        )
 
         self.unit_var = ttk.StringVar(value="°C")
         self.unit_combo = ttk.Combobox(
@@ -68,7 +76,9 @@ class TemperatureFrame(ttk.Frame):
             width=6,
         )
         self.unit_combo.grid(row=0, column=3, padx=5, pady=5, sticky="we")
-        self.unit_combo.bind("<<ComboboxSelected>>", lambda e: self.actualizar_grafico())
+        self.unit_combo.bind(
+            "<<ComboboxSelected>>", lambda e: self.actualizar_grafico()
+        )
 
         ttk.Button(
             control_frame,
@@ -99,7 +109,7 @@ class TemperatureFrame(ttk.Frame):
         ).grid(row=1, column=3, padx=5, pady=5, sticky="we")
 
         # --- Gráfico ---
-        self.fig, self.ax = plt.subplots(figsize=(5, 3))
+        self.fig, self.ax = plt.subplots()
         self.ax.set_title(title)
         self.ax.set_xlabel("Time (s)")
         self.ax.set_ylabel("Temperature (°C)")
@@ -108,7 +118,9 @@ class TemperatureFrame(ttk.Frame):
         canvas_widget.grid(row=1, column=0, padx=10, pady=10, sticky="nsew")
         canvas_widget.columnconfigure(0, weight=1)
         canvas_widget.rowconfigure(0, weight=1)
-        canvas_widget.configure(highlightbackground="lightblue", highlightthickness=2)  # Solo pruebas
+        canvas_widget.configure(
+            highlightbackground="lightblue", highlightthickness=2
+        )  # Solo pruebas
 
     # ----------------- Control -----------------
 
@@ -255,11 +267,10 @@ class TemperatureFrame(ttk.Frame):
         lf = self.client.latest_float()
         self.temps_filter.pop(0)
         self.temps_filter.append(lf)
-        lf = sum(self.temps_filter) / len(self.temps_filter)        
+        lf = sum(self.temps_filter) / len(self.temps_filter)
         if lf is None:
             return 20.0
         return lf
-
 
     @staticmethod
     def cpu_temp_reader():
