@@ -248,10 +248,11 @@ class MainGUI(ttk.Window):
         # config_frame = ConfigFrame(self)
         if self.config_frame is None:
             self.config_frame = ConfigFrame(self)  # pyrefly: ignore
-            self.config_frame.focus_set()
             self.config_frame.lift()
+            self.config_frame.focus_force()
         else:
             self.config_frame.lift()
+            self.config_frame.focus_force()
 
     def on_button_test_disc(self):
         if self.try_connect_disc():
