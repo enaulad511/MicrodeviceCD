@@ -48,7 +48,10 @@ if __name__ == "__main__":
                 text = str(data)
 
             timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-            print(f"{timestamp}-From {addr[0]}:{addr[1]} -> {text}")
+            if "WEMOS" in text:
+                print(f"{timestamp}-From {addr[0]}:{addr[1]} -> Beacon detected")
+            else:
+                print(f"{timestamp}-From {addr[0]}:{addr[1]} -> {text}")
             if "start sent" in text.lower():
                 flag_recording = True
                 data_cv = {}

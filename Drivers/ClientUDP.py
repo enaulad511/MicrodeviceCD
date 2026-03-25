@@ -1,4 +1,3 @@
-
 # -*- coding: utf-8 -*-
 from templates.constants import secrets
 import datetime
@@ -29,11 +28,11 @@ class UdpClient:
         local_ip: str = "",  # "" => all interfaces; or set to your wlan0 IP
         decode: str = "utf-8",
         recv_timeout_sec: Optional[float] = None,
-        on_message : Callable[[str, tuple, dict], None] | None = None,
+        on_message: Callable[[str, tuple, dict], None] | None = None,
         parse_float: bool = False,
         save_data=True,
-        stop_event = None,
-        debug = False
+        stop_event=None,
+        debug=False,
     ):
         """
         :param port: UDP port to bind.
@@ -54,8 +53,11 @@ class UdpClient:
         self.on_message = on_message
         self.parse_float = parse_float
         self.save_data = save_data
+        self.filename = "data_temps.csv"
         if save_data:
-            self.initial_file()
+            timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            self.filename = f"data_temps-{timestamp}.csv"
+            self.initial_file(self.filename)
         self._sock = None
         self._thread = None
         self._stop_evt = threading.Event() if stop_event is None else stop_event
@@ -63,13 +65,13 @@ class UdpClient:
         self._latest_float = 20.0
         self._latest_addr = None
         self.data_temps = {
-                    "type": "unknown",
-                    "timestamp_ms": time.time_ns() // 1_000_000,
-                    "mlx_ambient": 0.0,
-                    "mlx_object": 0.0,
-                    "max31855": 0.0,
-                    "unit": "unknown",
-                }
+            "type": "unknown",
+            "timestamp_ms": time.time_ns() // 1_000_000,
+            "mlx_ambient": 0.0,
+            "mlx_object": 0.0,
+            "max31855": 0.0,
+            "unit": "unknown",
+        }
         self.status_disc = False
         self.debug = debug
 
@@ -97,9 +99,13 @@ class UdpClient:
         self._stop_evt.clear()
         self._sock = self._create_socket()  # pyrefly: ignore
 
-        self._thread = threading.Thread(target=self._run_loop, daemon=True) # pyrefly: ignore
-        self._thread.start()    # pyrefly: ignore
-        print(f"[UdpClient] Listening on {self.local_ip or '0.0.0.0'}:{self.port} (threaded)")
+        self._thread = threading.Thread(
+            target=self._run_loop, daemon=True
+        )  # pyrefly: ignore
+        self._thread.start()  # pyrefly: ignore
+        print(
+            f"[UdpClient] Listening on {self.local_ip or '0.0.0.0'}:{self.port} (threaded)"
+        )
 
     def stop(self):
         """Stop the background thread and close the socket."""
@@ -123,13 +129,15 @@ class UdpClient:
         Blocking mode: run the receive loop in the current thread.
         Useful for simple scripts.
         """
-        self._sock = self._create_socket()   # pyrefly: ignore
-        print(f"[UdpClient] Listening on {self.local_ip or '0.0.0.0'}:{self.port} (blocking)")
+        self._sock = self._create_socket()  # pyrefly: ignore
+        print(
+            f"[UdpClient] Listening on {self.local_ip or '0.0.0.0'}:{self.port} (blocking)"
+        )
         try:
             self._run_loop()
         finally:
             try:
-                self._sock.close()      # pyrefly: ignore
+                self._sock.close()  # pyrefly: ignore
             except Exception:
                 pass
             self._sock = None
@@ -174,13 +182,13 @@ class UdpClient:
                 self._latest_float = 20.0
                 self.status_disc = False
 
-            self._latest_text = text    # pyrefly: ignore
+            self._latest_text = text  # pyrefly: ignore
             self._latest_addr = addr
             # Call user callback if provided
             if self.on_message:
                 try:
                     if self.save_data:
-                        self.save_data_file()
+                        self.save_data_file(self.filename)
                     self.on_message(text, addr, self.data_temps)
                 except Exception as e:
                     print(f"[UdpClient] on_message error: {e}")
@@ -188,7 +196,7 @@ class UdpClient:
             # Small sleep to avoid burning CPU (optional)
             time.sleep(0.005)
 
-    def initial_file(self, filename="data_temps.txt"):
+    def initial_file(self, filename="data_temps.csv"):
         if secrets.get("environment", "") == "dev":
             return
         # save header in txt
@@ -197,6 +205,8 @@ class UdpClient:
             f.write(header)
 
     def save_data_file(self, filename=None):
+        if secrets.get("environment", "") == "dev":
+            return
         # save logs temps in txt
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         if filename is None:
@@ -205,7 +215,7 @@ class UdpClient:
         with open(filename, "a") as f:
             line = f"{timestamp},{self.data_temps['max31855']}\n"
             f.write(line)
-        print(f"[UdpClient] Saved data: {filename}")
+        # print(f"[UdpClient] Saved data: {filename}")
 
     # ---- Convenience getters ----
     def latest_text(self) -> Optional[str]:
@@ -216,8 +226,10 @@ class UdpClient:
 
     def latest_addr(self) -> Optional[tuple]:
         return self._latest_addr
+
     def latest_temps(self):
         return self.data_temps
+
     def get_status_disc(self):
         return self.status_disc
 
@@ -245,11 +257,11 @@ if __name__ == "__main__":
     client = UdpClient(
         port=5005,
         buffer_size=4096,
-        allow_broadcast=True,    # Important for broadcast payloads
-        local_ip="",             # "" listens on all interfaces (wlan0, eth0, etc.)
-        recv_timeout_sec=1.0,    # lets loop check stop flag periodically
+        allow_broadcast=True,  # Important for broadcast payloads
+        local_ip="",  # "" listens on all interfaces (wlan0, eth0, etc.)
+        recv_timeout_sec=1.0,  # lets loop check stop flag periodically
         on_message=handle_message,
-        parse_float=True,        # Arduino sends a numeric string
+        parse_float=True,  # Arduino sends a numeric string
     )
 
     try:
@@ -266,4 +278,3 @@ if __name__ == "__main__":
         print("\nStopping client...")
     finally:
         client.stop()
-
