@@ -106,7 +106,7 @@ class PCRFrame(ttk.Frame):
         self.last_display = time.time()
         self.stop_event_motor = None
         self.stop_udp_listenner = None
-
+        self.temp_update_counter = 0
         content_frame = ScrolledFrame(self, autohide=True)
         content_frame.grid(row=0, column=0, sticky="nsew")
         content_frame.columnconfigure(0, weight=1)
