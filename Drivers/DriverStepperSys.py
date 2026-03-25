@@ -302,7 +302,8 @@ class DriverStepperSys:
         """Cierra UART y libera recursos GPIO."""
         self._running = False
         # Señal clara al hilo de RX (si usa Event, setéalo aquí)
-        self.ser.reset_input_buffer()
+        if self.ser:
+            self.ser.reset_input_buffer()
         # 1) Esperar fin del hilo de RX determinísticamente
         t = getattr(self, "_rx_thread", None)
         if t and t.is_alive():
