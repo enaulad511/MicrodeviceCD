@@ -176,10 +176,10 @@ class UdpClient:
                     "timestamp_ms": time.time_ns() // 1_000_000,
                     "mlx_ambient": 0.0,
                     "mlx_object": 0.0,
-                    "max31855": 0.0,
+                    "max31855": self._latest_float,
                     "unit": "unknown",
                 }
-                self._latest_float = 20.0
+                # self._latest_float = self._latest_float
                 self.status_disc = False
 
             self._latest_text = text  # pyrefly: ignore
@@ -187,9 +187,9 @@ class UdpClient:
             # Call user callback if provided
             if self.on_message:
                 try:
-                    if self.save_data:
-                        self.save_data_file(self.filename)
                     self.on_message(text, addr, self.data_temps)
+                    # if self.save_data:
+                    #     self.save_data_file(self.filename)
                 except Exception as e:
                     print(f"[UdpClient] on_message error: {e}")
 
