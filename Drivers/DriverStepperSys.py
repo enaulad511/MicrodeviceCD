@@ -2,14 +2,15 @@
 import serial
 import threading
 import time
-import gpiod    # pyrefly: ignore
-from gpiod.line import Direction, Value # pyrefly: ignore
+import gpiod  # pyrefly: ignore
+from gpiod.line import Direction, Value  # pyrefly: ignore
 
 
 __author__ = "Edisson A. Naula"
 __date__ = "$ 19/02/2026  at 08:11 a.m. $"
 
 STEPS_PER_REV = 6400
+
 
 class DriverStepperSys:
     """
@@ -34,7 +35,7 @@ class DriverStepperSys:
         en_pin=None,  # GPIO para ENABLE del driver (opcional)
         enable_active_high=False,  # True si ENABLE activo en alto; default False (activo en bajo)
         uart_port="/dev/ttyAMA0",  # En RPi 4 puedes usar "/dev/ttyAMA0" o "/dev/serial0"
-        baudrate=921600,
+        baudrate=115200,
         chip="/dev/gpiochip0",
         read_timeout=0.20,  # Timeout lectura serial (s)
         ack_timeout=0.01,  # Timeout espera ACK (s)
@@ -110,9 +111,11 @@ class DriverStepperSys:
             # Activo en bajo: active=True => línea a 0 (INACTIVE), active=False => 1 (ACTIVE)
             val = Value.INACTIVE if active else Value.ACTIVE
         self._gpio_request.set_value(self.en_pin, val)
+
     def set_init_vals(self, pos_deg=0.0, rpm=0.0):
         """Inicializa el estado interno (útil para sincronizar al arrancar)."""
         self._last_status.update({"pos_deg": pos_deg, "rpm": rpm, "ts": time.time()})
+
     # --------------------- Comunicación UART ---------------------
     def _send_line(self, s: str):
         if not s.endswith("\n"):
@@ -159,7 +162,7 @@ class DriverStepperSys:
     def _reader_loop(self):
         while self._running:
             try:
-                self.ser.reset_input_buffer()    # Asegura que se envíen los comandos sin demora
+                self.ser.reset_input_buffer()  # Asegura que se envíen los comandos sin demora
                 raw = self.ser.readline()  # lee hasta '\n' o timeout
                 if not raw:
                     continue
@@ -173,7 +176,7 @@ class DriverStepperSys:
                 time.sleep(0.05)
 
     # --------------------- Helpers de protocolo ---------------------
-    def _cmd_mode(self, mode_code: int, value_1:float, value_2:float):
+    def _cmd_mode(self, mode_code: int, value_1: float, value_2: float):
         """Envía MODO:x y espera ACK."""
         self._send_line(f"MODO:{mode_code}:{value_1:.2f}:{value_2:.2f}")
         # print(f"MODO:{mode_code}:{value_1:.2f}:{value_2:.2f}")
@@ -207,7 +210,7 @@ class DriverStepperSys:
         Si 'wait=True', espera hasta que la velocidad reported (|rpm|) sea ~0 (fin del movimiento).
         """
         # MODO POS
-        self._cmd_mode(0, grados, 0) 
+        self._cmd_mode(0, grados, 0)
         # VEL opcional
         if vel_hz is not None:
             self._cmd_vel(vel_hz)
@@ -238,7 +241,7 @@ class DriverStepperSys:
     def run_rpm(self, rpm: float) -> bool:
         """Velocidad continua en RPM (signo = dirección)."""
         self.ser.reset_output_buffer()
-        self._cmd_mode(1, rpm, 0) 
+        self._cmd_mode(1, rpm, 0)
         return True
 
     def run_hz(self, hz_signed: float) -> bool:
@@ -246,11 +249,11 @@ class DriverStepperSys:
         self._cmd_mode(2, hz_signed, 0)
         return True
 
-    def go_zero(self,rpm:float):
+    def go_zero(self, rpm: float):
         self._cmd_mode(6, rpm, 0)
         return True
 
-    def run_sweep(self, angle:float, speed_hz:float):
+    def run_sweep(self, angle: float, speed_hz: float):
         if speed_hz <= 0.0:
             self._cmd_stop()
             print("[spinMotorAngle] Velocidad resultante = 0 Hz; STOP.")
@@ -331,6 +334,7 @@ class DriverStepperSys:
         except Exception:
             pass
         self._gpio_request = None
+
     # Context manager
     def __enter__(self):
         return self
