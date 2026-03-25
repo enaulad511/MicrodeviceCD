@@ -250,9 +250,7 @@ class DriverStepperSys:
         self._cmd_mode(6, rpm, 0)
         return True
 
-    def run_sweep(self, angle:float, rpm:float):
-        rpm_eff = max(min(abs(rpm), abs(200)), 0.0)
-        speed_hz = rpm_eff * (STEPS_PER_REV / 60.0)
+    def run_sweep(self, angle:float, speed_hz:float):
         if speed_hz <= 0.0:
             self._cmd_stop()
             print("[spinMotorAngle] Velocidad resultante = 0 Hz; STOP.")
