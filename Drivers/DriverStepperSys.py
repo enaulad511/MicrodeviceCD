@@ -175,8 +175,8 @@ class DriverStepperSys:
     # --------------------- Helpers de protocolo ---------------------
     def _cmd_mode(self, mode_code: int, value_1:float, value_2:float):
         """Envía MODO:x y espera ACK."""
-        self._send_line(f"MODO:{mode_code}:{value_1}:{value_2}")
-        print(f"MODO:{mode_code}:{value_1}:{value_2}")
+        self._send_line(f"MODO:{mode_code}:{value_1:.2f}:{value_2:.2f}")
+        # print(f"MODO:{mode_code}:{value_1:.2f}:{value_2:.2f}")
         return True
 
     def _cmd_vel(self, hz):

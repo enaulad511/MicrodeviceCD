@@ -126,6 +126,7 @@ class PCRFrame(ttk.Frame):
         self.canvas = None  # Para almacenar el gráfico incrustado
 
         self.callback_generate_profile()  # Generar el gráfico inicial
+        self.data_temperature = []
 
     def callback_generate_profile(self):
         try:
@@ -264,6 +265,39 @@ class PCRFrame(ttk.Frame):
         if time.time() - self.last_display > self.ts_display:
             msg = f"Temperature: {self.temp} °C\n" + f"State: {self.fase}"
             self.entries[-1].set(msg)  # pyrefly: ignore
+        self.data_temperature.append(self.temp)
+        self.temp_update_counter += 1
+        if self.temp_update_counter >= 20:
+            self.temp_update_counter = 0  # Reiniciar contador
+            # Programar actualización de la gráfica en el hilo principal
+            self.after(1, lambda: self.update_graph_temperature())
+
+    def init_temperature_graph(self):
+        if self.canvas is not None:
+            self.canvas.get_tk_widget().destroy()
+        self.data_temperature = []  # Datos acumulados
+
+        self.fig, self.ax = plt.subplots()
+        self.line, = self.ax.plot([], [], marker="o")
+        self.ax.set_title("Temperature (°C)")
+        self.ax.set_xlabel("Samples")
+        self.ax.set_ylabel("°C")
+
+        self.canvas = FigureCanvasTkAgg(self.fig, master=self.profile_frame)
+        self.canvas.get_tk_widget().pack(fill="both", expand=True)
+        self.canvas.draw()
+
+    def update_graph_temperature(self):
+        if self.canvas is None:
+            print("Canvas is not initialized.")
+            return
+        self.line.set_xdata(range(len(self.data_temperature)))
+        self.line.set_ydata(self.data_temperature)
+        self.ax.relim()
+        self.ax.autoscale_view()
+        self.canvas.draw_idle()
+
+
 
     def callback_start_experiment(self):
         if self.running_experiment:
@@ -318,6 +352,7 @@ class PCRFrame(ttk.Frame):
             if self.stop_udp_listenner is None
             else self.stop_udp_listenner
         )
+        self.init_temperature_graph()
         self.client_temperature = UdpClient(
             port=5005,
             buffer_size=4096,
@@ -461,7 +496,7 @@ class PCRFrame(ttk.Frame):
                     None,
                     stop_func=lambda: self.stop_event_motor.is_set()
                     or abs(self.temp - low_temp) <= 7.5,
-                    stop_event=self.stop_event_motor
+                    stop_event=self.stop_event_motor,
                 )
                 print(f"Temperature reached: {self.temp} °C")
                 # -------------------------------------------------------------------
