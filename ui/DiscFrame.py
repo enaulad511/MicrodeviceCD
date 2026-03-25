@@ -113,7 +113,7 @@ def create_widgets_disco_input(parent, callbacks: dict):
     ttk.Label(frame3, text="Speed (%):", style="Custom.TLabel").grid(
         row=1, column=0, padx=5, pady=5, sticky="w"
     )
-    svar_speed = ttk.StringVar(value="50")
+    svar_speed = ttk.StringVar(value="10")
     speed_entry = ttk.Entry(frame3, font=font_entry, textvariable=svar_speed, width=5)
     speed_entry.grid(row=1, column=1, padx=5, pady=5, sticky="w")
     entries.append(svar_speed)

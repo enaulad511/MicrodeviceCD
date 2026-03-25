@@ -176,6 +176,7 @@ class DriverStepperSys:
     def _cmd_mode(self, mode_code: int, value_1:float, value_2:float):
         """Envía MODO:x y espera ACK."""
         self._send_line(f"MODO:{mode_code}:{value_1}:{value_2}")
+        print(f"MODO:{mode_code}:{value_1}:{value_2}")
         return True
 
     def _cmd_vel(self, hz):
