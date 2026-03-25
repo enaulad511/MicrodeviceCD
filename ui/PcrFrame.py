@@ -62,31 +62,46 @@ def create_widgets_pcr(parent, callbacks: dict):
         entry.grid(row=row, column=col * 2 + 1, padx=5, pady=5)
         entries.append(entry)
     frame1.columnconfigure(tuple(range(2 * columns)), weight=1)
+    frame_label = ttk.Frame(parent, style="Custom.TFrame")
+    frame_label.grid(row=1, column=0, sticky="nswe")
+    frame_label.columnconfigure(0, weight=1)
+    svar_temperature = ttk.StringVar(value="")
+    ttk.Label(frame_label, textvariable=svar_temperature, style="Custom.TLabel").grid(
+        row=0, column=0, padx=5, pady=5, sticky="nswe"
+    )
+    entries.append(svar_temperature)  # pyrefly:ignore
+    frame_buttons = ttk.Frame(parent)
+    frame_buttons.grid(row=2, column=0, sticky="nswe")
+    frame_buttons.columnconfigure(tuple(range(4)), weight=1)
     # Botón para generar perfil
     ttk.Button(
-        frame1,
+        frame_buttons,
         text="Generate Profile",
         style="info.TButton",
         command=callbacks.get("callback_generate_profile", ()),
-    ).grid(row=len(labels), column=0, columnspan=2, pady=10)
+    ).grid(row=0, column=0, pady=10, sticky="nswe")
     # Boton para empezar experimento
     ttk.Button(
-        frame1,
+        frame_buttons,
         text="Start Experiment",
         style="success.TButton",
         command=callbacks.get("callback_start_experiment", ()),
-    ).grid(row=len(labels), column=2, columnspan=2, pady=10)
-    svar_temperature = ttk.StringVar(value="")
-    ttk.Label(frame1, textvariable=svar_temperature, style="Custom.TLabel").grid(
-        row=len(labels) + 1, column=0, padx=5, pady=5, sticky="nswe"
-    )
-    entries.append(svar_temperature)  # pyrefly:ignore
+    ).grid(row=0, column=1, pady=10, sticky="nswe")
+    
+    # save data button
     ttk.Button(
-        frame1,
+        frame_buttons,
         text="Stop Experiment",
         style="danger.TButton",
         command=callbacks.get("callback_stop_experiment", ()),
-    ).grid(row=len(labels) + 1, column=2, columnspan=2, pady=10)
+    ).grid(row=0, column=2, pady=10, sticky="nswe")
+    
+    ttk.Button(
+        frame_buttons,
+        text="Save Data",
+        style="warning.TButton",
+        command=callbacks.get("callback_save_data", ()),
+    ).grid(row=0 , column=3, pady=10, sticky="nswe")
     return entries
 
 
