@@ -118,7 +118,7 @@ class PCRFrame(ttk.Frame):
         self.rowconfigure(0, weight=1)
         self.ads = ads_reader
         self.fase = "Initial"
-        self.ts_display = 1
+        self.ts_display = 0.5
         self.last_display = time.time()
         self.stop_event_motor = None
         self.stop_udp_listenner = None
@@ -462,12 +462,12 @@ class PCRFrame(ttk.Frame):
             self.fase = "Denaturation Hold"
             while current_time - start_time < denat_time:
                 if (
-                    self.temp > denat_temp + 0.5
+                    self.temp > denat_temp + 0.2
                 ):  # si se pasa de la temperatura objetivo
                     self.pin_heating.write(False)  # apagar calor
                 else:
                     self.pin_heating.write(True)  # encender calor
-                time.sleep(ts)
+                time.sleep(ts/2)
                 current_time = time.time()
                 # current_time = time.time()
             self.pin_heating.write(False)  # pyrefly: ignore
