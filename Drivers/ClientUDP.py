@@ -153,33 +153,42 @@ class UdpClient:
 
     def _run_loop(self):
         assert self._sock is not None, "Socket must be created before running loop."
+
         while not self._stop_evt.is_set():
-            try:
-                data, addr = self._sock.recvfrom(self.buffer_size)
-            except socket.timeout:
-                # Timeout to check stop flag periodically
-                continue
-            except OSError:
-                # Socket closed while waiting
-                break
-            except Exception as e:
-                print(f"[UdpClient] recv error: {e}")
+
+            last_data = None
+            last_addr = None
+
+            # ✅ Vaciamos el buffer completo
+            while True:
+                try:
+                    data, addr = self._sock.recvfrom(self.buffer_size)
+                    last_data = data
+                    last_addr = addr
+                except BlockingIOError:
+                    # No hay más paquetes pendientes
+                    break
+                except Exception as e:
+                    print(f"[UdpClient] recv error: {e}")
+                    break
+
+            # ✅ Si no llegó ningún paquete en este ciclo, seguimos
+            if last_data is None:
+                time.sleep(0.0005)
                 continue
 
+            # ✅ Decodificamos solo el ÚLTIMO paquete
             try:
-                text = data.decode(self.decode, errors="replace").strip()
-                if self.debug:
-                    # print(f"[UdpClient] Received raw: {data} from {addr}")
-                    print(f"[UdpClient] Decoded text: '{text}'")
+                text = last_data.decode(self.decode, errors="replace").strip()
                 if "UDP" in text:
-                    data = text.split("UDP:", 1)[-1]
-                    self.data_temps = json.loads(data)
-                    # print(self.data_temps)
-                    self.latest_text = text
+                    payload = text.split("UDP:", 1)[-1]
+                    self.data_temps = json.loads(payload)
                     self._latest_float = float(self.data_temps.get("max31855", 20.0))
                     self.status_disc = True
+                else:
+                    raise ValueError("Invalid packet")
             except Exception:
-                text = str(data)
+                # Si falla el JSON usamos la última temperatura válida
                 self.data_temps = {
                     "type": "unknown",
                     "timestamp_ms": time.time_ns() // 1_000_000,
@@ -188,22 +197,21 @@ class UdpClient:
                     "max31855": self._latest_float,
                     "unit": "unknown",
                 }
-                # self._latest_float = self._latest_float
                 self.status_disc = False
+                text = str(last_data)
 
-            self._latest_text = text  # pyrefly: ignore
-            self._latest_addr = addr
-            # Call user callback if provided
+            self._latest_text = text
+            self._latest_addr = last_addr
+
+            # ✅ Ejecutamos callback SOLO una vez por batch
             if self.on_message:
                 try:
-                    self.on_message(text, addr, self.data_temps)
-                    # if self.save_data:
-                    #     self.save_data_file(self.filename)
+                    self.on_message(text, last_addr, self.data_temps)
                 except Exception as e:
                     print(f"[UdpClient] on_message error: {e}")
 
-            # Small sleep to avoid burning CPU (optional)
-            time.sleep(0.005)
+            # ✅ Muy pequeño delay para bajar CPU, sin afectar tiempo real
+            time.sleep(0.0005)
 
     def initial_file(self, filename="data_temps.csv"):
         if secrets.get("environment", "") == "dev":

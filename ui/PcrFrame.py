@@ -264,39 +264,65 @@ class PCRFrame(ttk.Frame):
         except ValueError:
             print("Error: Verifique los valores ingresados.")
 
+    # def update_displayed_temperature(self, text, address, temps_dict):
+    #     # print("temps: ", temps_dict)
+    #     temps = [
+    #         temps_dict["mlx_object"],
+    #         0.0,
+    #         temps_dict["max31855"],
+    #     ]
+
+    #     # print(msg)
+    #     try:
+    #         lf = float(temps[2])  # Usamos la temperatura del objeto como referencia
+
+    #     except Exception as e:
+    #         print(e)
+    #         lf = self.temps_filter[-1]
+    #     # filter temperatures
+    #     self.temps_filter.pop(0)
+    #     self.temps_filter.append(lf)
+    #     lf = sum(self.temps_filter) / len(self.temps_filter)
+    #     if lf is None:
+    #         return self.temps_filter[-1]
+    #     self.data_temperature.append(lf)
+    #     self.temp = lf
+    #     if time.time() - self.last_display > self.ts_display:
+    #         msg = f"Temperature: {self.temp} °C\n" + f"State: {self.fase}"
+    #         self.entries[-1].set(msg)  # pyrefly: ignore
+    #         self.last_display = time.time()
+    #     self.temp_update_counter += 1
+    #     if self.temp_update_counter >= 20:
+    #         self.temp_update_counter = 0  # Reiniciar contador
+    #         # Programar actualización de la gráfica en el hilo principal
+    #         self.after(1, lambda: self.update_graph_temperature())
     def update_displayed_temperature(self, text, address, temps_dict):
-        # print("temps: ", temps_dict)
-        temps = [
-            temps_dict["mlx_object"],
-            0.0,
-            temps_dict["max31855"],
-        ]
-
-        # print(msg)
         try:
-            lf = float(temps[2])  # Usamos la temperatura del objeto como referencia
-
-        except Exception as e:
-            print(e)
+            lf = float(temps_dict["max31855"])
+        except Exception:
             lf = self.temps_filter[-1]
-        # filter temperatures
+
+        # ✅ Filtro rápido y estable
         self.temps_filter.pop(0)
         self.temps_filter.append(lf)
         lf = sum(self.temps_filter) / len(self.temps_filter)
-        if lf is None:
-            return self.temps_filter[-1]
-        self.data_temperature.append(lf)
+
+        # ✅ Actualizar temperatura global de control
         self.temp = lf
+        self.data_temperature.append(lf)
+
+        # ✅ Actualizar UI solo cuando toca
         if time.time() - self.last_display > self.ts_display:
-            msg = f"Temperature: {self.temp} °C\n" + f"State: {self.fase}"
-            self.entries[-1].set(msg)  # pyrefly: ignore
+            msg = f"Temperature: {lf:.2f} °C\nState: {self.fase}"
+            self.entries[-1].set(msg)
             self.last_display = time.time()
+
+        # ✅ Actualizar gráfica cada N muestras
         self.temp_update_counter += 1
         if self.temp_update_counter >= 20:
-            self.temp_update_counter = 0  # Reiniciar contador
-            # Programar actualización de la gráfica en el hilo principal
+            self.temp_update_counter = 0
             self.after(1, lambda: self.update_graph_temperature())
-
+    
     def init_temperature_graph(self):
         if self.canvas is not None:
             self.canvas.get_tk_widget().destroy()
