@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
+from templates.utils import convert_si_integer_full
 from ui.UDPClientFrame import UDPIVPlotter
+
 __author__ = "Edisson A. Naula"
 __date__ = "$ 11/11/2025 at 14:45 p.m. $"
 
 import ttkbootstrap as ttk
-from ttkbootstrap.scrolled import ScrolledFrame
 from tkinter.scrolledtext import ScrolledText
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
@@ -31,7 +32,7 @@ def construc_nscans_script(
         "set_autoranging ba 917969p 470u\n"
         f"set_e {E_begin}\n"
         "cell_on\n"
-        f"wait {int(t_equilibration * 1000)}ms\n"
+        f"wait {t_equilibration} s\n"
         f"meas_loop_cv e i {E_begin} {E_vertex1} {E_vertex2} {E_step} nscans({n_scans})\n"
         "pck_start\n"
         "    pck_add e\n"
@@ -58,7 +59,7 @@ def construc_individual_script(t_equilibration, E_begin, E_vertex1, E_vertex2, E
         "set_autoranging ba 917969p 470u\n"
         f"set_e {E_begin}\n"
         "cell_on\n"
-        f"wait {int(t_equilibration * 1000)}ms\n"
+        f"wait {t_equilibration}s\n"
         f"meas_loop_cv e i {E_begin} {E_vertex1} {E_vertex2} {E_step}\n"
         "pck_start\n"
         "    pck_add e\n"
@@ -187,16 +188,23 @@ class ShowProfileFrame(ttk.Toplevel):
         self.destroy()
 
 
-def create_widgets_cv(parent, callbacks: dict):
+def create_widgets_cv(parent, callbacks: dict, columns=2):
     entries = []
-    parent.columnconfigure((0, 1), weight=1)
+
+    # Configurar columnas del contenedor principal
+    parent.columnconfigure(tuple(range(columns)), weight=1)
+
     frame1 = ttk.LabelFrame(parent, text="Cyclic Voltammetry Settings")
-    frame1.grid(row=0, column=0, padx=(5, 20), pady=10, sticky="nswe")
+    frame1.grid(
+        row=0, column=0, columnspan=columns - 1, padx=(5, 20), pady=10, sticky="nswe"
+    )
     frame1.configure(style="Custom.TLabelframe")
-    frame1.columnconfigure((0, 1), weight=1)
+
+    # Configurar columnas internas dinámicamente
+    frame1.columnconfigure(tuple(range(columns * 2)), weight=1)
 
     labels = [
-        "t equilibration (s):",
+        "t equil. (s):",
         "E begin (V):",
         "E vertex1 (V):",
         "E vertex2 (V):",
@@ -205,36 +213,54 @@ def create_widgets_cv(parent, callbacks: dict):
         "Number of scans:",
     ]
 
-    for i, lbl in enumerate(labels):
-        ttk.Label(frame1, text=lbl, style="Custom.TLabel").grid(
-            row=i, column=0, padx=5, pady=5, sticky="w"
-        )
-        entry = ttk.Entry(frame1, font=font_entry)
-        entry.insert(0, DEFAUL_VALUES_CV[i])
-        entry.grid(row=i, column=1, padx=5, pady=5, sticky="w")
-        entries.append(entry)
+    # Calcular cuántos elementos por columna
+    total = len(labels)
+    per_col = (total + columns - 1) // columns  # redondeo hacia arriba
 
+    for col in range(columns):
+        start = col * per_col
+        end = min(start + per_col, total)
+        subset = labels[start:end]
+
+        for i, lbl in enumerate(subset):
+            row = i
+
+            # Etiqueta
+            ttk.Label(frame1, text=lbl, style="Custom.TLabel").grid(
+                row=row, column=col * 2, padx=5, pady=5, sticky="w"
+            )
+
+            # Entry
+            entry = ttk.Entry(frame1, font=font_entry)
+            entry.insert(0, DEFAUL_VALUES_CV[start + i])
+            entry.grid(row=row, column=col * 2 + 1, padx=5, pady=5, sticky="nswe")
+            entries.append(entry)
+
+    # Panel de controles a la derecha
     frame_controls = ttk.Frame(parent)
-    frame_controls.grid(row=0, column=1, pady=10, sticky="n")
+    frame_controls.grid(row=0, column=columns - 1, pady=10, sticky="nswe")
     frame_controls.columnconfigure(0, weight=1)
+
     ttk.Button(
         frame_controls,
         text="Generate CV Profile",
         style="info.TButton",
         command=callbacks.get("callback_generate_profile", ()),
-    ).grid(row=0, column=0, pady=5)
+    ).grid(row=0, column=0, pady=5, sticky="nswe")
+
     ttk.Button(
         frame_controls,
         text="Show MethodScript",
         style="info.TButton",
         command=callbacks.get("callback_show_script", ()),
-    ).grid(row=1, column=0, pady=5)
+    ).grid(row=1, column=0, pady=5, sticky="nswe")
+
     ttk.Button(
         frame_controls,
         text="Send Script",
         style="info.TButton",
         command=callbacks.get("callback_send_script", ()),
-    ).grid(row=2, column=0, pady=5)
+    ).grid(row=2, column=0, pady=5, sticky="nswe")
 
     return entries
 
@@ -257,7 +283,7 @@ class CVFrame(ttk.Frame):
         self.ShowProfile = None
         # ---------------------------------------
 
-        content_frame = ScrolledFrame(self, autohide=True)
+        content_frame = ttk.Frame(self)
         content_frame.grid(row=0, column=0, sticky="nsew")
         content_frame.columnconfigure(0, weight=1)
 
@@ -267,11 +293,29 @@ class CVFrame(ttk.Frame):
             "callback_send_script": self.callback_send_script,
         }
         self.entries = create_widgets_cv(content_frame, callbacks)
-        self.frame_plotter = ttk.LabelFrame(content_frame, text="Live Data Plotter")
+        self.frame_plotter = ttk.LabelFrame(self, text="Live Data Plotter")
         self.frame_plotter.grid(row=1, column=0, padx=10, pady=10, sticky="nsew")
-        udp_plotter = UDPIVPlotter(self.frame_plotter, udp_port=5005, buffer_size=4096, max_points=5000, update_interval_ms=80)
+        self.frame_plotter.columnconfigure(0, weight=1)
+        udp_plotter = UDPIVPlotter(
+            self.frame_plotter,
+            udp_port=5005,
+            buffer_size=4096,
+            max_points=5000,
+            update_interval_ms=80,
+        )
         udp_plotter.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
         self.frame_plotter.grid_forget()
+
+    def create_payload_cv(self):
+        self.payload = {
+            "t_e": convert_si_integer_full(self.t_equilibration),
+            "E_b": convert_si_integer_full(self.E_begin),
+            "E_1": convert_si_integer_full(self.E_vertex1),
+            "E_2": convert_si_integer_full(self.E_vertex2),
+            "E_s": convert_si_integer_full(self.E_step),
+            "sc_r": convert_si_integer_full(self.scan_rate),
+            "n_sc": convert_si_integer_full(self.n_scans),
+        }
 
     def update_data_script(self):
         try:
@@ -297,7 +341,7 @@ class CVFrame(ttk.Frame):
         try:
             self.update_data_script()
             script = self.generate_methodscript()
-            print(script)
+            
             self.frame_plotter.grid(row=1, column=0, padx=10, pady=10, sticky="nsew")
         except ValueError:
             self.frame_plotter.grid_forget()
@@ -341,25 +385,22 @@ class CVFrame(ttk.Frame):
         self.ShowProfile = None
 
     def generate_methodscript(self) -> str:
-        def to_mV(value):
-            return f"{int(value * 1000)}m"
-
         if self.n_scans > 1:
             script = construc_nscans_script(
-                self.t_equilibration,
-                self.E_begin,
-                self.E_vertex1,
-                self.E_vertex2,
-                self.E_step,
-                self.n_scans,
+                convert_si_integer_full(self.t_equilibration),
+                convert_si_integer_full(self.E_begin),
+                convert_si_integer_full(self.E_vertex1),
+                convert_si_integer_full(self.E_vertex2),
+                convert_si_integer_full(self.E_step),
+                convert_si_integer_full(self.n_scans),
             )
         else:
             script = construc_individual_script(
-                self.t_equilibration,
-                self.E_begin,
-                self.E_vertex1,
-                self.E_vertex2,
-                self.E_step,
+                convert_si_integer_full(self.t_equilibration),
+                convert_si_integer_full(self.E_begin),
+                convert_si_integer_full(self.E_vertex1),
+                convert_si_integer_full(self.E_vertex2),
+                convert_si_integer_full(self.E_step),
             )
         return script.strip()
 

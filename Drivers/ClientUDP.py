@@ -64,14 +64,7 @@ class UdpClient:
         self._latest_text = None
         self._latest_float = 20.0
         self._latest_addr = None
-        self.data_temps = {
-            "type": "unknown",
-            "timestamp_ms": time.time_ns() // 1_000_000,
-            "mlx_ambient": 0.0,
-            "mlx_object": 0.0,
-            "max31855": 0.0,
-            "unit": "unknown",
-        }
+        self.data_temps = [20.0, 20.0, 20.0]
         self.status_disc = False
         self.debug = debug
 
@@ -94,6 +87,7 @@ class UdpClient:
         # Timeout opcional (afecta solo llamadas blocking, pero lo dejamos)
         if self.recv_timeout_sec is not None:
             sock.settimeout(self.recv_timeout_sec)
+            print(f"[UdpClient] Socket timeout set to {self.recv_timeout_sec}s")
 
         # Bind
         bind_ip = self.local_ip if self.local_ip else ""
@@ -155,62 +149,64 @@ class UdpClient:
         assert self._sock is not None, "Socket must be created before running loop."
 
         while not self._stop_evt.is_set():
-
             last_data = None
             last_addr = None
 
-            # ✅ Vaciamos el buffer completo
+            # Vaciamos el buffer completo
             while True:
                 try:
                     data, addr = self._sock.recvfrom(self.buffer_size)
                     last_data = data
                     last_addr = addr
+                    self.status_disc = True
                 except BlockingIOError:
                     # No hay más paquetes pendientes
                     break
-                except Exception as e:
-                    print(f"[UdpClient] recv error: {e}")
+                except Exception:
+                    # print(f"[UdpClient] recv error: {e}")
                     break
 
-            # ✅ Si no llegó ningún paquete en este ciclo, seguimos
+            # Si no llegó ningún paquete en este ciclo, seguimos
             if last_data is None:
                 time.sleep(0.0005)
                 continue
 
-            # ✅ Decodificamos solo el ÚLTIMO paquete
+            # Decodificamos solo el ÚLTIMO paquete
             try:
                 text = last_data.decode(self.decode, errors="replace").strip()
                 if "UDP" in text:
                     payload = text.split("UDP:", 1)[-1]
-                    self.data_temps = json.loads(payload)
-                    self._latest_float = float(self.data_temps.get("max31855", 20.0))
+                    self.data_temps = payload.split(":")
+                    self._latest_float = float(self.data_temps[-1])
                     self.status_disc = True
                 else:
                     raise ValueError("Invalid packet")
             except Exception:
                 # Si falla el JSON usamos la última temperatura válida
-                self.data_temps = {
-                    "type": "unknown",
-                    "timestamp_ms": time.time_ns() // 1_000_000,
-                    "mlx_ambient": 0.0,
-                    "mlx_object": 0.0,
-                    "max31855": self._latest_float,
-                    "unit": "unknown",
-                }
+                # self.data_temps = {
+                #     "type": "unknown",
+                #     "timestamp_ms": time.time_ns() // 1_000_000,
+                #     "mlx_ambient": 0.0,
+                #     "mlx_object": 0.0,
+                #     "max31855": self._latest_float,
+                #     "unit": "unknown",
+                # }
+                self.data_temps = [0.0, 0.0, self._latest_float]
                 self.status_disc = False
+                # print("error uod check")
                 text = str(last_data)
 
             self._latest_text = text
             self._latest_addr = last_addr
 
-            # ✅ Ejecutamos callback SOLO una vez por batch
+            # Ejecutamos callback SOLO una vez por batch
             if self.on_message:
                 try:
                     self.on_message(text, last_addr, self.data_temps)
                 except Exception as e:
                     print(f"[UdpClient] on_message error: {e}")
 
-            # ✅ Muy pequeño delay para bajar CPU, sin afectar tiempo real
+            # Muy pequeño delay para bajar CPU, sin afectar tiempo real
             time.sleep(0.0005)
 
     def initial_file(self, filename="data_temps.csv"):
@@ -230,7 +226,7 @@ class UdpClient:
             filename = f"data_temps-{timestamp}.csv"
         # line = f"{timestamp} -- {self.data_temps['max31855']}\n"
         with open(filename, "a") as f:
-            line = f"{timestamp},{self.data_temps['max31855']}\n"
+            line = f"{timestamp},{self.data_temps[2]}\n"
             f.write(line)
         # print(f"[UdpClient] Saved data: {filename}")
 

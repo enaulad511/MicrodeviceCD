@@ -281,7 +281,7 @@ class MainGUI(ttk.Window):
 
         try:
             client.start()
-            time.sleep(1.0)
+            time.sleep(2.0)
             lf = client.get_status_disc()
             if lf is not None and lf:
                 self.txt_connected.set("Disc Connected")

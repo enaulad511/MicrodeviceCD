@@ -51,7 +51,7 @@ class SWVFrame(ttk.Frame):
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=1)
 
-        content_frame = ScrolledFrame(self, autohide=True)
+        content_frame = ttk.Frame(self)
         content_frame.grid(row=0, column=0, sticky="nsew")
         content_frame.columnconfigure(0, weight=1)
 

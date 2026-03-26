@@ -7,7 +7,7 @@ __author__ = "Edisson Naula"
 __date__ = "$ 05/12/2025 at 16:26 $"
 
 UDP_PORT = 5005  # must match Arduino's remotePort
-BUFFER_SIZE = 4096
+BUFFER_SIZE = 512
 
 
 def graph_data(data):
@@ -34,18 +34,26 @@ if __name__ == "__main__":
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     # Allow receiving broadcast packets
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, BUFFER_SIZE)
+    sock.setblocking(False)
+    sock.settimeout(0.1)
     sock.bind(("", UDP_PORT))
+
     plot_data = True
     data_cv = {}
     flag_recording = False
     print(f"Listening for UDP on port {UDP_PORT} ...")
     try:
         while True:
-            data, addr = sock.recvfrom(BUFFER_SIZE)
+            try:
+                data, addr = sock.recvfrom(BUFFER_SIZE)
+            except TimeoutError:
+                continue
             try:
                 text = data.decode('utf-8', errors='replace')
             except Exception:
                 text = str(data)
+
 
             timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
             if "WEMOS" in text:

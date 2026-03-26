@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+from ttkbootstrap.scrolled import ScrolledFrame
 from templates.constants import font_text
 from templates.constants import font_entry
 __author__ = "Edisson A. Naula"
@@ -18,7 +19,7 @@ class ElectrochemicalFrame(ttk.Frame):
         self.rowconfigure(0, weight=1)
 
         # Main content frame with scroll
-        content_frame = ttk.Frame(self,)
+        content_frame = ScrolledFrame(self, autohide=True)
         content_frame.grid(row=0, column=0, sticky="nsew")
         content_frame.columnconfigure((0, 1), weight=1)
         content_frame.rowconfigure(1, weight=1)

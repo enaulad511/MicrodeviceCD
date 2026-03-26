@@ -59,7 +59,7 @@ class TemperatureFrame(ttk.Frame):
         )
 
         self.interval_entry = ttk.Entry(control_frame, width=10, font=font_entry)
-        self.interval_entry.insert(0, "1000")  # Por defecto 1 segundo
+        self.interval_entry.insert(0, "500")  # Por defecto 1 segundo
         self.interval_entry.grid(row=0, column=1, padx=5, pady=5, sticky="we")
 
         ttk.Label(control_frame, text="Unidad:", style="Custom.TLabel").grid(
@@ -153,6 +153,7 @@ class TemperatureFrame(ttk.Frame):
             self.after(intervalo, self.adquirir_dato)
         except ValueError:
             self.interval_entry.configure(background="salmon")
+            print("Intervalo inválido")
 
     def detener_lectura(self):
         print("Detener lectura de temperatura")
@@ -179,7 +180,7 @@ class TemperatureFrame(ttk.Frame):
             temp_c = float(self.sensor_reader())
         except Exception as e:
             print(f"Error leyendo el sensor: {e}")
-            temp_c = float("nan")
+            temp_c = self.temps_filter[-1]
 
         timestamp = time.time() - self.start_time
         self.timestamps.append(timestamp)
@@ -263,13 +264,16 @@ class TemperatureFrame(ttk.Frame):
         Usa socket to pico
         """
         if self.client is None:
+            print("Client is None")
             return 20.0
         lf = self.client.latest_float()
         self.temps_filter.pop(0)
         self.temps_filter.append(lf)
         lf = sum(self.temps_filter) / len(self.temps_filter)
         if lf is None:
+            print("Latest float is None")
             return 20.0
+        print(f"Temperature from sensor: {lf}")
         return lf
 
     @staticmethod
