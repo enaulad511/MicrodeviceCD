@@ -271,7 +271,7 @@ class MainGUI(ttk.Window):
     def try_connect_disc(self):
         client = UdpClient(
             port=5005,
-            buffer_size=4096,
+            buffer_size=512,
             allow_broadcast=True,  # Important for broadcast payloads
             local_ip="",  # "" listens on all interfaces (wlan0, eth0, etc.)
             recv_timeout_sec=1.0,  # lets loop check stop flag periodically

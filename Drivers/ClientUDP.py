@@ -23,7 +23,7 @@ class UdpClient:
     def __init__(
         self,
         port: int = 5005,
-        buffer_size: int = 4096,
+        buffer_size: int = 512,
         allow_broadcast: bool = True,
         local_ip: str = "",  # "" => all interfaces; or set to your wlan0 IP
         decode: str = "utf-8",
@@ -77,19 +77,28 @@ class UdpClient:
 
     def _create_socket(self):
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        # Allow reuse so you can restart without "address already in use"
+
+        # Permite reutilizar la dirección
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
+        # Habilitar broadcast si es necesario
         if self.allow_broadcast:
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
 
-        # Optional receive timeout
+        # ⚠️ IMPORTANTE: Reducir buffer interno del kernel
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 512)
+
+        # ⚠️ IMPORTANTE: Modo no bloqueante para leer el paquete más reciente
+        sock.setblocking(False)
+
+        # Timeout opcional (afecta solo llamadas blocking, pero lo dejamos)
         if self.recv_timeout_sec is not None:
             sock.settimeout(self.recv_timeout_sec)
 
-        # Bind: "" means all interfaces; otherwise the given local_ip (e.g., wlan0 IP)
+        # Bind
         bind_ip = self.local_ip if self.local_ip else ""
         sock.bind((bind_ip, self.port))
+
         return sock
 
     def start(self):
@@ -163,7 +172,7 @@ class UdpClient:
                     # print(f"[UdpClient] Received raw: {data} from {addr}")
                     print(f"[UdpClient] Decoded text: '{text}'")
                 if "UDP" in text:
-                    data = text.split("UDP:", 1)[1]
+                    data = text.split("UDP:", 1)[-1]
                     self.data_temps = json.loads(data)
                     # print(self.data_temps)
                     self.latest_text = text
@@ -256,7 +265,7 @@ if __name__ == "__main__":
 
     client = UdpClient(
         port=5005,
-        buffer_size=4096,
+        buffer_size=512,
         allow_broadcast=True,  # Important for broadcast payloads
         local_ip="",  # "" listens on all interfaces (wlan0, eth0, etc.)
         recv_timeout_sec=1.0,  # lets loop check stop flag periodically

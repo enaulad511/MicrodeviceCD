@@ -382,7 +382,7 @@ class PCRFrame(ttk.Frame):
         
         self.client_temperature = UdpClient(
             port=5005,
-            buffer_size=4096,
+            buffer_size=512,
             allow_broadcast=True,  # Important for broadcast payloads
             local_ip="",  # "" listens on all interfaces (wlan0, eth0, etc.)
             recv_timeout_sec=0.1,  # lets loop check stop flag periodically
