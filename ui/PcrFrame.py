@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 
+from datetime import datetime
 from templates.utils import read_settings_from_file
 from templates.constants import chip_rasp
 from Drivers.ClientUDP import UdpClient
@@ -313,9 +314,10 @@ class PCRFrame(ttk.Frame):
         self.ax.autoscale_view()
         self.canvas.draw_idle()
 
-    def save_data_temps_file(self, filename="data_temperature.csv"):
+    def save_data_temps_file(self):
         import csv
-
+        timestamp = datetime.now()
+        filename = f"temperature_data_{timestamp.strftime('%Y%m%d_%H%M%S')}.csv"
         with open(filename, "w", newline="") as file:
             writer = csv.writer(file)
             writer.writerow(["Temperature (°C)"])
