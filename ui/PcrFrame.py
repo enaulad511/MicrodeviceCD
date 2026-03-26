@@ -88,7 +88,7 @@ def create_widgets_pcr(parent, callbacks: dict):
         style="success.TButton",
         command=callbacks.get("callback_start_experiment", ()),
     ).grid(row=0, column=1, padx=10, sticky="nswe")
-    
+
     # save data button
     ttk.Button(
         frame_buttons,
@@ -96,13 +96,13 @@ def create_widgets_pcr(parent, callbacks: dict):
         style="danger.TButton",
         command=callbacks.get("callback_stop_experiment", ()),
     ).grid(row=0, column=2, padx=10, sticky="nswe")
-    
+
     ttk.Button(
         frame_buttons,
         text="Save Data",
         style="info.TButton",
         command=callbacks.get("callback_save_data", ()),
-    ).grid(row=0 , column=3, padx=10, sticky="nswe")
+    ).grid(row=0, column=3, padx=10, sticky="nswe")
     return entries
 
 
@@ -126,12 +126,13 @@ class PCRFrame(ttk.Frame):
         content_frame = ScrolledFrame(self, autohide=True)
         content_frame.grid(row=0, column=0, sticky="nsew")
         content_frame.columnconfigure(0, weight=1)
+        self.temps_filter = [20.0, 20.0, 20.0, 20.0]
 
         callbacks = {
             "callback_generate_profile": self.callback_generate_profile,
             "callback_start_experiment": self.callback_start_experiment,
             "callback_stop_experiment": self.callback_stop_experiment,
-            "callback_save_data": self.save_data_temps_file
+            "callback_save_data": self.save_data_temps_file,
         }
         self.entries = create_widgets_pcr(content_frame, callbacks)
 
@@ -273,16 +274,22 @@ class PCRFrame(ttk.Frame):
 
         # print(msg)
         try:
-            self.temp = float(
-                temps[2]
-            )  # Usamos la temperatura del objeto como referencia
+            lf = float(temps[2])  # Usamos la temperatura del objeto como referencia
+            
         except Exception as e:
             print(e)
-            self.temp = 0.0
+            lf  = self.temps_filter[-1]
+        # filter temperatures
+        self.temps_filter.pop(0)
+        self.temps_filter.append(lf)
+        lf = sum(self.temps_filter) / len(self.temps_filter)
+        if lf is None:
+            return self.temps_filter[-1]
+        self.data_temperature.append(lf)
         if time.time() - self.last_display > self.ts_display:
             msg = f"Temperature: {self.temp} °C\n" + f"State: {self.fase}"
             self.entries[-1].set(msg)  # pyrefly: ignore
-        self.data_temperature.append(self.temp)
+            self.last_display = time.time()
         self.temp_update_counter += 1
         if self.temp_update_counter >= 20:
             self.temp_update_counter = 0  # Reiniciar contador
@@ -295,7 +302,7 @@ class PCRFrame(ttk.Frame):
         self.data_temperature = []  # Datos acumulados
 
         self.fig, self.ax = plt.subplots()
-        self.line, = self.ax.plot([], [], marker="o")
+        (self.line,) = self.ax.plot([], [], marker="o")
         self.ax.set_title("Temperature (°C)")
         self.ax.set_xlabel("Samples")
         self.ax.set_ylabel("°C")
@@ -316,6 +323,7 @@ class PCRFrame(ttk.Frame):
 
     def save_data_temps_file(self):
         import csv
+
         timestamp = datetime.now()
         filename = f"temperature_data_{timestamp.strftime('%Y%m%d_%H%M%S')}.csv"
         with open(filename, "w", newline="") as file:
@@ -379,7 +387,7 @@ class PCRFrame(ttk.Frame):
             if self.stop_udp_listenner is None
             else self.stop_udp_listenner
         )
-        
+
         self.client_temperature = UdpClient(
             port=5005,
             buffer_size=512,
