@@ -275,10 +275,10 @@ class PCRFrame(ttk.Frame):
         # print(msg)
         try:
             lf = float(temps[2])  # Usamos la temperatura del objeto como referencia
-            
+
         except Exception as e:
             print(e)
-            lf  = self.temps_filter[-1]
+            lf = self.temps_filter[-1]
         # filter temperatures
         self.temps_filter.pop(0)
         self.temps_filter.append(lf)
@@ -286,6 +286,7 @@ class PCRFrame(ttk.Frame):
         if lf is None:
             return self.temps_filter[-1]
         self.data_temperature.append(lf)
+        self.temp = lf
         if time.time() - self.last_display > self.ts_display:
             msg = f"Temperature: {self.temp} °C\n" + f"State: {self.fase}"
             self.entries[-1].set(msg)  # pyrefly: ignore
