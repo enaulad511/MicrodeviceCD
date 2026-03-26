@@ -99,7 +99,7 @@ def create_widgets_pcr(parent, callbacks: dict):
     ttk.Button(
         frame_buttons,
         text="Save Data",
-        style="warning.TButton",
+        style="info.TButton",
         command=callbacks.get("callback_save_data", ()),
     ).grid(row=0 , column=3, pady=10, sticky="nswe")
     return entries
@@ -130,12 +130,13 @@ class PCRFrame(ttk.Frame):
             "callback_generate_profile": self.callback_generate_profile,
             "callback_start_experiment": self.callback_start_experiment,
             "callback_stop_experiment": self.callback_stop_experiment,
+            "callback_save_data": self.save_data_temps_file
         }
         self.entries = create_widgets_pcr(content_frame, callbacks)
 
         # Frame para mostrar el gráfico
         self.profile_frame = ttk.LabelFrame(content_frame, text="Profile Preview")
-        self.profile_frame.grid(row=1, column=0, padx=10, pady=10, sticky="nswe")
+        self.profile_frame.grid(row=3, column=0, padx=10, pady=10, sticky="nswe")
         self.profile_frame.configure(style="Custom.TLabelframe")
 
         self.canvas = None  # Para almacenar el gráfico incrustado
@@ -312,7 +313,15 @@ class PCRFrame(ttk.Frame):
         self.ax.autoscale_view()
         self.canvas.draw_idle()
 
+    def save_data_temps_file(self, filename="data_temperature.csv"):
+        import csv
 
+        with open(filename, "w", newline="") as file:
+            writer = csv.writer(file)
+            writer.writerow(["Temperature (°C)"])
+            for temp in self.data_temperature:
+                writer.writerow([temp])
+        print(f"Data saved to {filename}")
 
     def callback_start_experiment(self):
         if self.running_experiment:
