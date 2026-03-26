@@ -273,7 +273,6 @@ class TemperatureFrame(ttk.Frame):
         if lf is None:
             print("Latest float is None")
             return 20.0
-        print(f"Temperature from sensor: {lf}")
         return lf
 
     @staticmethod
