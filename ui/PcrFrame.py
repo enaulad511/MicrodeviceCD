@@ -80,14 +80,14 @@ def create_widgets_pcr(parent, callbacks: dict):
         text="Generate Profile",
         style="info.TButton",
         command=callbacks.get("callback_generate_profile", ()),
-    ).grid(row=0, column=0, pady=10, sticky="nswe")
+    ).grid(row=0, column=0, padx=10, sticky="nswe")
     # Boton para empezar experimento
     ttk.Button(
         frame_buttons,
         text="Start Experiment",
         style="success.TButton",
         command=callbacks.get("callback_start_experiment", ()),
-    ).grid(row=0, column=1, pady=10, sticky="nswe")
+    ).grid(row=0, column=1, padx=10, sticky="nswe")
     
     # save data button
     ttk.Button(
@@ -95,14 +95,14 @@ def create_widgets_pcr(parent, callbacks: dict):
         text="Stop Experiment",
         style="danger.TButton",
         command=callbacks.get("callback_stop_experiment", ()),
-    ).grid(row=0, column=2, pady=10, sticky="nswe")
+    ).grid(row=0, column=2, padx=10, sticky="nswe")
     
     ttk.Button(
         frame_buttons,
         text="Save Data",
         style="info.TButton",
         command=callbacks.get("callback_save_data", ()),
-    ).grid(row=0 , column=3, pady=10, sticky="nswe")
+    ).grid(row=0 , column=3, padx=10, sticky="nswe")
     return entries
 
 
