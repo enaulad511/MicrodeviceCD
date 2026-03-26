@@ -343,6 +343,7 @@ class PCRFrame(ttk.Frame):
             f"High Temp: {high_temp}, Low Temp: {low_temp}, Time High: {time_high}, Time Low: {time_low}, Cycles: {cycles}, RPM: {rpm}",
             f"Denaturing Time: {denat_time}, Denaturing Temp: {denat_temp}",
         )
+        self.init_temperature_graph()
         thread_experiment = threading.Thread(
             target=self.experiment_pcr,
             args=(
@@ -378,7 +379,7 @@ class PCRFrame(ttk.Frame):
             if self.stop_udp_listenner is None
             else self.stop_udp_listenner
         )
-        self.init_temperature_graph()
+        
         self.client_temperature = UdpClient(
             port=5005,
             buffer_size=4096,
