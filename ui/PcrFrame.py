@@ -389,9 +389,9 @@ class PCRFrame(ttk.Frame):
         # prefix_col = f" high_temp: {high_temp}-L "
         settings = read_settings_from_file()
         try:
-            ts = float(settings.get("ts_pcr", 0.1))
+            ts = float(settings.get("pidControllerRPM", {}).get("ts_pcr", 0.05))
         except Exception:
-            ts = 0.1
+            ts = 0.05
         prefix_col = f"high_temp: {high_temp}-low_temp: {low_temp}-time_high: {time_high}-time_low: {time_low}-cycles: {cycles}-rpm: {rpm}-denat_temp: {denat_temp}-denat_time: {denat_time}-ts: {ts}"
         self.client_temperature = UdpClient(
             port=5005,
