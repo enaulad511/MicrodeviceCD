@@ -33,6 +33,7 @@ class UdpClient:
         save_data=True,
         stop_event=None,
         debug=False,
+        prefixCol=""
     ):
         """
         :param port: UDP port to bind.
@@ -57,7 +58,7 @@ class UdpClient:
         if save_data:
             timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             self.filename = f"data_temps-{timestamp}.csv"
-            self.initial_file(self.filename)
+            self.initial_file(self.filename, prefixcolum=prefixCol)
         self._sock = None
         self._thread = None
         self._stop_evt = threading.Event() if stop_event is None else stop_event
@@ -209,11 +210,14 @@ class UdpClient:
             # Muy pequeño delay para bajar CPU, sin afectar tiempo real
             time.sleep(0.0005)
 
-    def initial_file(self, filename="data_temps.csv"):
+    def initial_file(self, filename="data_temps.csv", prefixcolum=""):
         if secrets.get("environment", "") == "dev":
             return
         # save header in txt
-        header = "temperature\n"
+        if prefixcolum:
+            header = prefixcolum + "temperature\n"
+        else:
+            header = "temperature\n"
         with open(filename, "w") as f:
             f.write(header)
 

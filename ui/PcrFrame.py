@@ -264,7 +264,6 @@ class PCRFrame(ttk.Frame):
         except ValueError:
             print("Error: Verifique los valores ingresados.")
 
-   
     def update_displayed_temperature(self, text, address, temps_dict):
         try:
             lf = float(temps_dict[2])
@@ -291,7 +290,7 @@ class PCRFrame(ttk.Frame):
         if self.temp_update_counter >= 10:
             self.temp_update_counter = 0
             self.after(1, lambda: self.update_graph_temperature())
-    
+
     def init_temperature_graph(self):
         if self.canvas is not None:
             self.canvas.get_tk_widget().destroy()
@@ -383,7 +382,14 @@ class PCRFrame(ttk.Frame):
             if self.stop_udp_listenner is None
             else self.stop_udp_listenner
         )
-
+        # write a predix line with al parameters of experiment
+        # prefix_col = f" high_temp: {high_temp}-L "
+        settings = read_settings_from_file()
+        try:
+            ts = float(settings.get("ts_pcr", 0.1))
+        except Exception:
+            ts = 0.1
+        prefix_col = f"high_temp: {high_temp}-low_temp: {low_temp}-time_high: {time_high}-time_low: {time_low}-cycles: {cycles}-rpm: {rpm}-denat_temp: {denat_temp}-denat_time: {denat_time}-ts: {ts}"
         self.client_temperature = UdpClient(
             port=5005,
             buffer_size=512,
@@ -393,17 +399,16 @@ class PCRFrame(ttk.Frame):
             on_message=lambda t, a, t_d: self.update_displayed_temperature(t, a, t_d),
             parse_float=True,  # Arduino sends a numeric string,
             stop_event=self.stop_udp_listenner,
+            prefixCol=prefix_col,
         )
         self.client_temperature.start()
         # rotate motor ar rpm
         from Drivers.DriverStepperSys import DriverStepperSys
 
         try:
-            settings = read_settings_from_file()
             acceleration = float(settings.get("acceleration_spin", 200.0))
             direction = "CW"
             rpm_setpoint = rpm
-            ts = float(settings.get("ts_pcr", 0.1))
             if sistemaMotor is None:
                 print("Creating new driver instance")
                 sistemaMotor = DriverStepperSys(
@@ -467,7 +472,7 @@ class PCRFrame(ttk.Frame):
                     self.pin_heating.write(False)  # apagar calor
                 else:
                     self.pin_heating.write(True)  # encender calor
-                time.sleep(ts/2)
+                time.sleep(ts / 2)
                 current_time = time.time()
                 # current_time = time.time()
             self.pin_heating.write(False)  # pyrefly: ignore
