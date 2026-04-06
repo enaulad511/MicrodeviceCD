@@ -552,8 +552,8 @@ class PCRFrame(ttk.Frame):
                         self.pin_heating.write(True)  # encender calor
                     else:
                         self.pin_heating.write(False)  # apagar calor
-                        passed_time += ts
-                    time.sleep(ts)
+                    passed_time += ts
+                    time.sleep(ts/2)
                     # current_time = time.time()
                 print(f"Hold complete, end of cycle {current_cycle}")
                 current_cycle += 1
