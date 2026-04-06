@@ -127,6 +127,7 @@ class PCRFrame(ttk.Frame):
         content_frame.grid(row=0, column=0, sticky="nsew")
         content_frame.columnconfigure(0, weight=1)
         self.temps_filter = [20.0, 20.0, 20.0, 20.0]
+        self.prefix_row = "temps_pcr"
 
         callbacks = {
             "callback_generate_profile": self.callback_generate_profile,
@@ -323,7 +324,7 @@ class PCRFrame(ttk.Frame):
         filename = f"temperature_data_{timestamp.strftime('%Y%m%d_%H%M%S')}.csv"
         with open(filename, "w", newline="") as file:
             writer = csv.writer(file)
-            writer.writerow(["Temperature (°C)"])
+            writer.writerow([self.prefix_row])
             for temp in self.data_temperature:
                 writer.writerow([temp])
         print(f"Data saved to {filename}")
@@ -342,10 +343,12 @@ class PCRFrame(ttk.Frame):
         rpm = float(self.entries[5].get())
         denat_time = float(self.entries[6].get())
         denat_temp = float(self.entries[7].get())
-        print(
+        msg = (
             f"High Temp: {high_temp}, Low Temp: {low_temp}, Time High: {time_high}, Time Low: {time_low}, Cycles: {cycles}, RPM: {rpm}",
             f"Denaturing Time: {denat_time}, Denaturing Temp: {denat_temp}",
         )
+        print(msg)
+
         self.init_temperature_graph()
         thread_experiment = threading.Thread(
             target=self.experiment_pcr,
@@ -400,7 +403,9 @@ class PCRFrame(ttk.Frame):
             parse_float=True,  # Arduino sends a numeric string,
             stop_event=self.stop_udp_listenner,
             prefixCol=prefix_col,
+            save_data=False,
         )
+        self.prefix_row = prefix_col
         self.client_temperature.start()
         # rotate motor ar rpm
         from Drivers.DriverStepperSys import DriverStepperSys
@@ -584,6 +589,8 @@ class PCRFrame(ttk.Frame):
             self.pin_pcr.write(False)
             self.pin_heating.close()
             self.pin_pcr.close()
+            # save data temps
+            self.save_data_temps_file()
 
         except Exception as e:
             print(f"exception in experiment: {e}")

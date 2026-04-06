@@ -228,7 +228,8 @@ class UdpClient:
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         if filename is None:
             filename = f"data_temps-{timestamp}.csv"
-        # line = f"{timestamp} -- {self.data_temps['max31855']}\n"
+        # line = f"{timestamp} -- {self.data_temps['max31855']}
+        
         with open(filename, "a") as f:
             line = f"{timestamp},{self.data_temps[2]}\n"
             f.write(line)
