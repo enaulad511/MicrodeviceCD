@@ -3,17 +3,36 @@ scr/apps/helloWorld/bin/
 scr/apps/helloWorld/obj/
 CPico/*.gitignore
 CPico/*.txt
-CPico/.vscode/
-CPico/build/
-CPico/*/
-__pycache__/
-**.pyc
-ui/*.pyc
+# --- Python & Bytecode ---
+**/__pycache__/
+*.pyc
 *.pyo
-ui/__pycache__/CvFrame.cpython-313.pyc
-ui/__pycache__/ElectrochemicalFrame.cpython-313.pyc
-pyrefly.toml
-ui/__pycache__/CvFrame.cpython-313.pyc
-*_test.py
-templates/__pycache__/constants.cpython-313.pyc
+*.pyd
+.pytest_cache/
+
+# --- Entornos Virtuales ---
+venv/
+.venv/
+env/
+
+# --- IDEs (PyCharm y VS Code) ---
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# --- Compilación de C/C++ (Pico SDK) ---
+build/
+CMakeLists.txt.user
+*.elf
+*.bin
+*.uf2
+*.map
+
+# --- Configuración y Secretos ---
 .env
+pyrefly.toml
+
+# --- Opcional: Pruebas ---
+# Descomenta la siguiente línea si NO quieres subir tus archivos de test
+*_test.py
