@@ -114,6 +114,7 @@ class PCRFrame(ttk.Frame):
         self.pin_heating = None
         self.pin_pcr = None
         self.temp = 0.0
+        self.temp_ts = time.time()
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=1)
         self.ads = ads_reader
@@ -278,6 +279,7 @@ class PCRFrame(ttk.Frame):
 
         # Actualizar temperatura global de control
         self.temp = lf
+        self.temp_ts = time.time()
         self.data_temperature.append(lf)
 
         # Actualizar UI solo cuando toca
@@ -463,8 +465,11 @@ class PCRFrame(ttk.Frame):
             # heat to temp
             self.fase = "Denaturation"
             self.pin_heating.write(True)  # pyrefly: ignore
+            self.temp_ts = time.time()
             while self.temp < denat_temp and not self.stop_udp_listenner.is_set():
                 # print(f"Temperature: {self.temp} °C")
+                temp_age = time.time() - self.temp_ts
+                print(f"Temp age: {temp_age * 1000:.1f} ms")
                 time.sleep(ts)
             # hold temperature for denat_time seconds only coounting time when temp is over temp target
             start_time = time.time()
@@ -553,7 +558,7 @@ class PCRFrame(ttk.Frame):
                     else:
                         self.pin_heating.write(False)  # apagar calor
                     passed_time += ts
-                    time.sleep(ts/2)
+                    time.sleep(ts / 2)
                     # current_time = time.time()
                 print(f"Hold complete, end of cycle {current_cycle}")
                 current_cycle += 1

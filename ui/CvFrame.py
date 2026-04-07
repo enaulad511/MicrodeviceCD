@@ -315,6 +315,7 @@ class CVFrame(ttk.Frame):
             "E_s": convert_si_integer_full(self.E_step),
             "sc_r": convert_si_integer_full(self.scan_rate),
             "n_sc": convert_si_integer_full(self.n_scans),
+            "method": "cv",
         }
 
     def update_data_script(self):
@@ -340,8 +341,9 @@ class CVFrame(ttk.Frame):
     def callback_send_script(self):
         try:
             self.update_data_script()
+            self.create_payload_cv()
             script = self.generate_methodscript()
-            
+
             self.frame_plotter.grid(row=1, column=0, padx=10, pady=10, sticky="nsew")
         except ValueError:
             self.frame_plotter.grid_forget()

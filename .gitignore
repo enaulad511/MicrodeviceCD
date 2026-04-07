@@ -36,3 +36,4 @@ pyrefly.toml
 # --- Opcional: Pruebas ---
 # Descomenta la siguiente línea si NO quieres subir tus archivos de test
 *_test.py
+files_test/
