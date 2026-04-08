@@ -545,7 +545,7 @@ class PCRFrame(ttk.Frame):
             # Denaturation Hold (control proporcional por ventana)
             # ------------------------------------------------------------
             self.fase = "Denaturation Hold"
-            KI = 0.375  # medio
+            KI = 0.4  # medio
             I_MAX = 0.5
             KP_HOLD = 0.3  # más suave que en calentamiento
             TEMP_BAND = 0.05  # margen muerto muy pequeño
