@@ -468,8 +468,6 @@ class PCRFrame(ttk.Frame):
             self.fase = "Denaturation"
             self.pin_heating.write(True)  # pyrefly: ignore
             self.temp_ts = time.time()
-            heat_led_status = True
-            current_time = time.time()
             KP = 0.6  # ajustar
             WINDOW = 0.5  # segundos
             MAX_AGE = 0.15  # s
@@ -494,22 +492,6 @@ class PCRFrame(ttk.Frame):
                 self.pin_heating.write(False)
                 time.sleep(WINDOW - on_time)
 
-            # # hold temperature for denat_time seconds only coounting time when temp is over temp target
-            # start_time = time.time()
-            # current_time = time.time()
-            # self.fase = "Denaturation Hold"
-            # heat_led_status=False
-            # while current_time - start_time < denat_time:
-            #     if (
-            #         self.temp > denat_temp + 0.2
-            #     ):  # si se pasa de la temperatura objetivo
-            #         self.pin_heating.write(False)  # apagar calor
-            #     else:
-            #         self.pin_heating.write(True)  # encender calor
-            #     time.sleep(ts / 2)
-            #     current_time = time.time()
-            #     # current_time = time.time()
-            # self.pin_heating.write(False)  # pyrefly: ignore
             # ------------------------------------------------------------
             # Denaturation Hold (control proporcional por ventana)
             # ------------------------------------------------------------
@@ -573,18 +555,42 @@ class PCRFrame(ttk.Frame):
                 # -------------------------------------------------------------------
                 # -------------------------------------------------------------------
                 # reach high temp
+
                 self.fase = "High temp"
-                while True and not self.stop_udp_listenner.is_set():
-                    if (
-                        self.temp > high_temp + 1.1
-                    ):  # si se pasa de la temperatura objetivo
-                        self.pin_heating.write(False)  # apagar calor
-                    elif self.temp < high_temp - 5:
-                        self.pin_heating.write(True)  # encender calor
-                    else:
-                        break
-                    time.sleep(ts)
-                self.pin_heating.write(False)  # pyrefly: ignore
+                KP = 0.8  # ajustar
+                WINDOW = 0.3  # segundos
+                MAX_AGE = 0.10  # s
+                while self.temp < high_temp and not self.stop_udp_listenner.is_set():
+                    # heat straigh foward to the 75 % of setpoint
+                    if self.temp <= high_temp * 0.75:
+                        continue
+                    # print(f"Temperature: {self.temp} °C")
+
+                    age = time.time() - self.temp_ts
+                    if age > MAX_AGE:
+                        # Temperatura vieja → no confiar
+                        self.pin_heating.write(False)
+                        continue
+                    error = high_temp - self.temp
+                    power = max(0.0, min(1.0, KP * error))
+                    on_time = power * WINDOW
+
+                    if on_time > 0:
+                        self.pin_heating.write(True)
+                        time.sleep(on_time)
+                    self.pin_heating.write(False)
+                    time.sleep(WINDOW - on_time)
+                # while True and not self.stop_udp_listenner.is_set():
+                #     if (
+                #         self.temp > high_temp + 1.1
+                #     ):  # si se pasa de la temperatura objetivo
+                #         self.pin_heating.write(False)  # apagar calor
+                #     elif self.temp < high_temp - 5:
+                #         self.pin_heating.write(True)  # encender calor
+                #     else:
+                #         break
+                #     time.sleep(ts)
+                # self.pin_heating.write(False)  # pyrefly: ignore
                 print(f"Temperature reached: {self.temp} °C")
                 # -------------------------------------------------------------------
                 # hold High temperature
