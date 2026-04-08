@@ -547,7 +547,7 @@ class PCRFrame(ttk.Frame):
             self.fase = "Denaturation Hold"
             KI = 0.375  # medio
             I_MAX = 0.5
-            KP_HOLD = 0.4  # más suave que en calentamiento
+            KP_HOLD = 0.3  # más suave que en calentamiento
             TEMP_BAND = 0.05  # margen muerto muy pequeño
             self.hold_temperature(
                 denat_temp,
