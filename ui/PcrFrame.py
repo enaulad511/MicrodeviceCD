@@ -266,21 +266,23 @@ class PCRFrame(ttk.Frame):
         except ValueError:
             print("Error: Verifique los valores ingresados.")
 
-    def update_displayed_temperature(self, text, address, temps_dict):
+    def update_displayed_temperature(self, text, address, temps_list):
         try:
-            lf = float(temps_dict[2])
+            lf = float(temps_list[2])
+            self.temp_ts = temps_list[3]
         except Exception:
-            lf = self.temps_filter[-1]
-
+            lf = self.temp
+            self.temp_ts = time.time()
         # Filtro rápido y estable
-        self.temps_filter.pop(0)
-        self.temps_filter.append(lf)
-        lf = sum(self.temps_filter) / len(self.temps_filter)
+        alpha = 0.3
+        self.temp = alpha * lf + (1-alpha) * self.temp
+        # self.temps_filter.pop(0)
+        # self.temps_filter.append(lf)
+        # lf = sum(self.temps_filter) / len(self.temps_filter)
 
-        # Actualizar temperatura global de control
-        self.temp = lf
-        self.temp_ts = time.time()
-        self.data_temperature.append(lf)
+        # # Actualizar temperatura global de control
+        # self.temp = lf
+        # self.data_temperature.append(lf)
 
         # Actualizar UI solo cuando toca
         if time.time() - self.last_display > self.ts_display:
