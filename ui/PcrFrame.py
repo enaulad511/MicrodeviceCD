@@ -471,6 +471,9 @@ class PCRFrame(ttk.Frame):
             heat_led_status = True
             current_time = time.time()
             while self.temp < denat_temp and not self.stop_udp_listenner.is_set():
+                # heat straigh foward to the 75 % of setpoint 
+                if self.temp<= denat_temp*0.75:
+                    continue
                 # print(f"Temperature: {self.temp} °C")
                 heat_led_status = True
                 self.pin_heating.write(heat_led_status)
@@ -485,11 +488,6 @@ class PCRFrame(ttk.Frame):
                     and not self.stop_udp_listenner.is_set()
                 ):
                     time.sleep(ts / 4)
-                    print(
-                        "stop bucle",
-                        time.time() - current_time,
-                        not self.stop_udp_listenner.is_set(),
-                    )
                 current_time = time.time()
             # hold temperature for denat_time seconds only coounting time when temp is over temp target
             start_time = time.time()
