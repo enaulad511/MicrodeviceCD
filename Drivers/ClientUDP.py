@@ -183,10 +183,7 @@ class UdpClient:
                                 ("last_addr",),
                                 [0, 0, self.latest_temp.value, self.latest_temp.ts],
                             )
-                            print(
-                                "on message",
-                                [0, 0, self.latest_temp.value, self.latest_temp.ts],
-                            )
+                            
                         except Exception as e:
                             print(f"[UdpClient] on_message error: {e}")
 
