@@ -477,7 +477,7 @@ class PCRFrame(ttk.Frame):
                 temp_age = time.time() - self.temp_ts
                 if temp_age > 0.1:
                     # Temperatura vieja → no confiar
-                    self.pin_heating.write(heat_led_status)
+                    self.pin_heating.write(not heat_led_status)
                     continue
                 while time.time() - current_time < ts and not self.stop_udp_listenner.is_set():
                     time.sleep(ts / 4)
