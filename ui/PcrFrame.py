@@ -497,6 +497,10 @@ class PCRFrame(ttk.Frame):
             # ------------------------------------------------------------
             start_time = time.time()
             self.fase = "Denaturation Hold"
+            
+            KI = 0.02           # LENTO
+            I_MAX = 0.5
+            integral = 0.0
 
             KP_HOLD = 0.4  # más suave que en calentamiento
             WINDOW = ts  # reutiliza tu ts (100 ms está bien)
@@ -517,12 +521,14 @@ class PCRFrame(ttk.Frame):
                 temp = self.temp
 
                 # Banda muerta mínima para evitar chatter
-                error = denat_temp - temp
+                error = denat_temp - temp                
+                integral += error * WINDOW
+                integral = max(-I_MAX, min(I_MAX, integral))
                 if abs(error) < TEMP_BAND:
                     power = 0.0
-                else:
-                    power = KP_HOLD * error
-
+                else:        
+                    power = KP_HOLD * error + KI * integral
+                    # power = max(0.0, min(1.0, power))
                 # Saturar potencia
                 power = max(0.0, min(1.0, power))
 
@@ -560,6 +566,7 @@ class PCRFrame(ttk.Frame):
                 KP = 0.8  # ajustar
                 WINDOW = 0.3  # segundos
                 MAX_AGE = 0.10  # s
+                self.pin_heating.write(True)  # pyrefly: ignore
                 while self.temp < high_temp and not self.stop_udp_listenner.is_set():
                     # heat straigh foward to the 75 % of setpoint
                     if self.temp <= high_temp * 0.75:
