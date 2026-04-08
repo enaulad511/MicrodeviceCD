@@ -473,7 +473,7 @@ class PCRFrame(ttk.Frame):
             MAX_AGE = 0.15  # s
             while self.temp < denat_temp and not self.stop_udp_listenner.is_set():
                 # heat straigh foward to the 75 % of setpoint
-                if self.temp <= denat_temp * 0.75:
+                if self.temp <= denat_temp * 0.6:
                     continue
                 # print(f"Temperature: {self.temp} °C")
 
@@ -498,7 +498,7 @@ class PCRFrame(ttk.Frame):
             start_time = time.time()
             self.fase = "Denaturation Hold"
             
-            KI = 0.02           # LENTO
+            KI = 0.06           # LENTO
             I_MAX = 0.5
             integral = 0.0
 
@@ -569,7 +569,7 @@ class PCRFrame(ttk.Frame):
                 self.pin_heating.write(True)  # pyrefly: ignore
                 while self.temp < high_temp and not self.stop_udp_listenner.is_set():
                     # heat straigh foward to the 75 % of setpoint
-                    if self.temp <= high_temp * 0.75:
+                    if self.temp <= high_temp * 0.6:
                         continue
                     # print(f"Temperature: {self.temp} °C")
 
