@@ -282,25 +282,6 @@ class DriverStepperSys:
             }
             return data_out
 
-    # def close(self):
-    #     """Cierra UART y libera recursos GPIO."""
-    #     self._running = False
-    #     try:
-    #         if self._rx_thread.is_alive():
-    #             self._rx_thread.join(timeout=0.5)
-    #     except Exception:
-    #         pass
-    #     try:
-    #         self.ser.close()
-    #     except Exception:
-    #         pass
-    #     try:
-    #         if self._gpio_request is not None:
-    #             # Deshabilitar el driver al cerrar (seguro)
-    #             self.enable_driver(False)
-    #             self._gpio_request.release()
-    #     except Exception:
-    #         pass
     def close(self):
         """Cierra UART y libera recursos GPIO."""
         self._running = False

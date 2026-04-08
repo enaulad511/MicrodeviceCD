@@ -421,7 +421,6 @@ class PCRFrame(ttk.Frame):
                 if stop_func.is_set():
                     break
                 time.sleep(WINDOW / 10)
-        print("passed time: ", time.time() - start_time)
 
     def experiment_pcr(
         self,
@@ -688,7 +687,6 @@ class PCRFrame(ttk.Frame):
                 print(f"fluorescence voltage: {v_fluo}")
 
             print("PCR cycles complete, reading fluorescence")
-            # passed_time = 0
             self.fase = "Extension"
             time_extension = 30
             KI = 0.45  # medio
@@ -753,6 +751,7 @@ class PCRFrame(ttk.Frame):
         if sistemaMotor is not None:
             sistemaMotor.stop()
             sistemaMotor.close()
+            sistemaMotor = None
         if self.pin_heating is not None:
             self.pin_heating.write(False)
             self.pin_heating.close()
@@ -763,3 +762,4 @@ class PCRFrame(ttk.Frame):
         self.pin_pcr = None
         self.stop_event_motor = None
         self.stop_udp_listenner = None
+        sistemaMotor=None
