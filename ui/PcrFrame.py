@@ -498,11 +498,11 @@ class PCRFrame(ttk.Frame):
             start_time = time.time()
             self.fase = "Denaturation Hold"
             
-            KI = 0.06           # LENTO
+            KI = 0.1           # LENTO
             I_MAX = 0.5
             integral = 0.0
 
-            KP_HOLD = 0.4  # más suave que en calentamiento
+            KP_HOLD = 0.6  # más suave que en calentamiento
             WINDOW = ts  # reutiliza tu ts (100 ms está bien)
             MAX_TEMP_AGE = ts  # si es más vieja → no confiar
             TEMP_BAND = 0.05  # margen muerto muy pequeño
