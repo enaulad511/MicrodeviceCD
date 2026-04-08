@@ -275,7 +275,7 @@ class PCRFrame(ttk.Frame):
             self.temp_ts = time.time()
         # Filtro rápido y estable
         alpha = 0.3
-        self.temp = alpha * lf + (1-alpha) * self.temp
+        self.temp = alpha * lf + (1 - alpha) * self.temp
         # self.temps_filter.pop(0)
         # self.temps_filter.append(lf)
         # lf = sum(self.temps_filter) / len(self.temps_filter)
@@ -475,12 +475,17 @@ class PCRFrame(ttk.Frame):
                 heat_led_status = True
                 self.pin_heating.write(heat_led_status)
                 temp_age = time.time() - self.temp_ts
-                if temp_age > 0.1:
+                if temp_age > ts:
                     # Temperatura vieja → no confiar
                     self.pin_heating.write(not heat_led_status)
+                    print("off")
                     continue
-                while time.time() - current_time < ts and not self.stop_udp_listenner.is_set():
+                while (
+                    time.time() - current_time < ts
+                    and not self.stop_udp_listenner.is_set()
+                ):
                     time.sleep(ts / 4)
+                    print("stop bucle")
                     current_time = time.time()
             # hold temperature for denat_time seconds only coounting time when temp is over temp target
             start_time = time.time()
