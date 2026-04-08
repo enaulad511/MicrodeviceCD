@@ -65,7 +65,7 @@ class UdpClient:
         if save_data:
             timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             self.filename = f"data_temps-{timestamp}.csv"
-            self.initial_file(self.filename, prefixcolum=prefixCol)
+            # self.initial_file(self.filename, prefixcolum=prefixCol)
         self._sock = None
         self._thread = None
         self._stop_evt = threading.Event() if stop_event is None else stop_event
