@@ -471,8 +471,8 @@ class PCRFrame(ttk.Frame):
             heat_led_status = True
             current_time = time.time()
             while self.temp < denat_temp and not self.stop_udp_listenner.is_set():
-                # heat straigh foward to the 75 % of setpoint 
-                if self.temp<= denat_temp*0.75:
+                # heat straigh foward to the 75 % of setpoint
+                if self.temp <= denat_temp * 0.75:
                     continue
                 # print(f"Temperature: {self.temp} °C")
                 heat_led_status = True
@@ -481,7 +481,6 @@ class PCRFrame(ttk.Frame):
                 if temp_age > ts:
                     # Temperatura vieja → no confiar
                     self.pin_heating.write(not heat_led_status)
-                    print("off")
                     continue
                 while (
                     time.time() - current_time < ts
@@ -489,21 +488,82 @@ class PCRFrame(ttk.Frame):
                 ):
                     time.sleep(ts / 4)
                 current_time = time.time()
-            # hold temperature for denat_time seconds only coounting time when temp is over temp target
+            # # hold temperature for denat_time seconds only coounting time when temp is over temp target
+            # start_time = time.time()
+            # current_time = time.time()
+            # self.fase = "Denaturation Hold"
+            # heat_led_status=False
+            # while current_time - start_time < denat_time:
+            #     if (
+            #         self.temp > denat_temp + 0.2
+            #     ):  # si se pasa de la temperatura objetivo
+            #         self.pin_heating.write(False)  # apagar calor
+            #     else:
+            #         self.pin_heating.write(True)  # encender calor
+            #     time.sleep(ts / 2)
+            #     current_time = time.time()
+            #     # current_time = time.time()
+            # self.pin_heating.write(False)  # pyrefly: ignore
+            # ------------------------------------------------------------
+            # Denaturation Hold (control proporcional por ventana)
+            # ------------------------------------------------------------
             start_time = time.time()
-            current_time = time.time()
             self.fase = "Denaturation Hold"
-            while current_time - start_time < denat_time:
-                if (
-                    self.temp > denat_temp + 0.2
-                ):  # si se pasa de la temperatura objetivo
-                    self.pin_heating.write(False)  # apagar calor
+
+            KP_HOLD = 0.4  # más suave que en calentamiento
+            WINDOW = ts  # reutiliza tu ts (100 ms está bien)
+            MAX_TEMP_AGE = ts  # si es más vieja → no confiar
+            TEMP_BAND = 0.05  # margen muerto muy pequeño
+
+            last_temp = None
+
+            while (
+                time.time() - start_time < denat_time
+                and not self.stop_udp_listenner.is_set()
+            ):
+                # Verificar edad de la temperatura
+                temp_age = time.time() - self.temp_ts
+                if temp_age > MAX_TEMP_AGE:
+                    # Temperatura vieja → apagar por seguridad
+                    self.pin_heating.write(False)
+                    time.sleep(WINDOW / 2)
+                    continue
+
+                temp = self.temp
+
+                # Banda muerta mínima para evitar chatter
+                error = denat_temp - temp
+                if abs(error) < TEMP_BAND:
+                    power = 0.0
                 else:
-                    self.pin_heating.write(True)  # encender calor
-                time.sleep(ts / 2)
-                current_time = time.time()
-                # current_time = time.time()
-            self.pin_heating.write(False)  # pyrefly: ignore
+                    power = KP_HOLD * error
+
+                # Saturar potencia
+                power = max(0.0, min(1.0, power))
+
+                on_time = power * WINDOW
+                off_time = WINDOW - on_time
+
+                if on_time > 0:
+                    self.pin_heating.write(True)
+                    end_on = time.time() + on_time
+                    while time.time() < end_on:
+                        if self.stop_udp_listenner.is_set():
+                            break
+                        time.sleep(WINDOW / 10)
+
+                self.pin_heating.write(False)
+
+                # Tiempo OFF (permite disipar energía)
+                end_off = time.time() + off_time
+                while time.time() < end_off:
+                    if self.stop_udp_listenner.is_set():
+                        break
+                    time.sleep(WINDOW / 10)
+
+            # Asegurar apagado final
+            self.pin_heating.write(False)
+
             print(f"Denaturation complete, temperature: {self.temp} °C")
             # Preconfigura como salida en bajo
             current_cycle = 0
