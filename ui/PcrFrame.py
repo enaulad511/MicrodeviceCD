@@ -386,7 +386,7 @@ class PCRFrame(ttk.Frame):
         MAX_TEMP_AGE = ts  # si es más vieja → no confiar
         integral = 0.0
         start_time = time.time()
-        while time.time() - start_time < time_hold and not stop_func.is_set():
+        while time.time() - start_time <= time_hold and not stop_func.is_set():
             # Verificar edad de la temperatura
             temp_age = time.time() - self.temp_ts
             if temp_age > MAX_TEMP_AGE:
@@ -421,6 +421,7 @@ class PCRFrame(ttk.Frame):
                 if stop_func.is_set():
                     break
                 time.sleep(WINDOW / 10)
+        print("passed time: ", time.time() - start_time)
 
     def experiment_pcr(
         self,
@@ -611,7 +612,7 @@ class PCRFrame(ttk.Frame):
                 print(f"Holding temperature for {time_high} seconds")
                 KI = 0.4  # medio
                 I_MAX = 0.5
-                KP_HOLD = 0.25  # más suave que en calentamiento
+                KP_HOLD = 0.15  # más suave que en calentamiento
                 TEMP_BAND = 0.05  # margen muerto muy pequeño
                 self.hold_temperature(
                     high_temp,
