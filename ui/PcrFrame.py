@@ -475,12 +475,13 @@ class PCRFrame(ttk.Frame):
                 sistemaMotor = DriverStepperSys(
                     en_pin=12, enable_active_high=False, uart_port=serial_port_encoder
                 )
-                print(sistemaMotor.get_status())
+
             self.stop_event_motor = (
                 threading.Event()
                 if self.stop_event_motor is None
                 else self.stop_event_motor
             )
+            print("serial: ", sistemaMotor.ser)
             # -------------------------------------------------------------------
             # initial spin with expecific time
             # -------------------------------------------------------------------
@@ -762,4 +763,4 @@ class PCRFrame(ttk.Frame):
         self.pin_pcr = None
         self.stop_event_motor = None
         self.stop_udp_listenner = None
-        sistemaMotor=None
+        sistemaMotor = None
