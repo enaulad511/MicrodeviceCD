@@ -188,7 +188,8 @@ class UdpClient:
 
             except BlockingIOError:
                 time.sleep(0.0005)
-
+            except Exception as e:
+                time.sleep(0.0005)
             # last_data = None
             # last_addr = None
 
