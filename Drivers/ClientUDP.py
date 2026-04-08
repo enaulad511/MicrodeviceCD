@@ -172,13 +172,16 @@ class UdpClient:
                 temp = float(temps[2])
 
                 now = time.time()
+                self.status_disc = True
 
                 with self.latest_lock:
                     self.latest_temp = TempSample(value=temp, ts=now)
                     if self.on_message:
                         try:
                             self.on_message(
-                                text, ("last_addr",), [0, 0, self.latest_temp.value, self.latest_temp.ts]
+                                text,
+                                ("last_addr",),
+                                [0, 0, self.latest_temp.value, self.latest_temp.ts],
                             )
                         except Exception as e:
                             print(f"[UdpClient] on_message error: {e}")
