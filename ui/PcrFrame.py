@@ -498,7 +498,7 @@ class PCRFrame(ttk.Frame):
             start_time = time.time()
             self.fase = "Denaturation Hold"
             
-            KI = 0.2           # LENTO
+            KI = 0.4           # LENTO
             I_MAX = 0.5
             integral = 0.0
 
