@@ -544,12 +544,10 @@ class PCRFrame(ttk.Frame):
             # ------------------------------------------------------------
             # Denaturation Hold (control proporcional por ventana)
             # ------------------------------------------------------------
-            start_time = time.time()
             self.fase = "Denaturation Hold"
-
             KI = 0.4  # medio
             I_MAX = 0.5
-            KP_HOLD = 0.5  # más suave que en calentamiento
+            KP_HOLD = 0.45  # más suave que en calentamiento
             TEMP_BAND = 0.05  # margen muerto muy pequeño
             self.hold_temperature(
                 denat_temp,
@@ -607,9 +605,9 @@ class PCRFrame(ttk.Frame):
                 # hold High temperature
                 self.fase = "Hold High temp"
                 print(f"Holding temperature for {time_high} seconds")
-                KI = 0.5  # medio
+                KI = 0.4  # medio
                 I_MAX = 0.5
-                KP_HOLD = 0.6  # más suave que en calentamiento
+                KP_HOLD = 0.45  # más suave que en calentamiento
                 TEMP_BAND = 0.05  # margen muerto muy pequeño
                 self.hold_temperature(
                     high_temp,
