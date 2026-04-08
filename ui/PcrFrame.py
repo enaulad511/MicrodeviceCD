@@ -469,16 +469,16 @@ class PCRFrame(ttk.Frame):
             self.pin_heating.write(True)  # pyrefly: ignore
             self.temp_ts = time.time()
             heat_led_status = True
-            current_time = time.time()            
-            KP = 0.6           # ajustar
-            WINDOW = 0.5       # segundos
-            MAX_AGE = 0.15     # s
+            current_time = time.time()
+            KP = 0.6  # ajustar
+            WINDOW = 0.5  # segundos
+            MAX_AGE = 0.15  # s
             while self.temp < denat_temp and not self.stop_udp_listenner.is_set():
                 # heat straigh foward to the 75 % of setpoint
                 if self.temp <= denat_temp * 0.75:
                     continue
                 # print(f"Temperature: {self.temp} °C")
-                
+
                 age = time.time() - self.temp_ts
                 if age > MAX_AGE:
                     # Temperatura vieja → no confiar
@@ -487,7 +487,7 @@ class PCRFrame(ttk.Frame):
                 error = denat_temp - self.temp
                 power = max(0.0, min(1.0, KP * error))
                 on_time = power * WINDOW
-                
+
                 if on_time > 0:
                     self.pin_heating.write(True)
                     time.sleep(on_time)
@@ -520,9 +520,6 @@ class PCRFrame(ttk.Frame):
             WINDOW = ts  # reutiliza tu ts (100 ms está bien)
             MAX_TEMP_AGE = ts  # si es más vieja → no confiar
             TEMP_BAND = 0.05  # margen muerto muy pequeño
-
-            last_temp = None
-
             while (
                 time.time() - start_time < denat_time
                 and not self.stop_udp_listenner.is_set()
@@ -557,19 +554,15 @@ class PCRFrame(ttk.Frame):
                         if self.stop_udp_listenner.is_set():
                             break
                         time.sleep(WINDOW / 10)
-
                 self.pin_heating.write(False)
-
                 # Tiempo OFF (permite disipar energía)
                 end_off = time.time() + off_time
                 while time.time() < end_off:
                     if self.stop_udp_listenner.is_set():
                         break
                     time.sleep(WINDOW / 10)
-
             # Asegurar apagado final
             self.pin_heating.write(False)
-
             print(f"Denaturation complete, temperature: {self.temp} °C")
             # Preconfigura como salida en bajo
             current_cycle = 0
@@ -597,18 +590,60 @@ class PCRFrame(ttk.Frame):
                 # hold High temperature
                 self.fase = "Hold High temp"
                 print(f"Holding temperature for {time_high} seconds")
-                start_time = time.time()
-                current_time = time.time()
-                passed_time = 0
-                while passed_time < time_high and not self.stop_udp_listenner.is_set():
-                    if self.temp > high_temp:  # si se pasa de la temperatura objetivo
-                        self.pin_heating.write(False)  # apagar calor
-                        passed_time += ts
-                        # print(f"Temperature: {self.temp} °C, passed_time: {passed_time:.2f} s")
+                KP_HOLD = 0.4  # más suave que en calentamiento
+                WINDOW = ts  # reutiliza tu ts (100 ms está bien)
+                MAX_TEMP_AGE = ts  # si es más vieja → no confiar
+                TEMP_BAND = 0.05  # margen muerto muy pequeño
+                while (
+                    time.time() - start_time < time_high
+                    and not self.stop_udp_listenner.is_set()
+                ):
+                    # Verificar edad de la temperatura
+                    temp_age = time.time() - self.temp_ts
+                    if temp_age > MAX_TEMP_AGE:
+                        # Temperatura vieja → apagar por seguridad
+                        self.pin_heating.write(False)
+                        time.sleep(WINDOW / 2)
+                        continue
+                    # Banda muerta mínima para evitar chatter
+                    error = high_temp - self.temp
+                    if abs(error) < TEMP_BAND:
+                        power = 0.0
                     else:
-                        self.pin_heating.write(True)  # encender calor
-                    time.sleep(ts)
-                    # current_time = time.time()
+                        power = KP_HOLD * error
+                    # Saturar potencia
+                    power = max(0.0, min(1.0, power))
+                    on_time = power * WINDOW
+                    off_time = WINDOW - on_time
+
+                    if on_time > 0:
+                        self.pin_heating.write(True)
+                        end_on = time.time() + on_time
+                        while time.time() < end_on:
+                            if self.stop_udp_listenner.is_set():
+                                break
+                            time.sleep(WINDOW / 10)
+                    self.pin_heating.write(False)
+                    # Tiempo OFF (permite disipar energía)
+                    end_off = time.time() + off_time
+                    while time.time() < end_off:
+                        if self.stop_udp_listenner.is_set():
+                            break
+                        time.sleep(WINDOW / 10)
+                # Asegurar apagado final
+                self.pin_heating.write(False)
+                # start_time = time.time()
+                # current_time = time.time()
+                # passed_time = 0
+                # while passed_time < time_high and not self.stop_udp_listenner.is_set():
+                #     if self.temp > high_temp:  # si se pasa de la temperatura objetivo
+                #         self.pin_heating.write(False)  # apagar calor
+                #         passed_time += ts
+                #         # print(f"Temperature: {self.temp} °C, passed_time: {passed_time:.2f} s")
+                #     else:
+                #         self.pin_heating.write(True)  # encender calor
+                #     time.sleep(ts)
+                #     # current_time = time.time()
                 print(f"Hold complete, cooling down to {low_temp} °C with motor spin")
                 self.pin_heating.write(False)  # encender calor
                 # -------------------------------------------------------------------
@@ -633,17 +668,59 @@ class PCRFrame(ttk.Frame):
                 # hold LOW temperature
                 self.fase = "LOW temp Hold"
                 print(f"Holding LOW temperature for {time_low} seconds")
+                KP_HOLD = 0.4  # más suave que en calentamiento
+                WINDOW = ts  # reutiliza tu ts (100 ms está bien)
+                MAX_TEMP_AGE = ts  # si es más vieja → no confiar
+                TEMP_BAND = 0.05  # margen muerto muy pequeño
+                while (
+                    time.time() - start_time < time_low
+                    and not self.stop_udp_listenner.is_set()
+                ):
+                    # Verificar edad de la temperatura
+                    temp_age = time.time() - self.temp_ts
+                    if temp_age > MAX_TEMP_AGE:
+                        # Temperatura vieja → apagar por seguridad
+                        self.pin_heating.write(False)
+                        time.sleep(WINDOW / 2)
+                        continue
+                    # Banda muerta mínima para evitar chatter
+                    error = low_temp - self.temp
+                    if abs(error) < TEMP_BAND:
+                        power = 0.0
+                    else:
+                        power = KP_HOLD * error
+                    # Saturar potencia
+                    power = max(0.0, min(1.0, power))
+                    on_time = power * WINDOW
+                    off_time = WINDOW - on_time
+
+                    if on_time > 0:
+                        self.pin_heating.write(True)
+                        end_on = time.time() + on_time
+                        while time.time() < end_on:
+                            if self.stop_udp_listenner.is_set():
+                                break
+                            time.sleep(WINDOW / 10)
+                    self.pin_heating.write(False)
+                    # Tiempo OFF (permite disipar energía)
+                    end_off = time.time() + off_time
+                    while time.time() < end_off:
+                        if self.stop_udp_listenner.is_set():
+                            break
+                        time.sleep(WINDOW / 10)
+                # Asegurar apagado final
+                self.pin_heating.write(False)
                 # start_time = time.time()
                 # current_time = time.time()
-                passed_time = 0
-                while passed_time < time_low and not self.stop_udp_listenner.is_set():
-                    if self.temp < low_temp:  # si se pasa de la temperatura objetivo
-                        self.pin_heating.write(True)  # encender calor
-                    else:
-                        self.pin_heating.write(False)  # apagar calor
-                    passed_time += ts
-                    time.sleep(ts / 2)
-                    # current_time = time.time()
+                # passed_time = 0
+                # while passed_time < time_low and not self.stop_udp_listenner.is_set():
+                #     if self.temp < low_temp:  # si se pasa de la temperatura objetivo
+                #         self.pin_heating.write(True)  # encender calor
+                #     else:
+                #         self.pin_heating.write(False)  # apagar calor
+                #     passed_time += ts
+                #     time.sleep(ts / 2)
+                #     # current_time = time.time()
                 print(f"Hold complete, end of cycle {current_cycle}")
                 current_cycle += 1
                 # end of cycle
@@ -659,16 +736,59 @@ class PCRFrame(ttk.Frame):
                 print(f"fluorescence voltage: {v_fluo}")
 
             print("PCR cycles complete, reading fluorescence")
-            passed_time = 0
+            # passed_time = 0
             self.fase = "Extension"
-            while passed_time < 30 and not self.stop_udp_listenner.is_set():
-                if self.temp < low_temp:  # si se pasa de la temperatura objetivo
-                    self.pin_heating.write(True)  # encender calor
+            time_extension = 30
+            KP_HOLD = 0.4  # más suave que en calentamiento
+            WINDOW = ts  # reutiliza tu ts (100 ms está bien)
+            MAX_TEMP_AGE = ts  # si es más vieja → no confiar
+            TEMP_BAND = 0.05  # margen muerto muy pequeño
+            while (
+                time.time() - start_time < time_extension
+                and not self.stop_udp_listenner.is_set()
+            ):
+                # Verificar edad de la temperatura
+                temp_age = time.time() - self.temp_ts
+                if temp_age > MAX_TEMP_AGE:
+                    # Temperatura vieja → apagar por seguridad
+                    self.pin_heating.write(False)
+                    time.sleep(WINDOW / 2)
+                    continue
+                # Banda muerta mínima para evitar chatter
+                error = low_temp - self.temp
+                if abs(error) < TEMP_BAND:
+                    power = 0.0
                 else:
-                    self.pin_heating.write(False)  # apagar calor
-                    passed_time += ts
-                time.sleep(ts)
+                    power = KP_HOLD * error
+                # Saturar potencia
+                power = max(0.0, min(1.0, power))
+                on_time = power * WINDOW
+                off_time = WINDOW - on_time
+
+                if on_time > 0:
+                    self.pin_heating.write(True)
+                    end_on = time.time() + on_time
+                    while time.time() < end_on:
+                        if self.stop_udp_listenner.is_set():
+                            break
+                        time.sleep(WINDOW / 10)
+                self.pin_heating.write(False)
+                # Tiempo OFF (permite disipar energía)
+                end_off = time.time() + off_time
+                while time.time() < end_off:
+                    if self.stop_udp_listenner.is_set():
+                        break
+                    time.sleep(WINDOW / 10)
+            # Asegurar apagado final
             self.pin_heating.write(False)
+            # while passed_time < 30 and not self.stop_udp_listenner.is_set():
+            #     if self.temp < low_temp:  # si se pasa de la temperatura objetivo
+            #         self.pin_heating.write(True)  # encender calor
+            #     else:
+            #         self.pin_heating.write(False)  # apagar calor
+            #         passed_time += ts
+            #     time.sleep(ts)
+            # self.pin_heating.write(False)
             self.pin_pcr.write(True)
             time.sleep(1)
             v_fluo_final = ads.read_voltage(0, averages=4)
