@@ -282,7 +282,7 @@ class PCRFrame(ttk.Frame):
 
         # # Actualizar temperatura global de control
         # self.temp = lf
-        # self.data_temperature.append(lf)
+        self.data_temperature.append(self.temp)
 
         # Actualizar UI solo cuando toca
         if time.time() - self.last_display > self.ts_display:
