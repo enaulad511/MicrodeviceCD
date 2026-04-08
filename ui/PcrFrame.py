@@ -469,25 +469,31 @@ class PCRFrame(ttk.Frame):
             self.pin_heating.write(True)  # pyrefly: ignore
             self.temp_ts = time.time()
             heat_led_status = True
-            current_time = time.time()
+            current_time = time.time()            
+            KP = 0.6           # ajustar
+            WINDOW = 0.5       # segundos
+            MAX_AGE = 0.15     # s
             while self.temp < denat_temp and not self.stop_udp_listenner.is_set():
                 # heat straigh foward to the 75 % of setpoint
                 if self.temp <= denat_temp * 0.75:
                     continue
                 # print(f"Temperature: {self.temp} °C")
-                heat_led_status = True
-                self.pin_heating.write(heat_led_status)
-                temp_age = time.time() - self.temp_ts
-                if temp_age > ts:
+                
+                age = time.time() - self.temp_ts
+                if age > MAX_AGE:
                     # Temperatura vieja → no confiar
-                    self.pin_heating.write(not heat_led_status)
+                    self.pin_heating.write(False)
                     continue
-                while (
-                    time.time() - current_time < ts
-                    and not self.stop_udp_listenner.is_set()
-                ):
-                    time.sleep(ts / 4)
-                current_time = time.time()
+                error = denat_temp - self.temp
+                power = max(0.0, min(1.0, KP * error))
+                on_time = power * WINDOW
+                
+                if on_time > 0:
+                    self.pin_heating.write(True)
+                    time.sleep(on_time)
+                self.pin_heating.write(False)
+                time.sleep(WINDOW - on_time)
+
             # # hold temperature for denat_time seconds only coounting time when temp is over temp target
             # start_time = time.time()
             # current_time = time.time()
