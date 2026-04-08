@@ -594,6 +594,7 @@ class PCRFrame(ttk.Frame):
                 WINDOW = ts  # reutiliza tu ts (100 ms está bien)
                 MAX_TEMP_AGE = ts  # si es más vieja → no confiar
                 TEMP_BAND = 0.05  # margen muerto muy pequeño
+                start_time = time.time()
                 while (
                     time.time() - start_time < time_high
                     and not self.stop_udp_listenner.is_set()
@@ -672,6 +673,7 @@ class PCRFrame(ttk.Frame):
                 WINDOW = ts  # reutiliza tu ts (100 ms está bien)
                 MAX_TEMP_AGE = ts  # si es más vieja → no confiar
                 TEMP_BAND = 0.05  # margen muerto muy pequeño
+                start_time = time.time()
                 while (
                     time.time() - start_time < time_low
                     and not self.stop_udp_listenner.is_set()
@@ -743,6 +745,7 @@ class PCRFrame(ttk.Frame):
             WINDOW = ts  # reutiliza tu ts (100 ms está bien)
             MAX_TEMP_AGE = ts  # si es más vieja → no confiar
             TEMP_BAND = 0.05  # margen muerto muy pequeño
+            start_time = time.time()
             while (
                 time.time() - start_time < time_extension
                 and not self.stop_udp_listenner.is_set()
