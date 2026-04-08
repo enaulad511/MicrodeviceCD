@@ -692,10 +692,10 @@ class PCRFrame(ttk.Frame):
             self.fase = "Extension"
             time_extension = 30
             KI = 0.45  # medio
-            I_MAX = 0.7
-            KP_HOLD = 0.1  # más suave que en calentamiento
+            I_MAX = 0.5
+            KP_HOLD = 0.15  # más suave que en calentamiento
             TEMP_BAND = 0.05  # margen muerto muy pequeño
-            WINDOW = ts * 0.8
+            WINDOW = ts * 0.9
             self.hold_temperature(
                 low_temp,
                 time_extension,
