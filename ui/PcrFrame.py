@@ -521,8 +521,8 @@ class PCRFrame(ttk.Frame):
             self.fase = "Denaturation"
             self.pin_heating.write(True)  # pyrefly: ignore
             self.temp_ts = time.time()
-            KP = 0.15  # ajustar
-            WINDOW = 0.2  # segundos
+            KP = 0.1  # ajustar
+            WINDOW = 0.05  # segundos
             MAX_AGE = 0.09  # s
             while self.temp < denat_temp and not self.stop_udp_listenner.is_set():
                 # heat straigh foward to the 75 % of setpoint
@@ -574,15 +574,14 @@ class PCRFrame(ttk.Frame):
                 # -------------------------------------------------------------------
                 # -------------------------------------------------------------------
                 # reach high temp
-
                 self.fase = "Reach High temp"
-                KP = 0.2  # ajustar
+                KP = 0.1  # ajustar
                 WINDOW = 0.2  # segundos
                 MAX_AGE = 0.10  # s
                 TEMP_BAND = 0.5
                 self.pin_heating.write(True)  # pyrefly: ignore
                 while (
-                    TEMP_BAND < (high_temp - self.temp)
+                    TEMP_BAND < abs(high_temp - self.temp)
                     and not self.stop_udp_listenner.is_set()
                 ):
                     # heat straigh foward to the 75 % of setpoint
@@ -612,7 +611,7 @@ class PCRFrame(ttk.Frame):
                 print(f"Holding temperature for {time_high} seconds")
                 KI = 0.4  # medio
                 I_MAX = 0.5
-                KP_HOLD = 0.15  # más suave que en calentamiento
+                KP_HOLD = 0.1  # más suave que en calentamiento
                 TEMP_BAND = 0.05  # margen muerto muy pequeño
                 self.hold_temperature(
                     high_temp,
@@ -653,7 +652,7 @@ class PCRFrame(ttk.Frame):
                 print(f"Holding LOW temperature for {time_low} seconds")
                 KI = 0.4  # medio
                 I_MAX = 0.5
-                KP_HOLD = 0.15  # más suave que en calentamiento
+                KP_HOLD = 0.1  # más suave que en calentamiento
                 TEMP_BAND = 0.05  # margen muerto muy pequeño
                 self.hold_temperature(
                     low_temp,
@@ -688,7 +687,7 @@ class PCRFrame(ttk.Frame):
             time_extension = 30
             KI = 0.4  # medio
             I_MAX = 0.5
-            KP_HOLD = 0.25  # más suave que en calentamiento
+            KP_HOLD = 0.1  # más suave que en calentamiento
             TEMP_BAND = 0.05  # margen muerto muy pequeño
             self.hold_temperature(
                 low_temp,
