@@ -656,7 +656,7 @@ class PCRFrame(ttk.Frame):
                 print(f"Holding LOW temperature for {time_low} seconds")
                 KI = 0.45  # medio
                 I_MAX = 0.5
-                KP_HOLD = 0.15  # más suave que en calentamiento
+                KP_HOLD = 0.1  # más suave que en calentamiento
                 TEMP_BAND = 0.05  # margen muerto muy pequeño
                 WINDOW = ts * 0.5
                 self.hold_temperature(
@@ -693,7 +693,7 @@ class PCRFrame(ttk.Frame):
             time_extension = 30
             KI = 0.45  # medio
             I_MAX = 0.5
-            KP_HOLD = 0.15  # más suave que en calentamiento
+            KP_HOLD = 0.1  # más suave que en calentamiento
             TEMP_BAND = 0.05  # margen muerto muy pequeño
             WINDOW = ts * 0.5
             self.hold_temperature(
