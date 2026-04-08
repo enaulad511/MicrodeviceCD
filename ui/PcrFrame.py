@@ -490,7 +490,7 @@ class PCRFrame(ttk.Frame):
                         time.time() - current_time,
                         not self.stop_udp_listenner.is_set(),
                     )
-                    current_time = time.time()
+                current_time = time.time()
             # hold temperature for denat_time seconds only coounting time when temp is over temp target
             start_time = time.time()
             current_time = time.time()
