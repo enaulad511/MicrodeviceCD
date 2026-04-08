@@ -381,8 +381,8 @@ class PCRFrame(ttk.Frame):
         I_MAX,
         KP_HOLD,
         TEMP_BAND,
+        WINDOW,
     ):
-        WINDOW = ts  # reutiliza tu ts (100 ms está bien)
         MAX_TEMP_AGE = ts  # si es más vieja → no confiar
         integral = 0.0
         start_time = time.time()
@@ -546,10 +546,11 @@ class PCRFrame(ttk.Frame):
             # Denaturation Hold (control proporcional por ventana)
             # ------------------------------------------------------------
             self.fase = "Denaturation Hold"
-            KI = 0.4  # medio
-            I_MAX = 0.5
+            KI = 0.45  # medio
+            I_MAX = 0.7
             KP_HOLD = 0.15  # más suave que en calentamiento
             TEMP_BAND = 0.05  # margen muerto muy pequeño
+            WINDOW = ts * 0.8
             self.hold_temperature(
                 denat_temp,
                 denat_time,
@@ -560,6 +561,7 @@ class PCRFrame(ttk.Frame):
                 I_MAX,
                 KP_HOLD,
                 TEMP_BAND,
+                WINDOW,
             )
 
             # Asegurar apagado final
@@ -576,8 +578,8 @@ class PCRFrame(ttk.Frame):
                 # reach high temp
                 self.fase = "Reach High temp"
                 KP = 0.1  # ajustar
-                WINDOW = 0.2  # segundos
-                MAX_AGE = 0.10  # s
+                WINDOW = 0.05  # segundos
+                MAX_AGE = 0.09  # s
                 TEMP_BAND = 0.5
                 self.pin_heating.write(True)  # pyrefly: ignore
                 while (
@@ -609,10 +611,11 @@ class PCRFrame(ttk.Frame):
                 # hold High temperature
                 self.fase = "Hold High temp"
                 print(f"Holding temperature for {time_high} seconds")
-                KI = 0.4  # medio
-                I_MAX = 0.5
+                KI = 0.45  # medio
+                I_MAX = 0.7
                 KP_HOLD = 0.1  # más suave que en calentamiento
                 TEMP_BAND = 0.05  # margen muerto muy pequeño
+                WINDOW = ts * 0.8
                 self.hold_temperature(
                     high_temp,
                     time_high,
@@ -623,6 +626,7 @@ class PCRFrame(ttk.Frame):
                     I_MAX,
                     KP_HOLD,
                     TEMP_BAND,
+                    WINDOW,
                 )
 
                 self.pin_heating.write(False)
@@ -650,10 +654,11 @@ class PCRFrame(ttk.Frame):
                 # hold LOW temperature
                 self.fase = "LOW temp Hold"
                 print(f"Holding LOW temperature for {time_low} seconds")
-                KI = 0.4  # medio
-                I_MAX = 0.5
+                KI = 0.45  # medio
+                I_MAX = 0.7
                 KP_HOLD = 0.1  # más suave que en calentamiento
                 TEMP_BAND = 0.05  # margen muerto muy pequeño
+                WINDOW = ts * 0.8
                 self.hold_temperature(
                     low_temp,
                     time_low,
@@ -664,6 +669,7 @@ class PCRFrame(ttk.Frame):
                     I_MAX,
                     KP_HOLD,
                     TEMP_BAND,
+                    WINDOW,
                 )
                 # Asegurar apagado final
                 self.pin_heating.write(False)
@@ -685,20 +691,22 @@ class PCRFrame(ttk.Frame):
             # passed_time = 0
             self.fase = "Extension"
             time_extension = 30
-            KI = 0.4  # medio
-            I_MAX = 0.5
+            KI = 0.45  # medio
+            I_MAX = 0.7
             KP_HOLD = 0.1  # más suave que en calentamiento
             TEMP_BAND = 0.05  # margen muerto muy pequeño
+            WINDOW = ts * 0.8
             self.hold_temperature(
                 low_temp,
                 time_extension,
-                ts,
+                ts / 2,
                 self.stop_udp_listenner,
                 self.pin_heating,
                 KI,
                 I_MAX,
                 KP_HOLD,
                 TEMP_BAND,
+                WINDOW,
             )
             # Asegurar apagado final
             self.pin_heating.write(False)
