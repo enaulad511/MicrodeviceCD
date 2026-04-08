@@ -468,11 +468,20 @@ class PCRFrame(ttk.Frame):
             self.fase = "Denaturation"
             self.pin_heating.write(True)  # pyrefly: ignore
             self.temp_ts = time.time()
+            heat_led_status = True
+            current_time = time.time()
             while self.temp < denat_temp and not self.stop_udp_listenner.is_set():
                 # print(f"Temperature: {self.temp} °C")
+                heat_led_status = True
+                self.pin_heating.write(heat_led_status)
                 temp_age = time.time() - self.temp_ts
-                print(f"Temp age: {temp_age * 1000:.1f} ms")
-                time.sleep(ts)
+                if temp_age > 0.1:
+                    # Temperatura vieja → no confiar
+                    self.pin_heating.write(heat_led_status)
+                    continue
+                while time.time() - current_time < ts and not self.stop_udp_listenner.is_set():
+                    time.sleep(ts / 4)
+                    current_time = time.time()
             # hold temperature for denat_time seconds only coounting time when temp is over temp target
             start_time = time.time()
             current_time = time.time()
