@@ -190,8 +190,7 @@ def spinMotorRPM_ramped(
     if stop_event is None:
         print("Error: stop_event no proporcionado, se requiere para control de parada.")
         return False
-    print(drv)
-    print(drv.ser)
+
     # Validación de dirección
     d = direction.strip().upper()
     if d not in ("CW", "CCW"):

@@ -481,7 +481,6 @@ class PCRFrame(ttk.Frame):
                 if self.stop_event_motor is None
                 else self.stop_event_motor
             )
-            print("serial: ", sistemaMotor.ser)
             # -------------------------------------------------------------------
             # initial spin with expecific time
             # -------------------------------------------------------------------
