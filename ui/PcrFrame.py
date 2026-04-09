@@ -577,12 +577,12 @@ class PCRFrame(ttk.Frame):
                 # reach high temp
                 self.fase = "Reach High temp"
                 KP = 0.125  # ajustar
-                WINDOW = 0.05  # segundos
+                WINDOW = 0.09  # segundos
                 MAX_AGE = 0.09  # s
                 TEMP_BAND = 0.5
                 I_MAX = 0.5
                 integral = 0
-                KI = 0.45
+                KI = 0.6
                 self.pin_heating.write(True)  # pyrefly: ignore
                 while (
                     TEMP_BAND < abs(high_temp - self.temp)
