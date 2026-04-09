@@ -545,7 +545,7 @@ class PCRFrame(ttk.Frame):
             # Denaturation Hold (control proporcional por ventana)
             # ------------------------------------------------------------
             self.fase = "Denaturation Hold"
-            KI = 0.45  # medio
+            KI = 0.5  # medio
             I_MAX = 0.5
             KP_HOLD = 0.15  # más suave que en calentamiento
             TEMP_BAND = 0.05  # margen muerto muy pequeño
@@ -576,7 +576,7 @@ class PCRFrame(ttk.Frame):
                 # -------------------------------------------------------------------
                 # reach high temp
                 self.fase = "Reach High temp"
-                KP = 0.15  # ajustar
+                KP = 0.125  # ajustar
                 WINDOW = 0.05  # segundos
                 MAX_AGE = 0.09  # s
                 TEMP_BAND = 0.5
@@ -610,7 +610,7 @@ class PCRFrame(ttk.Frame):
                 # hold High temperature
                 self.fase = "Hold High temp"
                 print(f"Holding temperature for {time_high} seconds")
-                KI = 0.45  # medio
+                KI = 0.5  # medio
                 I_MAX = 0.5
                 KP_HOLD = 0.1  # más suave que en calentamiento
                 TEMP_BAND = 0.05  # margen muerto muy pequeño
@@ -645,7 +645,7 @@ class PCRFrame(ttk.Frame):
                     sistemaMotor,
                     None,
                     stop_func=lambda: self.stop_event_motor.is_set()
-                    or abs(self.temp - low_temp) <= 1.5,
+                    or abs(self.temp - low_temp) <= 3.5,
                     stop_event=self.stop_event_motor,
                 )
                 print(f"Temperature reached: {self.temp} °C")
