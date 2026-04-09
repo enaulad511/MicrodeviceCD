@@ -580,6 +580,9 @@ class PCRFrame(ttk.Frame):
                 WINDOW = 0.05  # segundos
                 MAX_AGE = 0.09  # s
                 TEMP_BAND = 0.5
+                I_MAX = 0.5
+                integral = 0
+                KI = 0.45
                 self.pin_heating.write(True)  # pyrefly: ignore
                 while (
                     TEMP_BAND < abs(high_temp - self.temp)
@@ -596,6 +599,12 @@ class PCRFrame(ttk.Frame):
                         self.pin_heating.write(False)
                         continue
                     error = high_temp - self.temp
+                    integral += error * WINDOW
+                    integral = max(-I_MAX, min(I_MAX, integral))
+                    if abs(error) < TEMP_BAND:
+                        power = 0.0
+                    else:
+                        power = KP_HOLD * error + KI * integral
                     power = max(0.0, min(1.0, KP * error))
                     on_time = power * WINDOW
 
