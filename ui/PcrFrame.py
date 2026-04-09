@@ -51,7 +51,7 @@ def create_widgets_pcr(parent, callbacks: dict):
         "Denaturing Temp:",
     ]
     columns = 2
-    default_values = ["60", "40", "10", "10", "1", "500", "180", "68"]
+    default_values = ["60", "40", "10", "10", "1", "700", "180", "68"]
     for i, lbl in enumerate(labels):
         row = i // columns
         col = i % columns
