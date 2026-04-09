@@ -182,7 +182,6 @@ def spinMotorRPM_ramped(
     accel_rpm_s: aceleración/deceleración en RPM/s
     """
     if drv_motor is not None:
-        print("Error drv not initialized")
         drv = drv_motor
     else:
         print("Error drv not initialized")
