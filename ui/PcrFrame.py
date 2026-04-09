@@ -612,14 +612,16 @@ class PCRFrame(ttk.Frame):
                 integral = 0
                 self.pin_heating.write(True)  # pyrefly: ignore
                 while (
-                    TEMP_BAND < abs(high_temp - self.temp)
+                    TEMP_BAND < abs(high_temp - self.temp) 
                     and not self.stop_udp_listenner.is_set()
                 ):
-                    # heat straigh foward to the 75 % of setpoint
-                    if self.temp <= high_temp * 0.4:
-                        continue
-                    # print(f"Temperature: {self.temp} °C")
 
+                    # # heat straigh foward to the 75 % of setpoint
+                    # if self.temp <= high_temp * 0.4:
+                    #     continue
+                    # # print(f"Temperature: {self.temp} °C")
+                    if current_cycle==0 and self.temp<high_temp:
+                        break
                     age = time.time() - self.temp_ts
                     if age > MAX_AGE:
                         # Temperatura vieja → no confiar
