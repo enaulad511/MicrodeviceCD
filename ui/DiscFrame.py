@@ -185,6 +185,7 @@ def spinMotorRPM_ramped(
         print("Error drv not initialized")
         drv = drv_motor
     else:
+        print("Error drv not initialized")
         return False
     if stop_event is None:
         print("Error: stop_event no proporcionado, se requiere para control de parada.")
