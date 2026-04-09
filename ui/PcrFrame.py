@@ -612,7 +612,7 @@ class PCRFrame(ttk.Frame):
                 integral = 0
                 self.pin_heating.write(True)  # pyrefly: ignore
                 while (
-                    TEMP_BAND < abs(high_temp - self.temp) 
+                    1.5 < abs(high_temp - self.temp) 
                     and not self.stop_udp_listenner.is_set()
                 ):
 
