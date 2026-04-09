@@ -48,7 +48,7 @@ def create_widgets_disco_input(parent, callbacks: dict):
         style="info.TButton",
         command=callbacks.get("callback_spin", ()),
     ).grid(row=2, column=0, columnspan=2, pady=5, padx=5, sticky="nswe")
-    frame1.rowconfigure((0,1,2), weight=1)
+    frame1.rowconfigure((0, 1, 2), weight=1)
     # Mode 2: On/Off cycle
     frame2 = ttk.LabelFrame(parent, text="On/Off Cycle")
     # frame2.grid(row=1, column=0, padx=10, pady=10, sticky="nswe")
@@ -182,12 +182,16 @@ def spinMotorRPM_ramped(
     accel_rpm_s: aceleración/deceleración en RPM/s
     """
     global drv
-    if drv_motor is not None and drv is None:
+    if drv_motor is not None:
+        print("Error drv not initialized")
         drv = drv_motor
+    else:
+        return False
     if stop_event is None:
         print("Error: stop_event no proporcionado, se requiere para control de parada.")
         return False
-    
+    print(drv)
+    print(drv.ser)
     # Validación de dirección
     d = direction.strip().upper()
     if d not in ("CW", "CCW"):

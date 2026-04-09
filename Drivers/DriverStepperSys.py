@@ -240,7 +240,6 @@ class DriverStepperSys:
 
     def run_rpm(self, rpm: float) -> bool:
         """Velocidad continua en RPM (signo = dirección)."""
-        print(self.ser)
         self.ser.reset_output_buffer()
         self._cmd_mode(1, rpm, 0)
         return True
