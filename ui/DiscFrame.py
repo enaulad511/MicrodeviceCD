@@ -181,7 +181,6 @@ def spinMotorRPM_ramped(
     ts: periodo de actualización en segundos (ej. 0.02 a 0.05)
     accel_rpm_s: aceleración/deceleración en RPM/s
     """
-    global drv
     if drv_motor is not None:
         print("Error drv not initialized")
         drv = drv_motor
@@ -450,7 +449,7 @@ class ControlDiscFrame(ttk.Frame):
                     acceleration,
                     1000.0,
                     True,
-                    None,
+                    drv,
                     None,
                     None,
                     self.stop_event,
