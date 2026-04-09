@@ -444,8 +444,9 @@ class PCRFrame(ttk.Frame):
         # write a predix line with al parameters of experiment
         # prefix_col = f" high_temp: {high_temp}-L "
         settings = read_settings_from_file()
+        pidGains = settings.get("pidControllerRPM", {})
         try:
-            ts = float(settings.get("pidControllerRPM", {}).get("ts_pcr", 0.05))
+            ts = float(pidGains.get("ts_pcr", 0.05))
         except Exception:
             ts = 0.05
         prefix_col = f"high_temp: {high_temp}-low_temp: {low_temp}-time_high: {time_high}-time_low: {time_low}-cycles: {cycles}-rpm: {rpm}-denat_temp: {denat_temp}-denat_time: {denat_time}-ts: {ts}"
@@ -467,7 +468,7 @@ class PCRFrame(ttk.Frame):
         from Drivers.DriverStepperSys import DriverStepperSys
 
         try:
-            acceleration = float(settings.get("acceleration_spin", 200.0))
+            acceleration = float(pidGains.get("acceleration_spin", 200.0))
             direction = "CW"
             rpm_setpoint = rpm
             if sistemaMotor is None:
@@ -520,9 +521,14 @@ class PCRFrame(ttk.Frame):
             self.fase = "Denaturation"
             self.pin_heating.write(True)  # pyrefly: ignore
             self.temp_ts = time.time()
-            KP = 0.25  # ajustar
-            WINDOW = 0.05  # segundos
-            MAX_AGE = 0.09  # s
+            try:
+                KP = pidGains.get("KP_denat", 0.2)
+                WINDOW = pidGains.get("win_denat", 0.05)
+                MAX_AGE = pidGains.get("m_age_denat", 0.09)
+            except Exception:
+                print("erro bad data", pidGains)
+                self.stop_udp_listenner.set()
+                return
             while self.temp < denat_temp and not self.stop_udp_listenner.is_set():
                 # heat straigh foward to the 75 % of setpoint
                 if self.temp <= denat_temp * 0.6:
@@ -545,11 +551,21 @@ class PCRFrame(ttk.Frame):
             # Denaturation Hold (control proporcional por ventana)
             # ------------------------------------------------------------
             self.fase = "Denaturation Hold"
-            KI = 0.7  # medio
-            I_MAX = 0.55
-            KP_HOLD = 0.15  # más suave que en calentamiento
-            TEMP_BAND = 0.05  # margen muerto muy pequeño
-            WINDOW = ts * 0.9
+            # KI = 0.7  # medio
+            # I_MAX = 0.55
+            # KP_HOLD = 0.15  # más suave que en calentamiento
+            # TEMP_BAND = 0.05  # margen muerto muy pequeño
+            # WINDOW = ts * 0.9
+            try:
+                KP_HOLD = pidGains.get("KP_h_denat", 0.2)
+                WINDOW = pidGains.get("win_h_denat", ts * 0.9)
+                KI = pidGains.get("KI_h_denat", 0.7)
+                I_MAX = pidGains.get("imax_h_denat", 0.55)
+                TEMP_BAND = pidGains.get("tband_h_denat", 0.05)
+            except Exception:
+                print("erorr bad pid denat hold", pidGains)
+                self.stop_udp_listenner.set()
+                return
             self.hold_temperature(
                 denat_temp,
                 denat_time,
@@ -576,13 +592,24 @@ class PCRFrame(ttk.Frame):
                 # -------------------------------------------------------------------
                 # reach high temp
                 self.fase = "Reach High temp"
-                KP = 0.15  # ajustar
-                WINDOW = 0.09  # segundos
-                MAX_AGE = 0.09  # s
-                TEMP_BAND = 0.5
-                I_MAX = 0.5
+                # KP = 0.15  # ajustar
+                # WINDOW = 0.09  # segundos
+                # MAX_AGE = 0.09  # s
+                # TEMP_BAND = 0.5
+                # I_MAX = 0.5
+                # KI = 0.6
+                try:
+                    KP = pidGains.get("KP_high", 0.15)
+                    WINDOW = pidGains.get("win_high", 0.05)
+                    MAX_AGE = pidGains.get("m_age_high", 0.09)
+                    TEMP_BAND = pidGains.get("tband_high", 0.05)
+                    KI = pidGains.get("KI_high", 0.6)
+                    I_MAX = pidGains.get("imax_high", 0.5)
+                except Exception:
+                    print("error bad data reach high", pidGains)
+                    self.stop_udp_listenner.set()
+                    return
                 integral = 0
-                KI = 0.6
                 self.pin_heating.write(True)  # pyrefly: ignore
                 while (
                     TEMP_BAND < abs(high_temp - self.temp)
@@ -619,11 +646,21 @@ class PCRFrame(ttk.Frame):
                 # hold High temperature
                 self.fase = "Hold High temp"
                 print(f"Holding temperature for {time_high} seconds")
-                KI = 0.5  # medio
-                I_MAX = 0.5
-                KP_HOLD = 0.1  # más suave que en calentamiento
-                TEMP_BAND = 0.05  # margen muerto muy pequeño
-                WINDOW = ts * 0.9
+                # KI = 0.5  # medio
+                # I_MAX = 0.5
+                # KP_HOLD = 0.1  # más suave que en calentamiento
+                # TEMP_BAND = 0.05  # margen muerto muy pequeño
+                # WINDOW = ts * 0.9
+                try:
+                    KP_HOLD = pidGains.get("KP_h_high", 0.1)
+                    WINDOW = pidGains.get("win_h_high", ts * 0.9)
+                    KI = pidGains.get("KI_h_high", 0.5)
+                    I_MAX = pidGains.get("imax_h_high", 0.5)
+                    TEMP_BAND = pidGains.get("tband_h_high", 0.05)
+                except Exception:
+                    print("error data pid hold h")
+                    self.stop_udp_listenner.set()
+                    return
                 self.hold_temperature(
                     high_temp,
                     time_high,
@@ -662,11 +699,21 @@ class PCRFrame(ttk.Frame):
                 # hold LOW temperature
                 self.fase = "LOW temp Hold"
                 print(f"Holding LOW temperature for {time_low} seconds")
-                KI = 0.45  # medio
-                I_MAX = 0.5
-                KP_HOLD = 0.1  # más suave que en calentamiento
-                TEMP_BAND = 0.05  # margen muerto muy pequeño
-                WINDOW = ts * 0.5
+                # KI = 0.45  # medio
+                # I_MAX = 0.5
+                # KP_HOLD = 0.1  # más suave que en calentamiento
+                # TEMP_BAND = 0.05  # margen muerto muy pequeño
+                # WINDOW = ts * 0.5
+                try:
+                    KP_HOLD = pidGains.get("KP_h_low", 0.1)
+                    WINDOW = pidGains.get("win_h_low", ts * 0.5)
+                    KI = pidGains.get("KI_h_low", 0.45)
+                    I_MAX = pidGains.get("imax_h_low", 0.5)
+                    TEMP_BAND = pidGains.get("tband_h_low", 0.05)
+                except Exception:
+                    print("error data pid hold low")
+                    self.stop_udp_listenner.set()
+                    return
                 self.hold_temperature(
                     low_temp,
                     time_low,
@@ -698,11 +745,16 @@ class PCRFrame(ttk.Frame):
             print("PCR cycles complete, reading fluorescence")
             self.fase = "Extension"
             time_extension = 30
-            KI = 0.45  # medio
-            I_MAX = 0.5
-            KP_HOLD = 0.1  # más suave que en calentamiento
-            TEMP_BAND = 0.05  # margen muerto muy pequeño
-            WINDOW = ts * 0.5
+            try:
+                KP_HOLD = pidGains.get("KP_h_ext", 0.1)
+                WINDOW = pidGains.get("win_h_ext", ts * 0.9)
+                KI = pidGains.get("KI_h_ext", 0.5)
+                I_MAX = pidGains.get("imax_h_ext", 0.5)
+                TEMP_BAND = pidGains.get("tband_h_ext", 0.05)
+            except Exception:
+                print("error data pid hold h")
+                self.stop_udp_listenner.set()
+                return
             self.hold_temperature(
                 low_temp,
                 time_extension,

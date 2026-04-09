@@ -48,7 +48,7 @@ def validar_flotante(valor: str|float, minimo: float, maximo: float) -> tuple[bo
         return False, "El valor ingresado no es un número decimal válido."
 
 
-def read_settings_from_file(file_path: str="resources/settings.json") -> dict[str, int|float|str|dict[str, int|float|str]]:
+def read_settings_from_file(file_path: str="resources/settings.json") -> dict:
     try:
         with open(file_path, 'r') as file:
             settings: dict = json.load(file)
