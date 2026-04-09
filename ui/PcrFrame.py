@@ -520,7 +520,7 @@ class PCRFrame(ttk.Frame):
             self.fase = "Denaturation"
             self.pin_heating.write(True)  # pyrefly: ignore
             self.temp_ts = time.time()
-            KP = 0.2  # ajustar
+            KP = 0.25  # ajustar
             WINDOW = 0.05  # segundos
             MAX_AGE = 0.09  # s
             while self.temp < denat_temp and not self.stop_udp_listenner.is_set():
@@ -545,8 +545,8 @@ class PCRFrame(ttk.Frame):
             # Denaturation Hold (control proporcional por ventana)
             # ------------------------------------------------------------
             self.fase = "Denaturation Hold"
-            KI = 0.5  # medio
-            I_MAX = 0.5
+            KI = 0.7  # medio
+            I_MAX = 0.55
             KP_HOLD = 0.15  # más suave que en calentamiento
             TEMP_BAND = 0.05  # margen muerto muy pequeño
             WINDOW = ts * 0.9
