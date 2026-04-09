@@ -691,9 +691,11 @@ class PCRFrame(ttk.Frame):
                     sistemaMotor,
                     None,
                     stop_func=lambda: self.stop_event_motor.is_set()
-                    or abs(self.temp - low_temp) <= 5.5,
+                    or abs(self.temp - low_temp) <= 9.5,
                     stop_event=self.stop_event_motor,
                 )
+                while self.temp>low_temp+1.5:
+                    time.sleep(ts/2)
                 print(f"Temperature reached: {self.temp} °C")
                 # -------------------------------------------------------------------
                 # hold LOW temperature
