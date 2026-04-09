@@ -576,7 +576,7 @@ class PCRFrame(ttk.Frame):
                 # -------------------------------------------------------------------
                 # reach high temp
                 self.fase = "Reach High temp"
-                KP = 0.125  # ajustar
+                KP = 0.15  # ajustar
                 WINDOW = 0.09  # segundos
                 MAX_AGE = 0.09  # s
                 TEMP_BAND = 0.5
