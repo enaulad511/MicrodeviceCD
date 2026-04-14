@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 from templates.utils import convert_si_integer_full
-from ui.UDPClientFrame import UDPIVPlotter
+from ui.EventEmstatFrame import EventPlotter
 
 __author__ = "Edisson A. Naula"
 __date__ = "$ 11/11/2025 at 14:45 p.m. $"
@@ -13,11 +13,55 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from templates.constants import font_entry  # Ajusta si no tienes este archivo
 
 
-DEFAUL_VALUES_CV = ["0", "-0.5", "-1.0", "1.0", "0.1", "1.0", "2"]
+DEFAUL_VALUES_CV = [
+    "0",
+    "0.0",
+    "-1",
+    "1",
+    "0.1",
+    "0.04",
+    "3",
+    "585954e-6",
+    "-1",
+    "1",
+    "47e-9",
+    "47e-9",
+    "47e-9",
+    "47e-9",
+]
+LABELS = [
+    "t equil. (s):",
+    "E begin (V):",
+    "E vertex1 (V):",
+    "E vertex2 (V):",
+    "E step (V):",
+    "Scan rate (V/s):",
+    "Number of scans:",
+    "Max BW:",
+    "Min Pot:",
+    "Max Pot:",
+    "Range Current:",
+    "Max Current:",
+    "Auto Current 1:",
+    "Auto Current 2:",
+]
+CURRENT_RANGES = {
+    "100 nA": 4.7e-8,  # 47 nA
+    "2 uA": 917969e-12,  # 917.969 nA
+    "4 uA": 4.7e-6,  # 4.7 µA
+    "8 uA": 9.7e-6,  # 9.7 µA
+    "16 uA": 19e-6,  # ~19 µA
+    "32 uA": 47e-6,  # 47 µA
+    "63 uA": 100e-6,  # 100 µA
+    "125 uA": 190e-6,  # 190 µA
+    "250 uA": 470e-6,  # 470 µA
+    "500 uA": 918e-6,  # 918 µA
+    "1 mA": 1.0e-3,  # 1 mA
+}
 
 
 def construc_nscans_script(
-    t_equilibration, E_begin, E_vertex1, E_vertex2, E_step, n_scans
+    t_equilibration, E_begin, E_vertex1, E_vertex2, E_step, n_scans, range_ba, ba1, ba2
 ):
     script = (
         "var i\n"
@@ -28,8 +72,8 @@ def construc_nscans_script(
         "set_pgstat_mode 2\n"
         "set_max_bandwidth 585054m\n"
         "set_range_minmax da -1 1\n"
-        "set_range ba 470u\n"
-        "set_autoranging ba 917969p 470u\n"
+        f"set_range ba {range_ba}\n"
+        f"set_autoranging ba {ba1} {ba2}\n"
         f"set_e {E_begin}\n"
         "cell_on\n"
         f"wait {t_equilibration} s\n"
@@ -45,7 +89,9 @@ def construc_nscans_script(
     return script.strip()
 
 
-def construc_individual_script(t_equilibration, E_begin, E_vertex1, E_vertex2, E_step):
+def construc_individual_script(
+    t_equilibration, E_begin, E_vertex1, E_vertex2, E_step, range_ba, ba1, ba2
+):
     script = (
         "var i\n"
         "var e\n"
@@ -55,8 +101,8 @@ def construc_individual_script(t_equilibration, E_begin, E_vertex1, E_vertex2, E
         "set_pgstat_mode 2\n"
         "set_max_bandwidth 585054m\n"
         "set_range_minmax da -1 1\n"
-        "set_range ba 470u\n"
-        "set_autoranging ba 917969p 470u\n"
+        f"set_range ba {range_ba}\n"
+        f"set_autoranging ba {ba1} {ba2}\n"
         f"set_e {E_begin}\n"
         "cell_on\n"
         f"wait {t_equilibration}s\n"
@@ -82,7 +128,6 @@ class ShowMethodScript(ttk.Toplevel):
         self.script_box.pack(fill="both", expand=True, padx=10, pady=10)
         self.script_box.insert("end", script)
         self.script_box.configure(state="disabled")
-
         self.protocol("WM_DELETE_WINDOW", self.on_close)
 
     def on_close(self):
@@ -188,57 +233,112 @@ class ShowProfileFrame(ttk.Toplevel):
         self.destroy()
 
 
+# def create_widgets_cv(parent, callbacks: dict, columns=2):
+#     entries = []
+#     parent.columnconfigure(tuple(range(columns)), weight=1)
+#     inputs_frame = ttk.Frame(parent)
+#     inputs_frame.grid(row=0, column=0, padx=(5, 20), pady=10, sticky="nswe")
+#     inputs_frame.columnconfigure((0, 1), weight=1)
+#     frame1 = ttk.LabelFrame(inputs_frame, text="Cyclic Voltammetry Settings")
+#     frame1.grid(row=0, column=0, padx=(5, 20), pady=10, sticky="nswe")
+#     frame1.configure(style="Custom.TLabelframe")
+#     frame1.columnconfigure(tuple(range(columns * 2)), weight=1)
+#     total = len(LABELS)
+#     per_col = (total + columns - 1) // columns  # redondeo hacia arriba
+#     for col in range(columns):
+#         start = col * per_col
+#         end = min(start + per_col, total)
+#         subset = LABELS[start:end]
+#         for i, lbl in enumerate(subset):
+#             row = i
+#             ttk.Label(frame1, text=lbl, style="Custom.TLabel").grid(
+#                 row=row, column=col * 2, padx=5, pady=5, sticky="w"
+#             )
+#             # Entry
+#             entry = ttk.Entry(frame1, font=font_entry)
+#             entry.insert(0, DEFAUL_VALUES_CV[start + i])
+#             entry.grid(row=row, column=col * 2 + 1, padx=5, pady=5, sticky="nswe")
+#             entries.append(entry)
+#     frame_selectors = ttk.LabelFrame(inputs_frame, text="Current Range")
+#     frame_selectors.grid(row=1, column=0, padx=(5, 20), pady=10, sticky="nswe")
+#     # create radio buttons to select current range
+
+#     # Panel de controles a la derecha
+#     frame_controls = ttk.Frame(inputs_frame)
+#     frame_controls.grid(row=0, column=1, pady=10, sticky="nswe")
+#     frame_controls.columnconfigure(0, weight=1)
+#     ttk.Button(
+#         frame_controls,
+#         text="Generate CV Profile",
+#         style="info.TButton",
+#         command=callbacks.get("callback_generate_profile", ()),
+#     ).grid(row=0, column=0, pady=5, sticky="nswe")
+#     ttk.Button(
+#         frame_controls,
+#         text="Show MethodScript",
+#         style="info.TButton",
+#         command=callbacks.get("callback_show_script", ()),
+#     ).grid(row=1, column=0, pady=5, sticky="nswe")
+#     ttk.Button(
+#         frame_controls,
+#         text="Send Script",
+#         style="info.TButton",
+#         command=callbacks.get("callback_send_script", ()),
+#     ).grid(row=2, column=0, pady=5, sticky="nswe")
+#     return entries
+
+
 def create_widgets_cv(parent, callbacks: dict, columns=2):
     entries = []
 
-    # Configurar columnas del contenedor principal
     parent.columnconfigure(tuple(range(columns)), weight=1)
 
-    frame1 = ttk.LabelFrame(parent, text="Cyclic Voltammetry Settings")
-    frame1.grid(
-        row=0, column=0, columnspan=columns - 1, padx=(5, 20), pady=10, sticky="nswe"
-    )
+    inputs_frame = ttk.Frame(parent)
+    inputs_frame.grid(row=0, column=0, padx=(5, 20), pady=10, sticky="nswe")
+    inputs_frame.columnconfigure((0, 1), weight=1)
+    # ===== CV SETTINGS =====
+    frame1 = ttk.LabelFrame(inputs_frame, text="Cyclic Voltammetry Settings")
+    frame1.grid(row=0, column=0, padx=(5, 20), pady=10, sticky="nswe")
     frame1.configure(style="Custom.TLabelframe")
-
-    # Configurar columnas internas dinámicamente
     frame1.columnconfigure(tuple(range(columns * 2)), weight=1)
 
-    labels = [
-        "t equil. (s):",
-        "E begin (V):",
-        "E vertex1 (V):",
-        "E vertex2 (V):",
-        "E step (V):",
-        "Scan rate (V/s):",
-        "Number of scans:",
-    ]
-
-    # Calcular cuántos elementos por columna
-    total = len(labels)
-    per_col = (total + columns - 1) // columns  # redondeo hacia arriba
+    total = len(LABELS)
+    per_col = (total + columns - 1) // columns
 
     for col in range(columns):
         start = col * per_col
         end = min(start + per_col, total)
-        subset = labels[start:end]
+        subset = LABELS[start:end]
 
         for i, lbl in enumerate(subset):
             row = i
-
-            # Etiqueta
             ttk.Label(frame1, text=lbl, style="Custom.TLabel").grid(
                 row=row, column=col * 2, padx=5, pady=5, sticky="w"
             )
 
-            # Entry
             entry = ttk.Entry(frame1, font=font_entry)
             entry.insert(0, DEFAUL_VALUES_CV[start + i])
             entry.grid(row=row, column=col * 2 + 1, padx=5, pady=5, sticky="nswe")
             entries.append(entry)
 
-    # Panel de controles a la derecha
-    frame_controls = ttk.Frame(parent)
-    frame_controls.grid(row=0, column=columns - 1, pady=10, sticky="nswe")
+    # ===== CURRENT RANGE SELECTOR =====
+    frame_selectors = ttk.LabelFrame(inputs_frame, text="Current Range")
+    frame_selectors.grid(row=1, column=0, padx=(5, 20), pady=10, sticky="nswe")
+
+    # NEW: variable compartida para los radio buttons
+    current_range_var = ttk.StringVar(value="1uA")  # valor por defecto
+
+    # NEW: creación horizontal de radio buttons
+    for col, (text, value) in enumerate(CURRENT_RANGES.items()):
+        ttk.Radiobutton(
+            frame_selectors,
+            text=text,
+            value=value,
+            variable=current_range_var,
+        ).grid(row=0, column=col, padx=5, pady=5, sticky="w")
+    # ===== CONTROL BUTTONS =====
+    frame_controls = ttk.Frame(inputs_frame)
+    frame_controls.grid(row=0, column=1, pady=10, sticky="nswe")
     frame_controls.columnconfigure(0, weight=1)
 
     ttk.Button(
@@ -262,15 +362,16 @@ def create_widgets_cv(parent, callbacks: dict, columns=2):
         command=callbacks.get("callback_send_script", ()),
     ).grid(row=2, column=0, pady=5, sticky="nswe")
 
-    return entries
+    return entries, current_range_var
 
 
 class CVFrame(ttk.Frame):
-    def __init__(self, parent):
+    def __init__(self, parent, ip_sender="localhost", callback_get_ip_sender=None):
         ttk.Frame.__init__(self, parent)
         self.parent = parent
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=1)
+        self.payload = {}
         # ----------------variables--------------
         self.t_equilibration = float(DEFAUL_VALUES_CV[0])
         self.E_begin = float(DEFAUL_VALUES_CV[1])
@@ -281,6 +382,7 @@ class CVFrame(ttk.Frame):
         self.n_scans = int(DEFAUL_VALUES_CV[6])
         self.ShowMethodScrit = None
         self.ShowProfile = None
+        self.callback_ip = callback_get_ip_sender
         # ---------------------------------------
 
         content_frame = ttk.Frame(self)
@@ -292,18 +394,20 @@ class CVFrame(ttk.Frame):
             "callback_show_script": self.callback_show_methodscript,
             "callback_send_script": self.callback_send_script,
         }
-        self.entries = create_widgets_cv(content_frame, callbacks)
+        self.entries, self.current_range = create_widgets_cv(content_frame, callbacks)
         self.frame_plotter = ttk.LabelFrame(self, text="Live Data Plotter")
         self.frame_plotter.grid(row=1, column=0, padx=10, pady=10, sticky="nsew")
         self.frame_plotter.columnconfigure(0, weight=1)
-        udp_plotter = UDPIVPlotter(
+        self.udp_plotter = EventPlotter(
             self.frame_plotter,
-            udp_port=5005,
+            tcp_port=5006,
+            ip_sender=ip_sender,
             buffer_size=4096,
             max_points=5000,
             update_interval_ms=80,
+            payload=self.payload,
         )
-        udp_plotter.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
+        self.udp_plotter.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
         self.frame_plotter.grid_forget()
 
     def create_payload_cv(self):
@@ -315,6 +419,12 @@ class CVFrame(ttk.Frame):
             "E_s": convert_si_integer_full(self.E_step),
             "sc_r": convert_si_integer_full(self.scan_rate),
             "n_sc": convert_si_integer_full(self.n_scans),
+            "m_b": convert_si_integer_full(self.m_band),
+            "min_da": convert_si_integer_full(self.min_da),
+            "max_da": convert_si_integer_full(self.max_da),
+            "range_ba": convert_si_integer_full(self.range_ba),
+            "ba_1": convert_si_integer_full(self.ba1),
+            "ba_2": convert_si_integer_full(self.ba2),
             "method": "cv",
         }
 
@@ -328,6 +438,12 @@ class CVFrame(ttk.Frame):
             self.E_step = float(self.entries[4].get())
             self.scan_rate = float(self.entries[5].get())
             self.n_scans = int(self.entries[6].get())
+            self.m_band = float(self.entries[7].get())
+            self.min_da = float(self.entries[8].get())
+            self.max_da = float(self.entries[9].get())
+            self.range_ba = float(self.current_range.get())
+            self.ba1 = float(self.current_range.get())
+            self.ba2 = float(self.current_range.get())
         except ValueError as e:
             print(f"Error: Invalid input. Please enter valid numbers -> {e}")
             self.t_equilibration = float(DEFAUL_VALUES_CV[0])
@@ -337,13 +453,22 @@ class CVFrame(ttk.Frame):
             self.E_step = float(DEFAUL_VALUES_CV[4])
             self.scan_rate = float(DEFAUL_VALUES_CV[5])
             self.n_scans = int(DEFAUL_VALUES_CV[6])
+            self.m_band = float(DEFAUL_VALUES_CV[7])
+            self.min_da = float(DEFAUL_VALUES_CV[8])
+            self.max_da = float(DEFAUL_VALUES_CV[9])
+            self.range_ba = float(DEFAUL_VALUES_CV[10])
+            self.ba1 = float(DEFAUL_VALUES_CV[11])
+            self.ba2 = float(DEFAUL_VALUES_CV[12])
 
     def callback_send_script(self):
         try:
             self.update_data_script()
             self.create_payload_cv()
             script = self.generate_methodscript()
-
+            ip_sender = self.callback_ip() if self.callback_ip else "localhost"
+            self.udp_plotter.update_val_experiment(
+                x_key="E_V", y_key="I_A", payload=self.payload, ip_sender=ip_sender
+            )
             self.frame_plotter.grid(row=1, column=0, padx=10, pady=10, sticky="nsew")
         except ValueError:
             self.frame_plotter.grid_forget()
@@ -374,6 +499,8 @@ class CVFrame(ttk.Frame):
         )
 
     def callback_show_methodscript(self):
+        self.update_data_script()
+        self.create_payload_cv()
         script = self.generate_methodscript()
         if self.ShowMethodScrit is not None:
             self.ShowMethodScrit.destroy()
@@ -395,6 +522,9 @@ class CVFrame(ttk.Frame):
                 convert_si_integer_full(self.E_vertex2),
                 convert_si_integer_full(self.E_step),
                 convert_si_integer_full(self.n_scans),
+                convert_si_integer_full(self.range_ba),
+                convert_si_integer_full(self.ba1),
+                convert_si_integer_full(self.ba2),
             )
         else:
             script = construc_individual_script(
@@ -403,6 +533,9 @@ class CVFrame(ttk.Frame):
                 convert_si_integer_full(self.E_vertex1),
                 convert_si_integer_full(self.E_vertex2),
                 convert_si_integer_full(self.E_step),
+                convert_si_integer_full(self.range_ba),
+                convert_si_integer_full(self.ba1),
+                convert_si_integer_full(self.ba2),
             )
         return script.strip()
 

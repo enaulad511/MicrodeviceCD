@@ -7,20 +7,22 @@ class EmstatStreamParser:
     """
 
     FIELD_MAP = {
-        "cv": {
-            "da": ("E_V", 1e-6),
-            "ba": ("I_A", 1e-12)
-        },
-        "swv": {
-            "da": ("E_V", 1e-6),
-            "ba": ("I_A", 1e-12),
-            "fr": ("freq_Hz", 1)
-        },
-        "eis": {
-            "fr": ("freq_Hz", 1),
-            "zr": ("Z_real", 1e-3),
-            "zi": ("Z_imag", 1e-3)
-        }
+        "cv": {"da": ("E_V", 1e-6), "ba": ("I_A", 1e-12)},
+        "swv": {"da": ("E_V", 1e-6), "ba": ("I_A", 1e-12), "fr": ("freq_Hz", 1)},
+        "eis": {"fr": ("freq_Hz", 1), "zr": ("Z_real", 1e-3), "zi": ("Z_imag", 1e-3)},
+    }
+    UNIT_MAP = {
+        "a": 1e-18,
+        "f": 1e-15,
+        "p": 1e-12,
+        "n": 1e-9,
+        "u": 1e-6,
+        "m": 1e-3,
+        " ": 1,
+        "k": 1e3,
+        "M": 1e6,
+        "G": 1e9,
+        "T": 1e12,
     }
 
     def __init__(self, experiment: str):
@@ -30,12 +32,7 @@ class EmstatStreamParser:
         self.experiment = experiment
 
         # Contexto dinámico
-        self.context = {
-            "cycle": 0,
-            "direction": +1,
-            "point": 0,
-            "method_id": None
-        }
+        self.context = {"cycle": 0, "direction": +1, "point": 0, "method_id": None}
 
         self.finished = False
 
@@ -58,24 +55,15 @@ class EmstatStreamParser:
 
         if kind == "scan_switch":
             self.context["direction"] *= -1
-            return {
-                "type": "scan_switch",
-                "direction": self.context["direction"]
-            }
+            return {"type": "scan_switch", "direction": self.context["direction"]}
 
         if kind == "cycle":
             self.context["cycle"] = int(raw[1:])
-            return {
-                "type": "cycle",
-                "cycle": self.context["cycle"]
-            }
+            return {"type": "cycle", "cycle": self.context["cycle"]}
 
         if kind == "method":
             self.context["method_id"] = int(raw[1:])
-            return {
-                "type": "method",
-                "method_id": self.context["method_id"]
-            }
+            return {"type": "method", "method_id": self.context["method_id"]}
 
         if kind == "start_method":
             return {"type": "start_method"}
@@ -85,10 +73,7 @@ class EmstatStreamParser:
             return {"type": "method_end"}
 
         # ruido o mensajes no relevantes
-        return {
-            "type": "unknown",
-            "raw": raw
-        }
+        return {"type": "unknown", "raw": raw}
 
     # ------------------------------------------------------------------
     # Clasificador
@@ -115,18 +100,18 @@ class EmstatStreamParser:
         parsed = self._parse_packet(raw)
         if parsed is None:
             return None
-
         decoded = self._decode(parsed)
-
         self.context["point"] = parsed["index"]
 
-        decoded.update({
-            "type": "data",
-            "cycle": self.context["cycle"],
-            "direction": self.context["direction"],
-            "point": parsed["index"],
-            "state": parsed["state"]
-        })
+        decoded.update(
+            {
+                "type": "data",
+                "cycle": self.context["cycle"],
+                "direction": self.context["direction"],
+                "point": parsed["index"],
+                "state": parsed["state"],
+            }
+        )
 
         return decoded
 
@@ -141,18 +126,15 @@ class EmstatStreamParser:
                 unit = part[-1]
                 raw_val = part[2:-1]
 
-                value = int(raw_val, 16) if any(c in raw_val for c in "ABCDEF") else int(raw_val)
+                value = int(raw_val, 16) - 0x8000000
+                # value = (
+                #     int(raw_val, 16)
+                #     if any(c in raw_val for c in "ABCDEF")
+                #     else int(raw_val)
+                # )
+                fields[key] = {"value": value, "unit": unit, "value_hex": raw_val}
 
-                fields[key] = {
-                    "value": value,
-                    "unit": unit
-                }
-
-            return {
-                "fields": fields,
-                "state": int(state),
-                "index": index
-            }
+            return {"fields": fields, "state": int(state), "index": index}
 
         except Exception:
             return None
@@ -167,7 +149,7 @@ class EmstatStreamParser:
         for key, (name, scale) in schema.items():
             f = parsed["fields"].get(key)
             if f:
-                out[name] = f["value"] * scale
+                out[name] = f["value"] * self.UNIT_MAP.get(f["unit"], 1)
 
         return out
 
@@ -199,23 +181,18 @@ class LineBufferedSocketReader:
 
 if __name__ == "__main__":
     parser = EmstatStreamParser(experiment="cv")
-
+    raw = 'EMSTAT:{"raw": "Pda7FCF2C0m;ba7F77482p,14,20B", "type": "emstat_data"}'
     while True:
         # raw = get_raw_line_somehow()
-
         event = parser.feed_raw(raw)
         if event is None:
             continue
-
         if event["type"] == "data":
             print(event["E_V"], event["I_A"])
-
         elif event["type"] == "scan_switch":
             print("Cambio de barrido")
-
         elif event["type"] == "cycle":
             print("Scan:", event["cycle"])
-
         elif event["type"] == "method_end":
             print("Experimento terminado")
             break

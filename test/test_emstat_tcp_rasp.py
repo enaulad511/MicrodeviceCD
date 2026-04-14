@@ -8,7 +8,7 @@ __author__ = "Edisson Naula"
 __date__ = "$ 19/11/2025 at 10:56 $"
 
 
-CD_IP = "10.22.25.200"
+CD_IP = "10.22.25.201"
 TCP_PORT = 5006
 
 payload = {

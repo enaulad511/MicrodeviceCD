@@ -46,7 +46,9 @@ def configure_styles():
         "Custom.TLabelframe.Label", font=font_labels_frame
     )
     style.configure("Custom.TNotebook.Tab", font=font_tabs)  # pyrefly: ignore
-    style.configure("Custom.TCombobox.Text", background='green', font=font_entry)  # pyrefly: ignore
+    style.configure(
+        "Custom.TCombobox.Text", background="green", font=font_entry
+    )  # pyrefly: ignore
     style.configure("info.TButton", font=font_buttons)  # pyrefly: ignore
     style.configure("success.TButton", font=font_buttons)  # pyrefly: ignore
     style.configure("danger.TButton", font=font_buttons)  # pyrefly: ignore
@@ -60,7 +62,7 @@ def configure_styles():
     style.configure(  # pyrefly: ignore
         "Custom.Treeview.Heading", font=("Arial", 18, "bold")
     )  # pyrefly: ignore
-    style.configure("Vertical.TScrollbar", arrowsize=20) #pyrefly: ignore
+    style.configure("Vertical.TScrollbar", arrowsize=20)  # pyrefly: ignore
     return style
 
 
@@ -96,15 +98,19 @@ class MainGUI(ttk.Window):
         self.project_key = None
         self.title("\u03bcAA")
         self.style_gui = configure_styles()
+        self.ip_sender = "localhost"
         self.protocol("WM_DELETE_WINDOW", self.on_close_window)
-        self.option_add('*TCombobox*Listbox.font', font_text)
-        self.option_add('*Combobox*Listbox.font', font_text) 
+        self.option_add("*TCombobox*Listbox.font", font_text)
+        self.option_add("*Combobox*Listbox.font", font_text)
         settings = read_settings_from_file()
         ads_fsr = float(settings.get("ads_fsr", 1.024))
         self.ads = None
         if secrets.get("environment", "") != "dev":
             from Drivers.ReaderADS import Ads1115Reader
-            self.ads = Ads1115Reader(address=0x48, fsr=ads_fsr, sps=64, single_shot=False) 
+
+            self.ads = Ads1115Reader(
+                address=0x48, fsr=ads_fsr, sps=64, single_shot=False
+            )
             # self.ads.check_diff_health(p=0, n=1, samples=30)
         # --------------------Start Animation -------------------
         # self.show_gif_toplevel()
@@ -132,7 +138,9 @@ class MainGUI(ttk.Window):
         self.tab_pcr = PCRFrame(self.main_notebook, self.ads)
         self.main_notebook.add(self.tab_pcr, text=main_tabs_texts[0], padding=10)
         # ------------------Electrochemical tab-------------------
-        self.tab_electrochemical = ElectrochemicalFrame(self.main_notebook)
+        self.tab_electrochemical = ElectrochemicalFrame(
+            self.main_notebook, self.callback_ip
+        )
         self.main_notebook.add(
             self.tab_electrochemical, text=main_tabs_texts[1], padding=10
         )
@@ -204,6 +212,9 @@ class MainGUI(ttk.Window):
 
         # ----------------------after init ----------------------
         self.after(2000, self.try_connect_disc)
+
+    def callback_ip(self):
+        return self.ip_sender
 
     def on_tab_changed(self, event):
         selected_index = self.notebook.index(self.notebook.select())
@@ -278,12 +289,13 @@ class MainGUI(ttk.Window):
             on_message=None,
             parse_float=True,  # Arduino sends a numeric string
         )
-
         try:
             client.start()
             time.sleep(2.0)
             lf = client.get_status_disc()
             if lf is not None and lf:
+                self.ip_sender = str(client.latest_addr())
+                print("ip sender: ", self.ip_sender)
                 self.txt_connected.set("Disc Connected")
                 client.stop()
                 return True
@@ -298,7 +310,7 @@ class MainGUI(ttk.Window):
         self.quit()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     app = ttk.Window(themename="flatly")
     app.title("MicroAA Main GUI")
     app.geometry("1200x800")

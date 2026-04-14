@@ -1,5 +1,7 @@
-
 # -*- coding: utf-8 -*-
+from Drivers.EmstatUtils import EmstatStreamParser
+from Drivers.EmstatUtils import LineBufferedSocketReader
+import json
 from tkinter.constants import END
 import socket
 import threading
@@ -8,6 +10,7 @@ import time
 from collections import deque
 
 import matplotlib
+
 matplotlib.use("TkAgg")  # backend para Tk
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
@@ -16,27 +19,44 @@ import ttkbootstrap as ttk
 import tkinter as tk
 
 
-class UDPIVPlotter(ttk.Frame):
+class EventPlotter(ttk.Frame):
     """
     Frame embebible en ttkbootstrap que:
-    - Escucha UDP (broadcast) en un puerto
-    - Detecta 'start sent' / 'end sent'
-    - Parseo de líneas a (V, I, t, status, range) vía parse_line()
-    - Grafica Voltaje vs Corriente en vivo por 'measurement' (cada START incrementa contador)
+    - Envia un scritp de methodscript por tcp
+    - Detecta inicio y final del experimento del EMSTAT
+    - Parseo de líneas
+    - Grafica las variables recibidas en los eventos detectados.
     - Control de inicio/detención desde botones
     """
 
-    def __init__(self, master, udp_port=5005, buffer_size=4096, max_points=5000,
-                 update_interval_ms=80, title="CV", x_label="E(V)", y_label="I(A)", **kwargs):
+    def __init__(
+        self,
+        master,
+        tcp_port=5006,
+        ip_sender="localhost",
+        buffer_size=4096,
+        max_points=5000,
+        update_interval_ms=80,
+        title="CV",
+        x_label="E(V)",
+        y_label="I(A)",
+        x_key="E_V",
+        y_key="I_A",
+        payload=None,
+        **kwargs,
+    ):
         super().__init__(master, **kwargs)
+        # payload para el experimento
+        self.payload_exp = payload
 
         # --- Parámetros de comunicación y plotting ---
-        self.udp_port = udp_port
+        self.tcp_port = tcp_port
+        self.ip_sender = ip_sender
         self.buffer_size = buffer_size
         self.max_points = max_points
         self.update_interval_ms = update_interval_ms
-        self.prefix_legend="M-"
-        self.legends_list=None
+        self.prefix_legend = "M-"
+        self.legends_list = None
         self.config_legend = None
         self.title = title
         self.x_label = x_label
@@ -44,14 +64,13 @@ class UDPIVPlotter(ttk.Frame):
 
         # --- Estado de ejecución ---
         self.q_points = queue.Queue()
-        self.storage_dict = {}          # registro parcial de informacion
-        self.total_data = []            # registro total de informacion 
+        self.storage_dict = {}  # registro parcial de informacion
+        self.total_data = []  # registro total de informacion
         self.stop_event = threading.Event()
         self.reader_th = None
         self.sock = None
         self.running = False
         self.flag_recording = False
-        self.count_measurement = 0
         self.after_id = None
 
         # --- Estado del gráfico ---
@@ -62,8 +81,10 @@ class UDPIVPlotter(ttk.Frame):
         self.ax.set_ylabel(self.y_label)
 
         # Por medición (m): deques y Line2D
-        self.v_by_m = {}
-        self.i_by_m = {}
+        self.x_key = x_key
+        self.y_key = y_key
+        self.x_by_m = {}
+        self.y_by_m = {}
         self.lines_by_m = {}
         self._style_cycle = self._build_style_cycle()
 
@@ -77,16 +98,28 @@ class UDPIVPlotter(ttk.Frame):
         controls = ttk.Frame(self)
         controls.pack(side=ttk.TOP, fill=ttk.X, pady=6)
 
-        self.btn_start = ttk.Button(controls, text="▶ Start listening",
-                                   bootstyle="success", command=self.start)
-        self.btn_stop = ttk.Button(controls, text="⏹ Stop",
-                                  bootstyle="danger", command=self.stop, state=ttk.DISABLED)
-        self.btn_clear = ttk.Button(controls, text="🗑 Clean",
-                                   bootstyle="secondary", command=self.clear_plot)
-        self.btn_save = ttk.Button(controls, text="💾 Save",
-                                   bootstyle="secondary", command=self.save_data)
-        self.btn_custom_plot = ttk.Button(controls, text="📊 Custom Plot",
-                                          bootstyle="secondary", command=self.custom_plot_axes)
+        self.btn_start = ttk.Button(
+            controls, text="▶ Start listening", bootstyle="success", command=self.start
+        )
+        self.btn_stop = ttk.Button(
+            controls,
+            text="⏹ Stop",
+            bootstyle="danger",
+            command=self.stop,
+            state=ttk.DISABLED,
+        )
+        self.btn_clear = ttk.Button(
+            controls, text="🗑 Clean", bootstyle="secondary", command=self.clear_plot
+        )
+        self.btn_save = ttk.Button(
+            controls, text="💾 Save", bootstyle="secondary", command=self.save_data
+        )
+        self.btn_custom_plot = ttk.Button(
+            controls,
+            text="📊 Custom Plot",
+            bootstyle="secondary",
+            command=self.custom_plot_axes,
+        )
         self.lbl_status = ttk.Label(controls, text="State: stopped.", anchor="w")
 
         self.btn_start.pack(side=ttk.LEFT, padx=4)
@@ -122,27 +155,31 @@ class UDPIVPlotter(ttk.Frame):
         if self.running:
             return
         try:
-            self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-            self.sock.bind(("", self.udp_port))
-            self.sock.settimeout(1.0)  # para cierre limpio
+            self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            print((self.ip_sender, self.tcp_port))
+            self.sock.connect((self.ip_sender, self.tcp_port))
+            # s.sendall((json.dumps(payload) + "\n").encode())
+            # self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            # self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            # self.sock.bind(("", self.tcp_port))
+            self.sock.settimeout(5.0)  # para cierre limpio
         except OSError as e:
             self._set_status(f"Error de socket: {e}")
             return
 
         self.stop_event.clear()
-        self.reader_th = threading.Thread(target=self._udp_reader, daemon=True)
+        self.reader_th = threading.Thread(target=self._tcp_reader, daemon=True)
         self.reader_th.start()
         self.running = True
         self.btn_start.configure(state=ttk.DISABLED)
         self.btn_stop.configure(state=ttk.NORMAL)
-        self._set_status(f"Listening for UPD in {self.udp_port} …")
+        self._set_status(f"Listening for TCP answer in {self.tcp_port} …")
         self._schedule_update()
 
     def stop(self):
         """Detiene hilo lector, cierra socket y cancela actualizaciones."""
         print("Stopping …")
-        
+
         if not self.running:
             return
         self.total_data.append(self.storage_dict.copy())
@@ -154,30 +191,28 @@ class UDPIVPlotter(ttk.Frame):
         except Exception:
             pass
         self.sock = None
-        
 
         # Esperar hilo (rápido gracias al timeout del socket)
         if self.reader_th and self.reader_th.is_alive():
-            self.reader_th.join(timeout=1.5)
+            self.reader_th.join(timeout=0.5)
 
         self.running = False
         self.btn_start.configure(state=ttk.NORMAL)
         self.btn_stop.configure(state=ttk.DISABLED)
         self._cancel_update()
         self._set_status("Estado: detenido")
-        print("Stopped")
 
     def clear_plot(self):
         """Limpia datos y resetea el gráfico."""
         self.storage_dict.clear()
-        self.v_by_m.clear()
-        self.i_by_m.clear()
+        self.x_by_m.clear()
+        self.y_by_m.clear()
         self.lines_by_m.clear()
 
         self.ax.clear()
-        self.ax.set_title("Voltaje vs Corriente (en vivo)")
-        self.ax.set_xlabel("Voltaje (V)")
-        self.ax.set_ylabel("Corriente (A)")
+        self.ax.set_title("V vs A (online)")
+        self.ax.set_xlabel("Potential (V)")
+        self.ax.set_ylabel("Current (A)")
         self.ax.legend([], [])
         self.canvas.draw_idle()
 
@@ -186,7 +221,7 @@ class UDPIVPlotter(ttk.Frame):
         Create CSV from data stored
         """
         if self.running:
-            self._set_status("Detenga la adquisición antes de guardar.")
+            self._set_status("Stop aquisition before saving data.")
             return
         if not self.total_data:
             self._set_status("No hay datos para guardar.")
@@ -198,14 +233,26 @@ class UDPIVPlotter(ttk.Frame):
             return
         try:
             with open(f"{path}/IV_data_{time.strftime('%Y%m%d_%H%M')}.csv", "w") as f:
-                f.write("sample,voltage,current,status,range,measurement\n")
-                for data in self.total_data:
-                    for k, v in data.items():
-                        f.write(f"{k},{v['voltage']},{v['current']},{v['status']},{v['range']},{v['measurement']}\n")
-            self._set_status(f"Data saved to file: IV_data_{time.strftime('%Y%m%d_%H%M')}.csv")
+                f.write(f"sample,{self.x_key}, {self.y_key}, cycle\n")
+                for index, event in enumerate(self.total_data):
+                    f.write(
+                        f"{index}, {event.get(self.x_key)}, {event.get(self.y_key)}, {event.get('cycle')}\n"
+                    )
+            self._set_status(
+                f"Data saved to file: IV_data_{time.strftime('%Y%m%d_%H%M')}.csv"
+            )
         except Exception as e:
             self._set_status(f"Error saving data: {e}")
             print(f"Error saving data: {e}")
+
+    def update_val_experiment(self, x_key, y_key, payload, ip_sender):
+        if self.flag_recording:
+            print("not posible to update payload while running experiment")
+            return
+        self.x_key = x_key
+        self.y_key = y_key
+        self.payload_exp = payload
+        self.ip_sender = ip_sender
 
     def custom_plot_axes(self):
         if self.config_legend is not None:
@@ -213,73 +260,71 @@ class UDPIVPlotter(ttk.Frame):
             self.config_legend.lift()
         else:
             self.config_legend = LegendManagerWindow(self, plotter=self)
-    
+
     def on_close_config_legend(self, legend_list, prefix_legend="M-"):
         # self.config_legend.destroy()
         self.config_legend = None
-        self.legends_list = legend_list if legend_list and len(legend_list)>0 else None
+        self.legends_list = (
+            legend_list if legend_list and len(legend_list) > 0 else None
+        )
         self.prefix_legend = prefix_legend
         self._update_legends()
-    
+
     # ---------------------------
     # Hilo lector UDP
     # ---------------------------
-    def _udp_reader(self):
-        print(f"Listening for UDP on port {self.udp_port} …")
+    def _tcp_reader(self):
+        print(f"starting tcp on port {self.tcp_port} and address {self.ip_sender} …")
         self.flag_recording = False
-
+        # s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        # s.connect((CD_IP, TCP_PORT))
+        if self.sock is None:
+            print("First create a socket")
+            return
+        self.sock.sendall((json.dumps(self.payload_exp) + "\n").encode())
+        self.flag_recording = True
+        reader = LineBufferedSocketReader(self.sock)
+        parser = EmstatStreamParser(experiment="cv")
+        start_time = time.time()
         while not self.stop_event.is_set():
-            try:
-                data, addr = self.sock.recvfrom(self.buffer_size)
-            except socket.timeout:
+            if time.time() - start_time > 120:
+                self.sock.sendall(b'{"type":"keepalive"}\n')
+                start_time = time.time()
+            lines = reader.read_lines()
+            if lines is None:
+                print("TCP closed by server")
                 continue
-            except OSError:
-                break  # socket cerrado
+            for line in lines:
+                if line.startswith("EMSTAT:"):
+                    raw_json = line[len("EMSTAT:") :]
+                    try:
+                        msg = json.loads(raw_json)
+                    except Exception:
+                        continue
+                    if msg.get("type") == "emstat_data":
+                        event = parser.feed_raw(msg["raw"])
+                        if event:
+                            if event["type"] == "data":
+                                self.total_data.append(event)
+                                # print("EVENT:", event)
 
-            try:
-                text = data.decode("utf-8", errors="replace")
-            except Exception:
-                text = str(data)
-
-            # Log opcional:
-            print(f"From {addr[0]}:{addr[1]} -> {text}")
-
-            lower = text.lower()
-            if "start sent" in lower:
-                measurement = lower.split(":")[-1].strip()
-                
-                print(f"Starting measurement {measurement}")
-                self.flag_recording = True
-                self.count_measurement += 1
-                if len(self.storage_dict)>0:
-                    self.total_data.append(self.storage_dict.copy())
-                self.storage_dict.clear()
-                # si quieres resetear el gráfico en cada medición:
-                # self.clear_plot()
-                continue
-
-            if "end sent" in lower:
-                self.flag_recording = False
-                print("Recording stopped.")
-                continue
-
-            if self.flag_recording:
-                parsed = self.parse_line(text)
-                if parsed is not None:
-                    v = parsed["voltage"]
-                    i = parsed["current"]
-                    t = parsed["time_ms"]
-                    self.q_points.put((v, i, self.count_measurement))
-
-                    self.storage_dict[str(t)] = {
-                        "voltage": v,
-                        "current": i,
-                        "status": parsed.get("status"),
-                        "range": parsed.get("range"),
-                        "measurement": self.count_measurement,
-                    }
-                else:
-                    print("Malformed data line, skipping.")
+                                self.q_points.put(
+                                    (
+                                        event.get(self.x_key, 0.0),
+                                        event.get(self.y_key, 0.0),
+                                        event.get("cycle", 0),
+                                    )
+                                )
+                            else:
+                                print("EVENT:", event)
+                    elif msg.get("type") == "emstat_end":
+                        print("END OF EXPERIMENT")
+                        self.stop_event.set()
+                        break
+        self.flag_recording = False
+        print("Recording stopped.")
+        self._set_status("End of Experiment")
+        # self.stop()
 
     # ---------------------------
     # Loop de actualización (UI)
@@ -304,25 +349,26 @@ class UDPIVPlotter(ttk.Frame):
             except queue.Empty:
                 break
             line = self._get_or_create_line(m)
-            self.v_by_m[m].append(v)
-            self.i_by_m[m].append(i)
+            self.x_by_m[m].append(v)
+            self.y_by_m[m].append(i)
             drained += 1
 
         if drained > 0:
             for m, line in self.lines_by_m.items():
-                vs = self.v_by_m[m]
-                is_ = self.i_by_m[m]
-                if len(vs) > 0:
-                    line.set_data(vs, is_)
+                xs = self.x_by_m[m]
+                ys_ = self.y_by_m[m]
+                if len(xs) > 0:
+                    line.set_data(xs, ys_)
             self.ax.relim()
             self.ax.autoscale_view()
             # Actualiza leyenda por si hay nuevas líneas
-            
+
             self._update_legends()
 
         # Reprogramar si seguimos corriendo
         if self.running:
             self._schedule_update()
+
     # ---------------------------
     # Utilidades de plotting
     # ---------------------------
@@ -332,18 +378,25 @@ class UDPIVPlotter(ttk.Frame):
             handles = [line for line in self.lines_by_m.values()]
             labels = self.legends_list
             if len(labels) < len(handles):
-                labels = labels + [f"{self.prefix_legend}{m}" for m in range(len(labels)+1, len(handles)+1)]
+                labels = labels + [
+                    f"{self.prefix_legend}{m}"
+                    for m in range(len(labels) + 1, len(handles) + 1)
+                ]
             elif len(labels) > len(handles):
-                labels = labels[:len(handles)]
+                labels = labels[: len(handles)]
         else:
             handles = [line for line in self.lines_by_m.values()]
             labels = [f"{self.prefix_legend}{m}" for m in self.lines_by_m.keys()]
         self.ax.legend(handles, labels, loc="best", frameon=True)
         self.canvas.draw_idle()
-    
+
     def _build_style_cycle(self):
         """Genera un ciclo de estilos color/linestyle para distintas mediciones."""
-        colors = plt.rcParams["axes.prop_cycle"].by_key().get("color", ["b", "g", "r", "c", "m", "y", "k"])
+        colors = (
+            plt.rcParams["axes.prop_cycle"]
+            .by_key()
+            .get("color", ["b", "g", "r", "c", "m", "y", "k"])
+        )
         linestyles = ["-", "--", "-.", ":"]
         styles = []
         for ls in linestyles:
@@ -355,61 +408,23 @@ class UDPIVPlotter(ttk.Frame):
         if m in self.lines_by_m:
             return self.lines_by_m[m]
 
-        self.v_by_m[m] = deque(maxlen=self.max_points)
-        self.i_by_m[m] = deque(maxlen=self.max_points)
+        self.x_by_m[m] = deque(maxlen=self.max_points)
+        self.y_by_m[m] = deque(maxlen=self.max_points)
 
         idx = (m - 1) % len(self._style_cycle)
         c, ls = self._style_cycle[idx]
-        line, = self.ax.plot([], [], linestyle=ls, color=c, marker='o', markersize=3, label=f"M{m}")
+        (line,) = self.ax.plot(
+            [], [], linestyle=ls, color=c, marker="o", markersize=3, label=f"M{m}"
+        )
 
         # Si el color es muy claro, mejora visibilidad del marcador:
-        line.set_markeredgecolor('0.3')
+        line.set_markeredgecolor("0.3")
 
         self.lines_by_m[m] = line
         return line
 
     def _set_status(self, msg):
         self.lbl_status.configure(text=msg)
-
-    # ---------------------------
-    # Parser de línea (AJUSTAR AL FORMATO REAL)
-    # ---------------------------
-    def parse_line(self, text):
-        """
-        Intenta extraer time_ms, voltage_v, current_a, status, range_data de la línea recibida.
-        Devuelve dict o None si no se pudo parsear.
-        """
-        try:
-            # Muchas veces llega con tabs; si no, usamos espacios múltiples
-            parts = text.strip().split("\t")
-            if len(parts) < 4:
-                # fallback: separar por varios espacios
-                parts = [p for p in text.replace("  ", "\t").split("\t") if p.strip()]
-
-            # Esperamos: [time] [E set[V]: x] [I [A]: y] [status: ...] [Range: ...]
-            time_ms = int(parts[0].strip())
-            voltage_v = float(parts[1].split(":")[1].strip())
-            current_a = float(parts[2].split(":")[1].strip())
-
-            status = None
-            range_data = None
-            # Busca claves conocidas si existen
-            for p in parts[3:]:
-                low = p.lower()
-                if "status" in low and ":" in p:
-                    status = p.split(":")[1].strip()
-                if "range" in low and ":" in p:
-                    range_data = p.split(":")[1].strip()
-
-            return {
-                "time_ms": time_ms,
-                "voltage": voltage_v,
-                "current": current_a,
-                "status": status,
-                "range": range_data,
-            }
-        except Exception:
-            return None
 
 
 class LegendManagerWindow(ttk.Toplevel):
@@ -431,7 +446,7 @@ class LegendManagerWindow(ttk.Toplevel):
         self.plotter = plotter
         self.parent = master
         self.idx_sel = None
-        self.lines_list=None
+        self.lines_list = None
 
         # --- Lista de mediciones ---
         frame_legends = ttk.LabelFrame(self, text="Legends")
@@ -447,9 +462,15 @@ class LegendManagerWindow(ttk.Toplevel):
 
         self.entry_new = ttk.Entry(controls)
         self.entry_new.pack(side=ttk.LEFT, padx=4)
-        self.btn_add = ttk.Button(controls, text="➕ Add", bootstyle="success", command=self.add_legend)
-        self.btn_remove = ttk.Button(controls, text="🗑 Delete", bootstyle="danger", command=self.remove_selected)
-        self.btn_edit = ttk.Button(controls, text="✏️ Editar", bootstyle="primary", command=self.on_edit_line)
+        self.btn_add = ttk.Button(
+            controls, text="➕ Add", bootstyle="success", command=self.add_legend
+        )
+        self.btn_remove = ttk.Button(
+            controls, text="🗑 Delete", bootstyle="danger", command=self.remove_selected
+        )
+        self.btn_edit = ttk.Button(
+            controls, text="✏️ Editar", bootstyle="primary", command=self.on_edit_line
+        )
         self.btn_add.pack(side=ttk.LEFT, padx=4)
         self.btn_remove.pack(side=ttk.LEFT, padx=4)
         self.btn_edit.pack(side=ttk.LEFT, padx=4)
@@ -461,7 +482,9 @@ class LegendManagerWindow(ttk.Toplevel):
         self.entry_prefix.pack(fill=ttk.X, padx=10, pady=6)
 
         # --- Botón cerrar ---
-        self.btn_close = ttk.Button(self, text="Close", bootstyle="secondary", command=self.on_close)
+        self.btn_close = ttk.Button(
+            self, text="Close", bootstyle="secondary", command=self.on_close
+        )
         self.btn_close.pack(pady=6)
 
         # Cargar leyendas actuales
@@ -494,8 +517,6 @@ class LegendManagerWindow(ttk.Toplevel):
         self.entry_new.delete(0, END)
         self.refresh_list()
 
-
-
     def remove_selected(self):
         """Elimina la medición seleccionada (línea y datos)."""
         sel = self.listbox.curselection()
@@ -505,7 +526,7 @@ class LegendManagerWindow(ttk.Toplevel):
         new_list = [x for i, x in enumerate(self.lines_list) if i != idx]
         self.lines_list = new_list
         self.refresh_list()
-    
+
     def on_double_clic_line(self, event):
         """Permite editar la medición seleccionada (no implementado)."""
         sel = self.listbox.curselection()
@@ -537,11 +558,10 @@ class LegendManagerWindow(ttk.Toplevel):
         prefix = self.entry_prefix.get().strip()
         if not prefix:
             prefix = "M-"
-        if prefix=="":
-            prefix="M-"
+        if prefix == "":
+            prefix = "M-"
         self.parent.on_close_config_legend(self.lines_list, prefix)
         self.destroy()
-
 
 
 # ---------------------------
@@ -550,27 +570,34 @@ class LegendManagerWindow(ttk.Toplevel):
 def demo():
     app = ttk.Window(themename="darkly")  # o "flatly", "cosmo", etc.
     app.title("UDP IV Plotter (ttkbootstrap)")
-    plotter = UDPIVPlotter(app, udp_port=5005, buffer_size=4096, max_points=5000, update_interval_ms=80)
+    plotter = EventPlotter(
+        app, udp_port=5005, buffer_size=4096, max_points=5000, update_interval_ms=80
+    )
 
     # Cierre limpio
     def on_close():
         plotter.on_close()
         app.quit()
         app.destroy()
+
     app.protocol("WM_DELETE_WINDOW", on_close)
 
     app.mainloop()
 
 
 if __name__ == "__main__":
-#    demo()
+    #    demo()
     app = ttk.Window(themename="litera")
     app.title("UDP IV Plotter (ttkbootstrap)")
-    plotter = UDPIVPlotter(app, udp_port=5005, buffer_size=4096, max_points=5000, update_interval_ms=80)
+    plotter = EventPlotter(
+        app, udp_port=5005, buffer_size=4096, max_points=5000, update_interval_ms=80
+    )
     plotter.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
+
     def on_close():
         plotter.on_close()
         app.quit()
         app.destroy()
+
     app.protocol("WM_DELETE_WINDOW", on_close)
     app.mainloop()

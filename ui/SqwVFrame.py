@@ -46,7 +46,7 @@ def create_widgets_swv(parent, callbacks):
 
 
 class SWVFrame(ttk.Frame):
-    def __init__(self, parent):
+    def __init__(self, parent, ip_sender="localhost", callback_get_ip_sender=None):
         ttk.Frame.__init__(self, parent)
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=1)
