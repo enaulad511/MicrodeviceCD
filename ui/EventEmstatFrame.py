@@ -32,6 +32,7 @@ class EventPlotter(ttk.Frame):
     def __init__(
         self,
         master,
+        method,
         tcp_port=5006,
         ip_sender="localhost",
         buffer_size=4096,
@@ -59,6 +60,7 @@ class EventPlotter(ttk.Frame):
         self.legends_list = None
         self.config_legend = None
         self.title = title
+        self.method = method
         self.x_label = x_label
         self.y_label = y_label
 
@@ -284,7 +286,7 @@ class EventPlotter(ttk.Frame):
         self.sock.sendall((json.dumps(self.payload_exp) + "\n").encode())
         self.flag_recording = True
         reader = LineBufferedSocketReader(self.sock)
-        parser = EmstatStreamParser(experiment="cv")
+        parser = EmstatStreamParser(experiment=self.method)
         start_time = time.time()
         while not self.stop_event.is_set():
             if time.time() - start_time > 120:

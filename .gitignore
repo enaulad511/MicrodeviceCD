@@ -38,3 +38,4 @@ pyrefly.toml
 *_test.py
 files_test/
 test_*.py
+**.csv

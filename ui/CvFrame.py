@@ -233,72 +233,15 @@ class ShowProfileFrame(ttk.Toplevel):
         self.destroy()
 
 
-# def create_widgets_cv(parent, callbacks: dict, columns=2):
-#     entries = []
-#     parent.columnconfigure(tuple(range(columns)), weight=1)
-#     inputs_frame = ttk.Frame(parent)
-#     inputs_frame.grid(row=0, column=0, padx=(5, 20), pady=10, sticky="nswe")
-#     inputs_frame.columnconfigure((0, 1), weight=1)
-#     frame1 = ttk.LabelFrame(inputs_frame, text="Cyclic Voltammetry Settings")
-#     frame1.grid(row=0, column=0, padx=(5, 20), pady=10, sticky="nswe")
-#     frame1.configure(style="Custom.TLabelframe")
-#     frame1.columnconfigure(tuple(range(columns * 2)), weight=1)
-#     total = len(LABELS)
-#     per_col = (total + columns - 1) // columns  # redondeo hacia arriba
-#     for col in range(columns):
-#         start = col * per_col
-#         end = min(start + per_col, total)
-#         subset = LABELS[start:end]
-#         for i, lbl in enumerate(subset):
-#             row = i
-#             ttk.Label(frame1, text=lbl, style="Custom.TLabel").grid(
-#                 row=row, column=col * 2, padx=5, pady=5, sticky="w"
-#             )
-#             # Entry
-#             entry = ttk.Entry(frame1, font=font_entry)
-#             entry.insert(0, DEFAUL_VALUES_CV[start + i])
-#             entry.grid(row=row, column=col * 2 + 1, padx=5, pady=5, sticky="nswe")
-#             entries.append(entry)
-#     frame_selectors = ttk.LabelFrame(inputs_frame, text="Current Range")
-#     frame_selectors.grid(row=1, column=0, padx=(5, 20), pady=10, sticky="nswe")
-#     # create radio buttons to select current range
-
-#     # Panel de controles a la derecha
-#     frame_controls = ttk.Frame(inputs_frame)
-#     frame_controls.grid(row=0, column=1, pady=10, sticky="nswe")
-#     frame_controls.columnconfigure(0, weight=1)
-#     ttk.Button(
-#         frame_controls,
-#         text="Generate CV Profile",
-#         style="info.TButton",
-#         command=callbacks.get("callback_generate_profile", ()),
-#     ).grid(row=0, column=0, pady=5, sticky="nswe")
-#     ttk.Button(
-#         frame_controls,
-#         text="Show MethodScript",
-#         style="info.TButton",
-#         command=callbacks.get("callback_show_script", ()),
-#     ).grid(row=1, column=0, pady=5, sticky="nswe")
-#     ttk.Button(
-#         frame_controls,
-#         text="Send Script",
-#         style="info.TButton",
-#         command=callbacks.get("callback_send_script", ()),
-#     ).grid(row=2, column=0, pady=5, sticky="nswe")
-#     return entries
-
-
 def create_widgets_cv(parent, callbacks: dict, columns=2):
     entries = []
-
-    parent.columnconfigure(tuple(range(columns)), weight=1)
-
+    parent.columnconfigure(0, weight=1)
     inputs_frame = ttk.Frame(parent)
     inputs_frame.grid(row=0, column=0, padx=(5, 20), pady=10, sticky="nswe")
     inputs_frame.columnconfigure((0, 1), weight=1)
     # ===== CV SETTINGS =====
     frame1 = ttk.LabelFrame(inputs_frame, text="Cyclic Voltammetry Settings")
-    frame1.grid(row=0, column=0, padx=(5, 20), pady=10, sticky="nswe")
+    frame1.grid(row=0, column=0, padx=(5, 10), pady=10, sticky="nswe")
     frame1.configure(style="Custom.TLabelframe")
     frame1.columnconfigure(tuple(range(columns * 2)), weight=1)
 
@@ -400,6 +343,7 @@ class CVFrame(ttk.Frame):
         self.frame_plotter.columnconfigure(0, weight=1)
         self.udp_plotter = EventPlotter(
             self.frame_plotter,
+            "cv",
             tcp_port=5006,
             ip_sender=ip_sender,
             buffer_size=4096,

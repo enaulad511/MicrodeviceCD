@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+from ui.EventEmstatFrame import EventPlotter
+
 __author__ = "Edisson A. Naula"
 __date__ = "$ 11/11/2025 at 15:00 p.m. $"
 
@@ -18,7 +20,7 @@ def create_widgets_swv(parent, callbacks):
         "E end (V):",
         "E step (V):",
         "Amplitude (V):",
-        "Frequency (Hz):"
+        "Frequency (Hz):",
     ]
     defaults = ["0", "-0.5", "0.5", "0.2", "0.5", "2"]
 
@@ -39,8 +41,18 @@ def create_widgets_swv(parent, callbacks):
         row=len(labels), column=0, columnspan=2, pady=5
     )
 
-    ttk.Button(frame, text="Generate SWV Profile & Script", style="info.TButton",
-               command=callbacks["callback_generate_profile"]).grid(row=len(labels)+1, column=0, columnspan=2, pady=10)
+    ttk.Button(
+        frame,
+        text="Generate SWV Profile & Script",
+        style="info.TButton",
+        command=callbacks["callback_generate_profile"],
+    ).grid(row=len(labels) + 1, column=0, columnspan=2, pady=10)
+    ttk.Button(
+        frame,
+        text="Send Script",
+        style="info.TButton",
+        command=callbacks["callback_send"],
+    ).grid(row=len(labels) + 2, column=0, columnspan=2, pady=10)
 
     return entries, measure_var
 
@@ -50,12 +62,16 @@ class SWVFrame(ttk.Frame):
         ttk.Frame.__init__(self, parent)
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=1)
+        self.callback_ip = callback_get_ip_sender
 
         content_frame = ttk.Frame(self)
         content_frame.grid(row=0, column=0, sticky="nsew")
         content_frame.columnconfigure(0, weight=1)
 
-        callbacks = {"callback_generate_profile": self.callback_generate_profile}
+        callbacks = {
+            "callback_generate_profile": self.callback_generate_profile, 
+            "callback_send": self.send_script
+        }
         self.entries, self.measure_var = create_widgets_swv(content_frame, callbacks)
 
         self.profile_frame = ttk.LabelFrame(content_frame, text="SWV Profile Preview")
@@ -66,6 +82,22 @@ class SWVFrame(ttk.Frame):
 
         self.canvas = None
         self.callback_generate_profile()
+        self.frame_plotter = ttk.LabelFrame(self, text="Live Data Plotter")
+        self.frame_plotter.grid(row=3, column=0, padx=10, pady=10, sticky="nsew")
+        self.frame_plotter.columnconfigure(0, weight=1)
+        self.payload = {}
+        self.udp_plotter = EventPlotter(
+            self.frame_plotter,
+            "sqwv",
+            tcp_port=5006,
+            ip_sender=ip_sender,
+            buffer_size=4096,
+            max_points=5000,
+            update_interval_ms=80,
+            payload=self.payload,
+        )
+        self.udp_plotter.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
+        self.frame_plotter.grid_forget()
 
     def callback_generate_profile(self):
         try:
@@ -84,7 +116,9 @@ class SWVFrame(ttk.Frame):
             # Equilibration
             times += [current_time, current_time + t_equilibration]
             potentials += [e_begin, e_begin]
-            segments.append((current_time, current_time + t_equilibration, "Equilibration"))
+            segments.append(
+                (current_time, current_time + t_equilibration, "Equilibration")
+            )
             current_time += t_equilibration
 
             # Generate SWV pulses
@@ -111,19 +145,35 @@ class SWVFrame(ttk.Frame):
 
             # Plot
             fig, ax = plt.subplots(figsize=(7, 4))
-            ax.step(times, potentials, where='post', color='blue', linewidth=2)
+            ax.step(times, potentials, where="post", color="blue", linewidth=2)
 
             # Annotate segments
             if len(segments) <= 20:
                 for s in segments:
                     start_time, end_time, label = s
                     mid_time = (start_time + end_time) / 2
-                    mid_potential = (potentials[times.index(start_time)] + potentials[times.index(end_time)]) / 2
-                    color = "purple" if label == "Equilibration" else "orange" if label == "Forward" else "green"
-                    ax.text(mid_time, mid_potential, label, ha='center', color=color, fontsize=8)
+                    mid_potential = (
+                        potentials[times.index(start_time)]
+                        + potentials[times.index(end_time)]
+                    ) / 2
+                    color = (
+                        "purple"
+                        if label == "Equilibration"
+                        else "orange"
+                        if label == "Forward"
+                        else "green"
+                    )
+                    ax.text(
+                        mid_time,
+                        mid_potential,
+                        label,
+                        ha="center",
+                        color=color,
+                        fontsize=8,
+                    )
 
-            ax.axhline(e_begin, color='gray', linestyle=':')
-            ax.axhline(e_end, color='red', linestyle=':')
+            ax.axhline(e_begin, color="gray", linestyle=":")
+            ax.axhline(e_end, color="red", linestyle=":")
             ax.set_xlabel("Time (s)")
             ax.set_ylabel("Potential (V)")
             ax.set_title(f"SWV Profile · t_interval = {t_interval:.3f} s")
@@ -137,7 +187,13 @@ class SWVFrame(ttk.Frame):
 
             # Generate MethodSCRIPT
             script = self.generate_methodscript(
-                t_equilibration, e_begin, e_end, e_step, amplitude, freq, self.measure_var.get()
+                t_equilibration,
+                e_begin,
+                e_end,
+                e_step,
+                amplitude,
+                freq,
+                self.measure_var.get(),
             )
             self.script_box.delete("1.0", "end")
             self.script_box.insert("end", script)
@@ -145,7 +201,16 @@ class SWVFrame(ttk.Frame):
         except ValueError:
             print("Error: Check input values.")
 
-    def generate_methodscript(self, t_equilibration, e_begin, e_end, e_step, amplitude, freq, measure_forward_reverse):
+    def generate_methodscript(
+        self,
+        t_equilibration,
+        e_begin,
+        e_end,
+        e_step,
+        amplitude,
+        freq,
+        measure_forward_reverse,
+    ):
         def to_mV(value):
             return f"{int(value * 1000)}m"
 
@@ -185,6 +250,18 @@ class SWVFrame(ttk.Frame):
                     cell_off
                 """
         return script.strip()
+    def send_script(self):
+        script = self.script_box.get("1.0", "end-1c")
+        self.payload["script"] = script
+        self.payload["type"] = "swv"
+        ip_sender = self.callback_ip() if self.callback_ip else "localhost"
+        self.udp_plotter.update_val_experiment(
+            x_key="E_V",
+            y_key="I_A",
+            payload=self.payload,
+            ip_sender=ip_sender,
+        )
+        self.frame_plotter.grid(row=3, column=0, padx=10, pady=10, sticky="nsew")
 
 
 if __name__ == "__main__":

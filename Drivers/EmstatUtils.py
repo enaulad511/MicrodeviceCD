@@ -8,7 +8,12 @@ class EmstatStreamParser:
 
     FIELD_MAP = {
         "cv": {"da": ("E_V", 1e-6), "ba": ("I_A", 1e-12)},
-        "swv": {"da": ("E_V", 1e-6), "ba": ("I_A", 1e-12), "fr": ("freq_Hz", 1)},
+        "sqwv": {
+            "da": ("E_V", 1e-6),
+            "ba": ("I_A", 1e-12),
+            "ba_1": ("I_A_F", 1e-12),
+            "ba_2": ("I_A_R", 1e-12),
+        },
         "eis": {"fr": ("freq_Hz", 1), "zr": ("Z_real", 1e-3), "zi": ("Z_imag", 1e-3)},
     }
     UNIT_MAP = {
@@ -122,16 +127,16 @@ class EmstatStreamParser:
             fields = {}
 
             for part in body.split(";"):
-                key = part[:2]
+                key_base = part[:2]
                 unit = part[-1]
                 raw_val = part[2:-1]
 
                 value = int(raw_val, 16) - 0x8000000
-                # value = (
-                #     int(raw_val, 16)
-                #     if any(c in raw_val for c in "ABCDEF")
-                #     else int(raw_val)
-                # )
+                key = key_base
+                counter = 1
+                while key in fields:
+                    key = f"{key_base}_{counter}"
+                    counter += 1
                 fields[key] = {"value": value, "unit": unit, "value_hex": raw_val}
 
             return {"fields": fields, "state": int(state), "index": index}
@@ -150,7 +155,6 @@ class EmstatStreamParser:
             f = parsed["fields"].get(key)
             if f:
                 out[name] = f["value"] * self.UNIT_MAP.get(f["unit"], 1)
-
         return out
 
 
