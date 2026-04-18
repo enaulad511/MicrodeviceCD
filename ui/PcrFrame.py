@@ -443,6 +443,7 @@ class PCRFrame(ttk.Frame):
         )
         # write a predix line with al parameters of experiment
         # prefix_col = f" high_temp: {high_temp}-L "
+        
         settings = read_settings_from_file()
         pidGains = settings.get("pidControllerRPM", {})
         try:
@@ -450,6 +451,7 @@ class PCRFrame(ttk.Frame):
         except Exception:
             ts = 0.05
         prefix_col = f"high_temp: {high_temp}-low_temp: {low_temp}-time_high: {time_high}-time_low: {time_low}-cycles: {cycles}-rpm: {rpm}-denat_temp: {denat_temp}-denat_time: {denat_time}-ts: {ts}"
+        self.temp = 20.0
         self.client_temperature = UdpClient(
             port=5005,
             buffer_size=512,

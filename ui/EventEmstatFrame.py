@@ -65,11 +65,13 @@ class EventPlotter(ttk.Frame):
         self.y_label = y_label
 
         # --- Estado de ejecución ---
-        self.q_points = queue.Queue()
+        self.q_points = queue.Queue(maxsize=20000)  # grande, pero finita
+        self.q_tcp_lines = queue.Queue(maxsize=20000)  # grande, pero finita
         self.storage_dict = {}  # registro parcial de informacion
         self.total_data = []  # registro total de informacion
         self.stop_event = threading.Event()
         self.reader_th = None
+        self.processor_th = None
         self.sock = None
         self.running = False
         self.flag_recording = False
@@ -153,37 +155,51 @@ class EventPlotter(ttk.Frame):
     # API pública
     # ---------------------------
     def start(self):
-        """Crea socket, levanta hilo lector y programa el loop de actualización."""
+        """Crea socket, lanza hilo TCP productor y procesador."""
         if self.running:
             return
+
         try:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            print((self.ip_sender, self.tcp_port))
             self.sock.connect((self.ip_sender, self.tcp_port))
-            # s.sendall((json.dumps(payload) + "\n").encode())
-            # self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            # self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-            # self.sock.bind(("", self.tcp_port))
-            self.sock.settimeout(5.0)  # para cierre limpio
+
+            # TCP streaming robusto
+            self.sock.settimeout(None)  # TCP en modo bloqueante
+            self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+
         except OSError as e:
             self._set_status(f"Error de socket: {e}")
             return
 
+        # Reset estado
         self.stop_event.clear()
-        self.reader_th = threading.Thread(target=self._tcp_reader, daemon=True)
-        self.reader_th.start()
+        self.flag_recording = True
         self.running = True
+
+        # Lanza hilo productor (solo lectura TCP)
+        self.reader_th = threading.Thread(
+            target=self._tcp_reader, daemon=True, name="TCPReader"
+        )
+        self.reader_th.start()
+
+        # Lanza hilo consumidor (parsing y lógica)
+        self.processor_th = threading.Thread(
+            target=self._tcp_processor, daemon=True, name="TCPProcessor"
+        )
+        self.processor_th.start()
+
+        # UI
         self.btn_start.configure(state=ttk.DISABLED)
         self.btn_stop.configure(state=ttk.NORMAL)
-        self._set_status(f"Listening for TCP answer in {self.tcp_port} …")
+        self._set_status(f"TCP connected to {self.ip_sender}:{self.tcp_port}")
         self._schedule_update()
 
     def stop(self):
         """Detiene hilo lector, cierra socket y cancela actualizaciones."""
-        print("Stopping …")
 
         if not self.running:
             return
+        print("Stopping …")
         self.total_data.append(self.storage_dict.copy())
         self.storage_dict.clear()
         self.stop_event.set()
@@ -195,9 +211,16 @@ class EventPlotter(ttk.Frame):
         self.sock = None
 
         # Esperar hilo (rápido gracias al timeout del socket)
-        if self.reader_th and self.reader_th.is_alive():
-            self.reader_th.join(timeout=0.5)
-
+        try:
+            if self.reader_th and self.reader_th.is_alive():
+                self.reader_th.join(timeout=0.5)
+        except Exception:
+            pass
+        try:
+            if self.processor_th and self.processor_th.is_alive():
+                self.processor_th.join(timeout=0.5)
+        except Exception:
+            pass
         self.running = False
         self.btn_start.configure(state=ttk.NORMAL)
         self.btn_stop.configure(state=ttk.DISABLED)
@@ -278,55 +301,136 @@ class EventPlotter(ttk.Frame):
     def _tcp_reader(self):
         print(f"starting tcp on port {self.tcp_port} and address {self.ip_sender} …")
         self.flag_recording = False
-        # s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        # s.connect((CD_IP, TCP_PORT))
         if self.sock is None:
             print("First create a socket")
             return
         self.sock.sendall((json.dumps(self.payload_exp) + "\n").encode())
         self.flag_recording = True
         reader = LineBufferedSocketReader(self.sock)
-        parser = EmstatStreamParser(experiment=self.method)
         start_time = time.time()
         while not self.stop_event.is_set():
+            # Keepalive SOLO para mantener control TCP
             if time.time() - start_time > 120:
-                self.sock.sendall(b'{"type":"keepalive"}\n')
-                start_time = time.time()
+                try:
+                    self.sock.sendall(b'{"type":"keepalive"}\n')
+                    start_time = time.time()
+                except Exception:
+                    pass  # si falla, TCP ya murió y no es crítico
             lines = reader.read_lines()
             if lines is None:
-                print("TCP closed by server")
-                continue
+                print("TCP closed by server (expected for long runs)")
+                break
             for line in lines:
-                if line.startswith("EMSTAT:"):
-                    raw_json = line[len("EMSTAT:") :]
-                    try:
-                        msg = json.loads(raw_json)
-                    except Exception:
-                        continue
-                    if msg.get("type") == "emstat_data":
-                        event = parser.feed_raw(msg["raw"])
-                        if event:
-                            if event["type"] == "data":
-                                self.total_data.append(event)
-                                # print("EVENT:", event)
-
-                                self.q_points.put(
-                                    (
-                                        event.get(self.x_key, 0.0),
-                                        event.get(self.y_key, 0.0),
-                                        event.get("cycle", 0),
-                                    )
-                                )
-                            else:
-                                print("EVENT:", event)
-                    elif msg.get("type") == "emstat_end":
-                        print("END OF EXPERIMENT")
-                        self.stop_event.set()
-                        break
+                try:
+                    self.q_tcp_lines.put_nowait(line)
+                except Exception:
+                    # si la cola se llena, descarta (mejor que bloquear TCP)
+                    pass
         self.flag_recording = False
-        print("Recording stopped.")
-        self._set_status("End of Experiment")
-        # self.stop()
+        self.sock.close()
+        print("TCP reader stopped.")
+        
+        self.reader_th=None
+        self.stop()
+
+    def _tcp_processor(self):
+        parser = EmstatStreamParser(experiment=self.method)
+        while not self.stop_event.is_set():
+            try:
+                line = self.q_tcp_lines.get(timeout=0.1)
+            except Exception:
+                continue
+            if not line.startswith("EMSTAT:"):
+                continue
+            raw_json = line[len("EMSTAT:") :]
+            try:
+                msg = json.loads(raw_json)
+            except Exception:
+                if "e!4" in raw_json.lower():
+                    print(f"Error in the methodscript: {raw_json.strip()}")
+                else:
+                    print(f"JSON decode error: {raw_json}")
+                continue
+            if msg.get("type") == "emstat_data":
+                event = parser.feed_raw(msg["raw"])
+                if not event:
+                    continue
+                if event["type"] == "data":
+                    self.total_data.append(event)
+                    try:
+                        self.q_points.put_nowait(
+                            (
+                                event.get(self.x_key, 0.0),
+                                event.get(self.y_key, 0.0),
+                                event.get("cycle", 0),
+                            )
+                        )
+                    except Exception:
+                        pass
+            elif msg.get("type") == "emstat_end":
+                print("END OF EXPERIMENT")
+                self._set_status("End of experiment.")
+                self.stop_event.set()
+                break
+        print("TCP processor stopped.")
+        self.processor_th = None
+
+    # def _tcp_reader(self):
+    #     print(f"starting tcp on port {self.tcp_port} and address {self.ip_sender} …")
+    #     self.flag_recording = False
+    #     # s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    #     # s.connect((CD_IP, TCP_PORT))
+    #     if self.sock is None:
+    #         print("First create a socket")
+    #         return
+    #     self.sock.sendall((json.dumps(self.payload_exp) + "\n").encode())
+    #     self.flag_recording = True
+    #     reader = LineBufferedSocketReader(self.sock)
+    #     parser = EmstatStreamParser(experiment=self.method)
+    #     start_time = time.time()
+    #     while not self.stop_event.is_set():
+    #         if time.time() - start_time > 120:
+    #             self.sock.sendall(b'{"type":"keepalive"}\n')
+    #             start_time = time.time()
+    #         lines = reader.read_lines()
+    #         if lines is None:
+    #             print("TCP closed by server")
+    #             continue
+    #         for line in lines:
+    #             if line.startswith("EMSTAT:"):
+    #                 raw_json = line[len("EMSTAT:") :]
+
+    #                 try:
+    #                     msg = json.loads(raw_json)
+
+    #                 except Exception:
+    #                     continue
+    #                 print(msg)
+    #                 if msg.get("type") == "emstat_data":
+    #                     event = parser.feed_raw(msg["raw"])
+    #                     print(event)
+    #                     if event:
+    #                         if event["type"] == "data":
+    #                             self.total_data.append(event)
+    #                             # print("EVENT:", event)
+
+    #                             self.q_points.put(
+    #                                 (
+    #                                     event.get(self.x_key, 0.0),
+    #                                     event.get(self.y_key, 0.0),
+    #                                     event.get("cycle", 0),
+    #                                 )
+    #                             )
+    #                         else:
+    #                             print("EVENT:", event)
+    #                 elif msg.get("type") == "emstat_end":
+    #                     print("END OF EXPERIMENT")
+    #                     self.stop_event.set()
+    #                     break
+    #     self.flag_recording = False
+    #     print("Recording stopped.")
+    #     self._set_status("End of Experiment")
+    #     # self.stop()
 
     # ---------------------------
     # Loop de actualización (UI)

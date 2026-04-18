@@ -1,3 +1,166 @@
+# ------function utilities------------
+def construct_header_experiment(
+    m_bandwidth,
+    min_da,
+    max_da,
+    ba_range,
+    min_ba,
+    max_ba,
+    i_forward=False,
+    i_reverse=False,
+):
+    script = "e\nvar i\nvar e\n"
+    if i_forward:
+        script += "var i_forward\n"
+    if i_reverse:
+        script += "var i_forward\n"
+    script += (
+        "var i_reverse\n"
+        "set_pgstat_chan 1\n"
+        "set_pgstat_mode 0\n"
+        "set_pgstat_chan 0\n"
+        "set_pgstat_mode 2\n"
+        f"set_max_bandwidth {m_bandwidth} \n"
+        f"set_range_minmax da {min_da} {max_da} \n"
+        f"set_range ba {ba_range}\n"
+        f"set_autoranging ba {min_ba} {max_ba} \n"
+    )
+    return script
+
+
+def construc_nscans_script_cv(
+    t_equilibration,
+    E_begin,
+    E_vertex1,
+    E_vertex2,
+    E_step,
+    scan_rate,
+    max_bandwith,
+    min_da,
+    max_da,
+    range_ba,
+    auto_ba1,
+    auto_ba2,
+    n_scans,
+):
+    script = construct_header_experiment(
+        max_bandwith,
+        min_da,
+        max_da,
+        range_ba,
+        auto_ba1,
+        auto_ba2,
+        i_forward=False,
+        i_reverse=False,
+    )
+
+    script += f"set_e {E_begin}\ncell_on\n"
+    if t_equilibration != "":
+        script += (
+            f"meas_loop_ca e i {E_begin} 200m {t_equilibration}\n"
+            "  pck_start\n"
+            "    pck_add e\n"
+            "    pck_add i\n"
+            "  pck_end\n"
+            "endloop\n"
+        )
+    script += f"meas_loop_cv e i {E_begin} {E_vertex1} {E_vertex2} {E_step} {scan_rate}"
+    script += f" nscans({n_scans})\n" if float(n_scans) > 1 else "\n"
+    script += (
+        "pck_start\npck_add e\npck_add i\npck_end\nendloop\non_finished:\ncell_off\n\n"
+    )
+    return script
+
+
+def construc_individual_script_sqwv(
+    t_equilibration,
+    E_begin,
+    E_end,
+    E_step,
+    Amplitude,
+    frequency,
+    max_bandwith,
+    min_da,
+    max_da,
+    range_ba,
+    auto_ba1,
+    auto_ba2,
+    E_con,
+    t_con,
+    E_dep,
+    t_dep,
+):
+    e_start = E_begin
+    sc_condition = ""
+    con_flag = False
+    dep_flag = False
+    sc_deposition = ""
+    if t_dep != "":
+        e_start = E_dep
+        con_flag = True
+        sc_deposition = (
+            f"meas_loop_ca e i {E_dep} 200m {t_dep}\n"
+            "  pck_start\n"
+            "    pck_add e\n"
+            "    pck_add i\n"
+            "  pck_end\n"
+            "endloop\n"
+        )
+    if t_con != "":
+        e_start = E_con
+        dep_flag = True
+        sc_condition = (
+            f"meas_loop_ca e i {E_con} 200m {t_con}\n"
+            "  pck_start\n"
+            "    pck_add e\n"
+            "    pck_add i\n"
+            "  pck_end\n"
+            "endloop\n"
+        )
+    sc_equilibrium = ""
+    if t_equilibration != "":
+        if con_flag or dep_flag:
+            sc_equilibrium = (
+                f"set_range ba {range_ba}\nset_autoranging ba {auto_ba1} {auto_ba2}\n"
+            )
+        sc_equilibrium += (
+            f"meas_loop_ca e i {E_begin} 200m {t_equilibration}\n"
+            "  pck_start\n"
+            "    pck_add e\n"
+            "    pck_add i\n"
+            "  pck_end\n"
+            "endloop\n"
+        )
+    script = construct_header_experiment(
+        max_bandwith,
+        min_da,
+        max_da,
+        range_ba,
+        auto_ba1,
+        auto_ba2,
+        i_forward=True,
+        i_reverse=True,
+    )
+    script += f"set_e {e_start}\ncell_on\n"
+    script += sc_condition
+    script += sc_deposition
+    script += sc_equilibrium
+    script += (
+        f"meas_loop_swv e i i_forward i_reverse {E_begin} {E_end} {E_step} {Amplitude} {frequency}\n"
+        "  pck_start\n"
+        "    pck_add e\n"
+        "    pck_add i\n"
+        "    pck_add i_forward\n"
+        "    pck_add i_reverse\n"
+        "  pck_end\n"
+        "endloop\n"
+        "on_finished:\n"
+        "  cell_off \n"
+        "\n"
+    )
+    return script.strip()
+
+
 class EmstatStreamParser:
     """
     Parser general de streams EmStat (CV, SWV, EIS, etc.)
@@ -106,7 +269,8 @@ class EmstatStreamParser:
         if parsed is None:
             return None
         decoded = self._decode(parsed)
-        self.context["point"] = parsed["index"]
+        print(parsed)
+        self.context["point"] = parsed["index"][0]
 
         decoded.update(
             {
@@ -122,15 +286,18 @@ class EmstatStreamParser:
 
     def _parse_packet(self, line: str):
         try:
-            body, state, idx_end = line[1:].rsplit(",", 2)
-            index = int(idx_end[:-1])
+            bodies = line[1:].split(";")
+            indexes = []
+            states = []
             fields = {}
-
-            for part in body.split(";"):
-                key_base = part[:2]
-                unit = part[-1]
-                raw_val = part[2:-1]
-
+            for body in bodies:
+                parts = body.split(",")
+                key_base = parts[0][:2]
+                unit = parts[0][-1]
+                raw_val = parts[0][2:-1]
+                if len(parts) > 1:
+                    indexes.append(int(parts[-1][:-1]))
+                    states.append(parts[-2])
                 value = int(raw_val, 16) - 0x8000000
                 key = key_base
                 counter = 1
@@ -139,7 +306,7 @@ class EmstatStreamParser:
                     counter += 1
                 fields[key] = {"value": value, "unit": unit, "value_hex": raw_val}
 
-            return {"fields": fields, "state": int(state), "index": index}
+            return {"fields": fields, "state": states, "index": indexes}
 
         except Exception:
             return None
@@ -159,28 +326,66 @@ class EmstatStreamParser:
 
 
 class LineBufferedSocketReader:
-    def __init__(self, sock, encoding="utf-8"):
+    def __init__(self, sock, encoding="utf-8", max_buffer=65536):
         self.sock = sock
         self.encoding = encoding
-        self.buffer = ""
+        self.buffer = bytearray()
+        self.max_buffer = max_buffer
 
     def read_lines(self):
-        """
-        Lee del socket y devuelve una lista de líneas completas (sin '\n').
-        Puede devolver lista vacía si aún no hay líneas completas.
-        """
-        data = self.sock.recv(2048)
+        try:
+            data = self.sock.recv(4096)
+        except Exception:
+            return None
         if not data:
             return None  # conexión cerrada
 
-        self.buffer += data.decode(self.encoding, errors="replace")
+        self.buffer.extend(data)
+
+        # protección contra runaway buffer
+        if len(self.buffer) > self.max_buffer:
+            raise RuntimeError("RX buffer overflow: receiver too slow")
 
         lines = []
-        while "\n" in self.buffer:
-            line, self.buffer = self.buffer.split("\n", 1)
-            lines.append(line.strip())
+        while True:
+            nl = self.buffer.find(b"\n")
+            if nl == -1:
+                break
+
+            line = self.buffer[:nl]
+            del self.buffer[: nl + 1]
+
+            try:
+                lines.append(line.decode(self.encoding, errors="replace").strip())
+            except Exception:
+                continue
 
         return lines
+
+
+# class LineBufferedSocketReader:
+#     def __init__(self, sock, encoding="utf-8"):
+#         self.sock = sock
+#         self.encoding = encoding
+#         self.buffer = ""
+
+#     def read_lines(self):
+#         """
+#         Lee del socket y devuelve una lista de líneas completas (sin '\n').
+#         Puede devolver lista vacía si aún no hay líneas completas.
+#         """
+#         data = self.sock.recv(2048)
+#         if not data:
+#             return None  # conexión cerrada
+
+#         self.buffer += data.decode(self.encoding, errors="replace")
+
+#         lines = []
+#         while "\n" in self.buffer:
+#             line, self.buffer = self.buffer.split("\n", 1)
+#             lines.append(line.strip())
+
+#         return lines
 
 
 if __name__ == "__main__":

@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+from Drivers.EmstatUtils import construc_nscans_script_cv
 from templates.utils import convert_si_integer_full
 from ui.EventEmstatFrame import EventPlotter
 
@@ -58,64 +59,6 @@ CURRENT_RANGES = {
     "500 uA": 918e-6,  # 918 µA
     "1 mA": 1.0e-3,  # 1 mA
 }
-
-
-def construc_nscans_script(
-    t_equilibration, E_begin, E_vertex1, E_vertex2, E_step, n_scans, range_ba, ba1, ba2
-):
-    script = (
-        "var i\n"
-        "var e\n"
-        "set_pgstat_chan 1\n"
-        "set_pgstat_mode 0\n"
-        "set_pgstat_chan 0\n"
-        "set_pgstat_mode 2\n"
-        "set_max_bandwidth 585054m\n"
-        "set_range_minmax da -1 1\n"
-        f"set_range ba {range_ba}\n"
-        f"set_autoranging ba {ba1} {ba2}\n"
-        f"set_e {E_begin}\n"
-        "cell_on\n"
-        f"wait {t_equilibration} s\n"
-        f"meas_loop_cv e i {E_begin} {E_vertex1} {E_vertex2} {E_step} nscans({n_scans})\n"
-        "pck_start\n"
-        "    pck_add e\n"
-        "    pck_add i\n"
-        "pck_end\n"
-        "endloop\n"
-        "on_finished:\n"
-        "cell_off\n"
-    )
-    return script.strip()
-
-
-def construc_individual_script(
-    t_equilibration, E_begin, E_vertex1, E_vertex2, E_step, range_ba, ba1, ba2
-):
-    script = (
-        "var i\n"
-        "var e\n"
-        "set_pgstat_chan 1\n"
-        "set_pgstat_mode 0\n"
-        "set_pgstat_chan 0\n"
-        "set_pgstat_mode 2\n"
-        "set_max_bandwidth 585054m\n"
-        "set_range_minmax da -1 1\n"
-        f"set_range ba {range_ba}\n"
-        f"set_autoranging ba {ba1} {ba2}\n"
-        f"set_e {E_begin}\n"
-        "cell_on\n"
-        f"wait {t_equilibration}s\n"
-        f"meas_loop_cv e i {E_begin} {E_vertex1} {E_vertex2} {E_step}\n"
-        "pck_start\n"
-        "    pck_add e\n"
-        "    pck_add i\n"
-        "pck_end\n"
-        "endloop\n"
-        "on_finished:\n"
-        "cell_off\n"
-    )
-    return script.strip()
 
 
 class ShowMethodScript(ttk.Toplevel):
@@ -269,7 +212,7 @@ def create_widgets_cv(parent, callbacks: dict, columns=2):
     frame_selectors.grid(row=1, column=0, padx=(5, 20), pady=10, sticky="nswe")
 
     # NEW: variable compartida para los radio buttons
-    current_range_var = ttk.StringVar(value="1uA")  # valor por defecto
+    current_range_var = ttk.StringVar(value="4.7e-8")  # valor por defecto
 
     # NEW: creación horizontal de radio buttons
     for col, (text, value) in enumerate(CURRENT_RANGES.items()):
@@ -278,7 +221,8 @@ def create_widgets_cv(parent, callbacks: dict, columns=2):
             text=text,
             value=value,
             variable=current_range_var,
-        ).grid(row=0, column=col, padx=5, pady=5, sticky="w")
+        ).grid(row=0, column=col, padx=5, pady=5, sticky="nswe")
+
     # ===== CONTROL BUTTONS =====
     frame_controls = ttk.Frame(inputs_frame)
     frame_controls.grid(row=0, column=1, pady=10, sticky="nswe")
@@ -355,8 +299,13 @@ class CVFrame(ttk.Frame):
         self.frame_plotter.grid_forget()
 
     def create_payload_cv(self):
+        try:
+            t_e = float(self.entries[0].get())
+            t_e = "" if t_e == 0 else convert_si_integer_full(t_e)
+        except Exception:
+            t_e = ""
         self.payload = {
-            "t_e": convert_si_integer_full(self.t_equilibration),
+            "t_e": t_e,
             "E_b": convert_si_integer_full(self.E_begin),
             "E_1": convert_si_integer_full(self.E_vertex1),
             "E_2": convert_si_integer_full(self.E_vertex2),
@@ -408,7 +357,6 @@ class CVFrame(ttk.Frame):
         try:
             self.update_data_script()
             self.create_payload_cv()
-            script = self.generate_methodscript()
             ip_sender = self.callback_ip() if self.callback_ip else "localhost"
             self.udp_plotter.update_val_experiment(
                 x_key="E_V", y_key="I_A", payload=self.payload, ip_sender=ip_sender
@@ -458,30 +406,22 @@ class CVFrame(ttk.Frame):
         self.ShowProfile = None
 
     def generate_methodscript(self) -> str:
-        if self.n_scans > 1:
-            script = construc_nscans_script(
-                convert_si_integer_full(self.t_equilibration),
-                convert_si_integer_full(self.E_begin),
-                convert_si_integer_full(self.E_vertex1),
-                convert_si_integer_full(self.E_vertex2),
-                convert_si_integer_full(self.E_step),
-                convert_si_integer_full(self.n_scans),
-                convert_si_integer_full(self.range_ba),
-                convert_si_integer_full(self.ba1),
-                convert_si_integer_full(self.ba2),
-            )
-        else:
-            script = construc_individual_script(
-                convert_si_integer_full(self.t_equilibration),
-                convert_si_integer_full(self.E_begin),
-                convert_si_integer_full(self.E_vertex1),
-                convert_si_integer_full(self.E_vertex2),
-                convert_si_integer_full(self.E_step),
-                convert_si_integer_full(self.range_ba),
-                convert_si_integer_full(self.ba1),
-                convert_si_integer_full(self.ba2),
-            )
-        return script.strip()
+        script = construc_nscans_script_cv(
+            self.payload.get("t_e", DEFAUL_VALUES_CV[0]),
+            self.payload.get("E_b", DEFAUL_VALUES_CV[1]),
+            self.payload.get("E_1", DEFAUL_VALUES_CV[2]),
+            self.payload.get("E_2", DEFAUL_VALUES_CV[3]),
+            self.payload.get("E_s", DEFAUL_VALUES_CV[4]),
+            self.payload.get("sc_r", DEFAUL_VALUES_CV[5]),
+            self.payload.get("m_b", DEFAUL_VALUES_CV[6]),
+            self.payload.get("min_da", DEFAUL_VALUES_CV[7]),
+            self.payload.get("max_da", DEFAUL_VALUES_CV[8]),
+            self.payload.get("range_ba", DEFAUL_VALUES_CV[9]),
+            self.payload.get("ba_1", DEFAUL_VALUES_CV[10]),
+            self.payload.get("ba_2", DEFAUL_VALUES_CV[11]),
+            self.payload.get("n_sc", DEFAUL_VALUES_CV[12]),
+        )
+        return script
 
 
 if __name__ == "__main__":

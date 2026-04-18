@@ -273,7 +273,7 @@ def spinMotorRPM_ramped(
 
 
 def spinMotorAngle(
-    angle, rpm, max_rpm, n_times=None, flag_continue=False, stop_event=None
+    angle, rpm, max_rpm, n_times=None, flag_continue=False, stop_event=None, drv=None
 ):
     """
     Versión global que usa los helpers del objeto global 'drv':
@@ -286,8 +286,6 @@ def spinMotorAngle(
     """
     import time as _t
     from Drivers.DriverStepperSys import STEPS_PER_REV
-
-    global drv  # asumiendo que existen en tu entorno
     if drv is None:
         print("[spinMotorAngle] drv no está inicializado.")
         return
@@ -523,6 +521,7 @@ class ControlDiscFrame(ttk.Frame):
                     None,
                     True,
                     self.stop_event,
+                    drv
                 ),
             )
             thread_motor.start()

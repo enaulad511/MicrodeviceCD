@@ -1,60 +1,143 @@
 # -*- coding: utf-8 -*-
+from Drivers.EmstatUtils import construc_individual_script_sqwv
+from templates.utils import convert_si_integer_full
 from ui.EventEmstatFrame import EventPlotter
 
 __author__ = "Edisson A. Naula"
 __date__ = "$ 11/11/2025 at 15:00 p.m. $"
 
 import ttkbootstrap as ttk
-from ttkbootstrap.scrolled import ScrolledFrame
 from tkinter.scrolledtext import ScrolledText
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 from templates.constants import font_entry  # Ajusta si no tienes este archivo
 
+LABELS = [
+    "t equilibration (s):",
+    "E begin (V):",
+    "E end (V):",
+    "E step (V):",
+    "Amplitude (V):",
+    "Frequency (Hz):",
+    "Max bandwidth (Hz):",
+    "Min DA (V):",
+    "Max DA (V):",
+    # "Range BA:",
+    # "Auto BA1:",
+    # "Auto BA2:",
+]
+DEFAULT = [
+    "0",
+    "-0.5",
+    "0.5",
+    "0.01",
+    "0.1",
+    "20",
+    "234021e-3",
+    "-0.6",
+    "0.6",
+    "47e-9",
+    "47e-9",
+    "47e-9",
+    "47e-9",
+]
+LABELS_PRE = {
+    "E condition": "0",
+    "t condition": "0",
+    "E deposition": "0",
+    "t deposition": "0",
+}
 
-def create_widgets_swv(parent, callbacks):
-    labels = [
-        "t equilibration (s):",
-        "E begin (V):",
-        "E end (V):",
-        "E step (V):",
-        "Amplitude (V):",
-        "Frequency (Hz):",
-    ]
-    defaults = ["0", "-0.5", "0.5", "0.2", "0.5", "2"]
+CURRENT_RANGES = {
+    "100 nA": 4.7e-8,  # 47 nA
+    "2 uA": 917969e-12,  # 917.969 nA
+    "4 uA": 4.7e-6,  # 4.7 µA
+    "8 uA": 9.7e-6,  # 9.7 µA
+    "16 uA": 19e-6,  # ~19 µA
+    "32 uA": 47e-6,  # 47 µA
+    "63 uA": 100e-6,  # 100 µA
+    "125 uA": 190e-6,  # 190 µA
+    "250 uA": 470e-6,  # 470 µA
+    "500 uA": 918e-6,  # 918 µA
+    "1 mA": 1.0e-3,  # 1 mA
+}
 
+
+def create_widgets_swv(parent, callbacks, n_cols=2):
     frame = ttk.LabelFrame(parent, text="Square Wave Voltammetry Settings")
     frame.grid(row=0, column=0, padx=10, pady=10, sticky="nswe")
+    frame.columnconfigure(0, weight=1)
+    entries_pre = []
+    frame_pre = ttk.LabelFrame(frame, text="Pre-treatment")
+    frame_pre.grid(row=0, column=0, padx=10, pady=10, sticky="nswe")
+    frame_pre.columnconfigure(tuple(range(4)), weight=1)
+    for i, (lbl, val) in enumerate(LABELS_PRE.items()):
+        row = i // 2
+        col = i % 2
+        ttk.Label(frame_pre, text=lbl).grid(row=row, column=col * 2, padx=5, pady=5)
+        entry = ttk.Entry(frame_pre, font=font_entry)
+        entry.insert(0, val)
+        entry.grid(row=row, column=col * 2 + 1, padx=5, pady=5, sticky="we")
+        entries_pre.append(entry)
 
+    frame_entries = ttk.LabelFrame(frame, text="Parameters")
+    frame_entries.grid(row=1, column=0, padx=10, pady=10, sticky="nswe")
+    frame_entries.columnconfigure(tuple(range(n_cols * 2)), weight=1)
     entries = []
-    for i, lbl in enumerate(labels):
-        ttk.Label(frame, text=lbl).grid(row=i, column=0, padx=5, pady=5, sticky="e")
-        entry = ttk.Entry(frame, font=font_entry)
-        entry.insert(0, defaults[i])
-        entry.grid(row=i, column=1, padx=5, pady=5)
+    for i, lbl in enumerate(LABELS):
+        col = i % n_cols
+        row = i // n_cols
+        # cada parámetro usa 2 columnas reales
+        base_col = col * 2
+        ttk.Label(frame_entries, text=lbl).grid(
+            row=row, column=base_col, padx=5, pady=5, sticky="e"
+        )
+        entry = ttk.Entry(frame_entries, font=font_entry)
+        entry.insert(0, DEFAULT[i])
+        entry.grid(row=row, column=base_col + 1, padx=5, pady=5, sticky="we")
+
         entries.append(entry)
+    # hacer que las columnas de Entry se expandan
+    for c in range(n_cols * 2):
+        frame_entries.columnconfigure(c, weight=1)
 
     # Checkbox para medir i_forward/i_reverse
     measure_var = ttk.BooleanVar(value=False)
-    ttk.Checkbutton(frame, text="Measure i forward/reverse", variable=measure_var).grid(
-        row=len(labels), column=0, columnspan=2, pady=5
-    )
-
+    ttk.Checkbutton(
+        frame_entries, text="Measure i forward/reverse", variable=measure_var
+    ).grid(row=len(LABELS), column=0, columnspan=2, pady=5)
+    # ===== CURRENT RANGE SELECTOR =====
+    frame_selectors = ttk.LabelFrame(frame, text="Current Range")
+    frame_selectors.grid(row=2, column=0, padx=(5, 20), pady=10, sticky="nswe")
+    # NEW: variable compartida para los radio buttons
+    current_range_var = ttk.StringVar(value="4.7e-8")  # valor por defecto
+    # NEW: creación horizontal de radio buttons
+    for col, (text, value) in enumerate(CURRENT_RANGES.items()):
+        ttk.Radiobutton(
+            frame_selectors,
+            text=text,
+            value=value,
+            variable=current_range_var,
+        ).grid(row=0, column=col, padx=5, pady=5, sticky="nswe")
+    frame_selectors.columnconfigure(tuple(range(len(CURRENT_RANGES))), weight=1)
+    frame_buttons = ttk.LabelFrame(frame, text="Actions")
+    frame_buttons.grid(row=0, column=1, pady=10, sticky="nswe")
+    frame_buttons.columnconfigure(0, weight=1)
     ttk.Button(
-        frame,
-        text="Generate SWV Profile & Script",
+        frame_buttons,
+        text="Generate Profile & Script",
         style="info.TButton",
         command=callbacks["callback_generate_profile"],
-    ).grid(row=len(labels) + 1, column=0, columnspan=2, pady=10)
+    ).grid(row=0, column=0, pady=10)
     ttk.Button(
-        frame,
+        frame_buttons,
         text="Send Script",
         style="info.TButton",
         command=callbacks["callback_send"],
-    ).grid(row=len(labels) + 2, column=0, columnspan=2, pady=10)
+    ).grid(row=1, column=0, pady=10)
 
-    return entries, measure_var
+    return entries, measure_var, current_range_var, entries_pre
 
 
 class SWVFrame(ttk.Frame):
@@ -69,23 +152,27 @@ class SWVFrame(ttk.Frame):
         content_frame.columnconfigure(0, weight=1)
 
         callbacks = {
-            "callback_generate_profile": self.callback_generate_profile, 
-            "callback_send": self.send_script
+            "callback_generate_profile": self.callback_generate_profile,
+            "callback_send": self.send_script,
         }
-        self.entries, self.measure_var = create_widgets_swv(content_frame, callbacks)
+        self.entries, self.measure_var, self.current_range, self.entries_pre = (
+            create_widgets_swv(content_frame, callbacks)
+        )
 
         self.profile_frame = ttk.LabelFrame(content_frame, text="SWV Profile Preview")
         self.profile_frame.grid(row=1, column=0, padx=(5, 15), pady=10, sticky="nswe")
+        self.profile_frame.grid_forget()
 
         self.script_box = ScrolledText(content_frame, height=15)
         self.script_box.grid(row=2, column=0, padx=(5, 15), pady=10, sticky="nswe")
+        self.script_box.grid_forget()
 
         self.canvas = None
-        self.callback_generate_profile()
         self.frame_plotter = ttk.LabelFrame(self, text="Live Data Plotter")
         self.frame_plotter.grid(row=3, column=0, padx=10, pady=10, sticky="nsew")
         self.frame_plotter.columnconfigure(0, weight=1)
-        self.payload = {}
+        self.generate_payload()
+        self.callback_generate_profile()
         self.udp_plotter = EventPlotter(
             self.frame_plotter,
             "sqwv",
@@ -186,74 +273,72 @@ class SWVFrame(ttk.Frame):
             self.canvas.get_tk_widget().pack(fill="both", expand=True)
 
             # Generate MethodSCRIPT
-            script = self.generate_methodscript(
-                t_equilibration,
-                e_begin,
-                e_end,
-                e_step,
-                amplitude,
-                freq,
-                self.measure_var.get(),
-            )
+            script = self.generate_methodscript()
             self.script_box.delete("1.0", "end")
             self.script_box.insert("end", script)
-
+            self.profile_frame.grid(
+                row=1, column=0, padx=(5, 15), pady=10, sticky="nswe"
+            )
+            self.script_box.grid(row=2, column=0, padx=(5, 15), pady=10, sticky="nswe")
+            self.frame_plotter.grid_forget()
         except ValueError:
             print("Error: Check input values.")
 
-    def generate_methodscript(
-        self,
-        t_equilibration,
-        e_begin,
-        e_end,
-        e_step,
-        amplitude,
-        freq,
-        measure_forward_reverse,
-    ):
-        def to_mV(value):
-            return f"{int(value * 1000)}m"
+    def generate_payload(self):
+        try:
+            t_e = float(self.entries[0].get())
+            t_e = "" if t_e == 0 else convert_si_integer_full(t_e)
+            t_con = float(self.entries_pre[1].get())
+            t_con = "" if t_con == 0 else convert_si_integer_full(t_con)
+            t_dep = float(self.entries_pre[3].get())
+            t_dep = "" if t_dep == 0 else convert_si_integer_full(t_dep)
+        except Exception:
+            t_e = ""
+            t_con = ""
+            t_dep = ""
+        self.payload = {
+            "t_e": t_e,
+            "E_b": convert_si_integer_full(float(self.entries[1].get())),
+            "E_e": convert_si_integer_full(float(self.entries[2].get())),
+            "E_s": convert_si_integer_full(float(self.entries[3].get())),
+            "Amp": convert_si_integer_full(float(self.entries[4].get())),
+            "Freq": convert_si_integer_full(float(self.entries[5].get())),
+            "m_b": convert_si_integer_full(float(self.entries[6].get())),
+            "min_da": convert_si_integer_full(float(self.entries[7].get())),
+            "max_da": convert_si_integer_full(float(self.entries[8].get())),
+            "range_ba": convert_si_integer_full(float(self.current_range.get())),
+            "ba_1": convert_si_integer_full(float(self.current_range.get())),
+            "ba_2": convert_si_integer_full(float(self.current_range.get())),
+            "E_con": convert_si_integer_full(float(self.entries_pre[0].get())),
+            "t_con": t_con,
+            "E_dep": convert_si_integer_full(float(self.entries_pre[2].get())),
+            "t_dep": t_dep,
+            "method": "sqwv",
+        }
 
-        # Variables
-        vars_line = "var i\nvar e"
-        if measure_forward_reverse:
-            vars_line += "\nvar i_forward\nvar i_reverse"
-
-        # Measurement line
-        meas_line = "meas_loop_swv e i"
-        if measure_forward_reverse:
-            meas_line += " i_forward i_reverse"
-        meas_line += f" {to_mV(e_begin)} {to_mV(e_end)} {to_mV(e_step)} {to_mV(amplitude)} {int(freq)}"
-        script = """
-                {vars_line}
-                set_pgstat_chan 1
-                set_pgstat_mode 0
-                set_pgstat_chan 0
-                set_pgstat_mode 2
-                set_max_bandwidth 234021m
-                set_range_minmax da -600m 600m
-                set_range ba 470u
-                set_autoranging ba 917969p 470u
-                set_e {to_mV(e_begin)}
-                cell_on
-                wait {int(t_equilibration * 1000)}ms
-                {meas_line}
-                pck_start
-                    pck_add e
-                    pck_add i
-                """
-        if measure_forward_reverse:
-            script += "    pck_add i_forward\n    pck_add i_reverse\n"
-        script += """  pck_end
-                    endloop
-                    on_finished:
-                    cell_off
-                """
+    def generate_methodscript(self):
+        script = construc_individual_script_sqwv(
+            self.payload.get("t_e", DEFAULT[0]),
+            self.payload.get("E_b", DEFAULT[1]),
+            self.payload.get("E_e", DEFAULT[2]),
+            self.payload.get("E_s", DEFAULT[3]),
+            self.payload.get("Amp", DEFAULT[4]),
+            self.payload.get("Freq", DEFAULT[5]),
+            self.payload.get("m_b", DEFAULT[6]),
+            self.payload.get("min_da", DEFAULT[7]),
+            self.payload.get("max_da", DEFAULT[8]),
+            self.payload.get("range_ba", DEFAULT[9]),
+            self.payload.get("ba_1", DEFAULT[10]),
+            self.payload.get("ba_2", DEFAULT[11]),
+            self.payload.get("E_con", LABELS_PRE["E condition"]),
+            self.payload.get("t_con", LABELS_PRE["t condition"]),
+            self.payload.get("E_dep", LABELS_PRE["E deposition"]),
+            self.payload.get("t_dep", LABELS_PRE["t deposition"]),
+        )
         return script.strip()
+
     def send_script(self):
-        script = self.script_box.get("1.0", "end-1c")
-        self.payload["script"] = script
-        self.payload["type"] = "swv"
+        self.generate_payload()
         ip_sender = self.callback_ip() if self.callback_ip else "localhost"
         self.udp_plotter.update_val_experiment(
             x_key="E_V",
@@ -262,6 +347,8 @@ class SWVFrame(ttk.Frame):
             ip_sender=ip_sender,
         )
         self.frame_plotter.grid(row=3, column=0, padx=10, pady=10, sticky="nsew")
+        self.profile_frame.grid_forget()
+        self.script_box.grid_forget()
 
 
 if __name__ == "__main__":
