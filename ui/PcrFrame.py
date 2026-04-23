@@ -55,9 +55,7 @@ def create_widgets_pcr(parent, callbacks: dict):
     for i, lbl in enumerate(labels):
         row = i // columns
         col = i % columns
-        ttk.Label(frame1, text=lbl, style="Custom.TLabel").grid(
-            row=row, column=col * 2, padx=5, pady=5, sticky="e"
-        )
+        ttk.Label(frame1, text=lbl, style="Custom.TLabel").grid(row=row, column=col * 2, padx=5, pady=5, sticky="e")
         entry = ttk.Entry(frame1, font=font_entry)
         entry.insert(0, default_values[i])
         entry.grid(row=row, column=col * 2 + 1, padx=5, pady=5)
@@ -67,9 +65,7 @@ def create_widgets_pcr(parent, callbacks: dict):
     frame_label.grid(row=1, column=0, sticky="nswe")
     frame_label.columnconfigure(0, weight=1)
     svar_temperature = ttk.StringVar(value="")
-    ttk.Label(frame_label, textvariable=svar_temperature, style="Custom.TLabel").grid(
-        row=0, column=0, padx=5, pady=5, sticky="nswe"
-    )
+    ttk.Label(frame_label, textvariable=svar_temperature, style="Custom.TLabel").grid(row=0, column=0, padx=5, pady=5, sticky="nswe")
     entries.append(svar_temperature)  # pyrefly:ignore
     frame_buttons = ttk.Frame(parent)
     frame_buttons.grid(row=2, column=0, sticky="nswe")
@@ -442,14 +438,10 @@ class PCRFrame(ttk.Frame):
     ):
         global thread_motor, sistemaMotor
         # cliente temperature
-        self.stop_udp_listenner = (
-            threading.Event()
-            if self.stop_udp_listenner is None
-            else self.stop_udp_listenner
-        )
+        self.stop_udp_listenner = threading.Event() if self.stop_udp_listenner is None else self.stop_udp_listenner
         # write a predix line with al parameters of experiment
         # prefix_col = f" high_temp: {high_temp}-L "
-        
+
         settings = read_settings_from_file()
         pidGains = settings.get("pidControllerRPM", {})
         try:
@@ -481,15 +473,9 @@ class PCRFrame(ttk.Frame):
             rpm_setpoint = rpm
             if sistemaMotor is None:
                 print("Creating new driver instance")
-                sistemaMotor = DriverStepperSys(
-                    en_pin=12, enable_active_high=False, uart_port=serial_port_encoder
-                )
+                sistemaMotor = DriverStepperSys(en_pin=12, enable_active_high=False, uart_port=serial_port_encoder)
 
-            self.stop_event_motor = (
-                threading.Event()
-                if self.stop_event_motor is None
-                else self.stop_event_motor
-            )
+            self.stop_event_motor = threading.Event() if self.stop_event_motor is None else self.stop_event_motor
             # -------------------------------------------------------------------
             # initial spin with expecific time
             # -------------------------------------------------------------------
@@ -619,16 +605,12 @@ class PCRFrame(ttk.Frame):
                     return
                 integral = 0
                 self.pin_heating.write(True)  # pyrefly: ignore
-                while (
-                    1.5 < abs(high_temp - self.temp) 
-                    and not self.stop_udp_listenner.is_set()
-                ):
-
+                while 1.5 < abs(high_temp - self.temp) and not self.stop_udp_listenner.is_set():
                     # # heat straigh foward to the 75 % of setpoint
                     # if self.temp <= high_temp * 0.4:
                     #     continue
                     # # print(f"Temperature: {self.temp} °C")
-                    if current_cycle==0 and self.temp<high_temp:
+                    if current_cycle == 0 and self.temp < high_temp:
                         break
                     age = time.time() - self.temp_ts
                     if age > MAX_AGE:
@@ -700,13 +682,10 @@ class PCRFrame(ttk.Frame):
                     True,
                     sistemaMotor,
                     None,
-                    stop_func=lambda: self.stop_event_motor.is_set()
-                    or abs(self.temp - low_temp) <= 9.5,
+                    stop_func=lambda: self.stop_event_motor.is_set() or abs(self.temp - low_temp) <= 9.5,
                     stop_event=self.stop_event_motor,
                 )
-                while (
-                    self.temp > low_temp + 1.5 and not self.stop_udp_listenner.is_set()
-                ):
+                while self.temp > low_temp + 1.5 and not self.stop_udp_listenner.is_set():
                     time.sleep(ts / 2)
                 print(f"Temperature reached: {self.temp} °C")
                 # -------------------------------------------------------------------
@@ -742,7 +721,42 @@ class PCRFrame(ttk.Frame):
                 )
                 # Asegurar apagado final
                 self.pin_heating.write(False)
-                print(f"Hold complete, end of cycle {current_cycle}")
+                # -------------------------------------------------------------------
+                # hold extension temperature
+                self.fase = "extension temp Hold"
+                time_ext = 6
+                exts_temp = 68
+                print(f"Holding LOW temperature for {time_ext} seconds")
+                # KI = 0.45  # medio
+                # I_MAX = 0.5
+                # KP_HOLD = 0.1  # más suave que en calentamiento
+                # TEMP_BAND = 0.05  # margen muerto muy pequeño
+                # WINDOW = ts * 0.5
+                try:
+                    KP_HOLD = pidGains.get("KP_h_low", 0.1)
+                    WINDOW = pidGains.get("win_h_low", ts * 0.5)
+                    KI = pidGains.get("KI_h_low", 0.45)
+                    I_MAX = pidGains.get("imax_h_low", 0.5)
+                    TEMP_BAND = pidGains.get("tband_h_low", 0.05)
+                except Exception:
+                    print("error data pid hold low")
+                    self.stop_udp_listenner.set()
+                    return
+                self.hold_temperature(
+                    exts_temp,
+                    time_ext,
+                    ts,
+                    self.stop_udp_listenner,
+                    self.pin_heating,
+                    KI,
+                    I_MAX,
+                    KP_HOLD,
+                    TEMP_BAND,
+                    WINDOW,
+                )
+                # Asegurar apagado final
+                self.pin_heating.write(False)
+                print(f"Hold ext complete, end of cycle {current_cycle}")
                 current_cycle += 1
                 # end of cycle
                 self.pin_heating.write(False)
@@ -756,11 +770,10 @@ class PCRFrame(ttk.Frame):
                 self.pin_pcr.write(False)
                 print(f"fluorescence voltage: {v_fluo}")
                 self.data_photodetector.append(v_fluo)
-            
 
             print("PCR cycles complete, reading fluorescence")
             self.fase = "Extension"
-            time_extension = 30
+            time_extension = 600
             try:
                 KP_HOLD = pidGains.get("KP_h_ext", 0.1)
                 WINDOW = pidGains.get("win_h_ext", ts * 0.9)
@@ -772,7 +785,7 @@ class PCRFrame(ttk.Frame):
                 self.stop_udp_listenner.set()
                 return
             self.hold_temperature(
-                low_temp,
+                68,
                 time_extension,
                 ts / 2,
                 self.stop_udp_listenner,
