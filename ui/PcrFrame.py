@@ -808,7 +808,7 @@ class PCRFrame(ttk.Frame):
 
             print("PCR cycles complete, reading fluorescence")
             self.fase = "Extension"
-            time_extension = 600
+            time_extension = 300
             try:
                 KP_HOLD = pidGains.get("KP_h_ext", 0.1)
                 WINDOW = pidGains.get("win_h_ext", ts * 0.9)
