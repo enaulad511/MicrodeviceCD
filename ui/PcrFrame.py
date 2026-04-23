@@ -711,6 +711,54 @@ class PCRFrame(ttk.Frame):
                 )
                 # Asegurar apagado final
                 self.pin_heating.write(False)
+                # ---------------------------------------------------
+                # reach high temp
+                self.fase = "Reach ext temp"
+                exts_temp = 68
+                settings = read_settings_from_file()
+                pidGains = settings.get("pidControllerRPM", {})
+                try:
+                    KP = pidGains.get("KP_high", 0.15)
+                    WINDOW = pidGains.get("win_high", 0.05)
+                    MAX_AGE = pidGains.get("m_age_high", 0.09)
+                    TEMP_BAND = pidGains.get("tband_high", 0.05)
+                    KI = pidGains.get("KI_high", 0.6)
+                    I_MAX = pidGains.get("imax_high", 0.5)
+                except Exception:
+                    print("error bad data reach high", pidGains)
+                    self.stop_udp_listenner.set()
+                    return
+                integral = 0
+                self.pin_heating.write(True)  # pyrefly: ignore
+                while 1.5 < abs(exts_temp - self.temp) and not self.stop_udp_listenner.is_set():
+                    # # heat straigh foward to the 75 % of setpoint
+                    # if self.temp <= high_temp * 0.4:
+                    #     continue
+                    # # print(f"Temperature: {self.temp} °C")
+                    if current_cycle == 0 and self.temp < exts_temp:
+                        break
+                    age = time.time() - self.temp_ts
+                    if age > MAX_AGE:
+                        # Temperatura vieja → no confiar
+                        self.pin_heating.write(False)
+                        continue
+                    error = exts_temp - self.temp
+                    integral += error * WINDOW
+                    integral = max(-I_MAX, min(I_MAX, integral))
+                    if abs(error) < TEMP_BAND:
+                        power = 0.0
+                    else:
+                        power = KP_HOLD * error + KI * integral
+                    power = max(0.0, min(1.0, KP * error))
+                    on_time = power * WINDOW
+
+                    if on_time > 0:
+                        self.pin_heating.write(True)
+                        time.sleep(on_time)
+                    self.pin_heating.write(False)
+                    time.sleep(WINDOW - on_time)
+
+                print(f"Temperature reached: {self.temp} °C")
                 # -------------------------------------------------------------------
                 # hold extension temperature
                 self.fase = "extension temp Hold"
