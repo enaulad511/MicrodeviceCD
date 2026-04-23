@@ -714,7 +714,7 @@ class PCRFrame(ttk.Frame):
                 # ---------------------------------------------------
                 # reach high temp
                 self.fase = "Reach ext temp"
-                exts_temp = 68
+                exts_temp = 72
                 settings = read_settings_from_file()
                 pidGains = settings.get("pidControllerRPM", {})
                 try:
@@ -763,7 +763,7 @@ class PCRFrame(ttk.Frame):
                 # hold extension temperature
                 self.fase = "extension temp Hold"
                 time_ext = 6
-                exts_temp = 68
+                exts_temp = 72
                 print(f"Holding LOW temperature for {time_ext} seconds")
                 settings = read_settings_from_file()
                 pidGains = settings.get("pidControllerRPM", {})
