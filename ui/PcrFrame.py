@@ -586,12 +586,8 @@ class PCRFrame(ttk.Frame):
                 # -------------------------------------------------------------------
                 # reach high temp
                 self.fase = "Reach High temp"
-                # KP = 0.15  # ajustar
-                # WINDOW = 0.09  # segundos
-                # MAX_AGE = 0.09  # s
-                # TEMP_BAND = 0.5
-                # I_MAX = 0.5
-                # KI = 0.6
+                settings = read_settings_from_file()
+                pidGains = settings.get("pidControllerRPM", {})
                 try:
                     KP = pidGains.get("KP_high", 0.15)
                     WINDOW = pidGains.get("win_high", 0.05)
@@ -638,11 +634,8 @@ class PCRFrame(ttk.Frame):
                 # hold High temperature
                 self.fase = "Hold High temp"
                 print(f"Holding temperature for {time_high} seconds")
-                # KI = 0.5  # medio
-                # I_MAX = 0.5
-                # KP_HOLD = 0.1  # más suave que en calentamiento
-                # TEMP_BAND = 0.05  # margen muerto muy pequeño
-                # WINDOW = ts * 0.9
+                settings = read_settings_from_file()
+                pidGains = settings.get("pidControllerRPM", {})
                 try:
                     KP_HOLD = pidGains.get("KP_h_high", 0.1)
                     WINDOW = pidGains.get("win_h_high", ts * 0.9)
@@ -692,11 +685,8 @@ class PCRFrame(ttk.Frame):
                 # hold LOW temperature
                 self.fase = "LOW temp Hold"
                 print(f"Holding LOW temperature for {time_low} seconds")
-                # KI = 0.45  # medio
-                # I_MAX = 0.5
-                # KP_HOLD = 0.1  # más suave que en calentamiento
-                # TEMP_BAND = 0.05  # margen muerto muy pequeño
-                # WINDOW = ts * 0.5
+                settings = read_settings_from_file()
+                pidGains = settings.get("pidControllerRPM", {})
                 try:
                     KP_HOLD = pidGains.get("KP_h_low", 0.1)
                     WINDOW = pidGains.get("win_h_low", ts * 0.5)
@@ -727,11 +717,8 @@ class PCRFrame(ttk.Frame):
                 time_ext = 6
                 exts_temp = 68
                 print(f"Holding LOW temperature for {time_ext} seconds")
-                # KI = 0.45  # medio
-                # I_MAX = 0.5
-                # KP_HOLD = 0.1  # más suave que en calentamiento
-                # TEMP_BAND = 0.05  # margen muerto muy pequeño
-                # WINDOW = ts * 0.5
+                settings = read_settings_from_file()
+                pidGains = settings.get("pidControllerRPM", {})
                 try:
                     KP_HOLD = pidGains.get("KP_h_low", 0.1)
                     WINDOW = pidGains.get("win_h_low", ts * 0.5)
