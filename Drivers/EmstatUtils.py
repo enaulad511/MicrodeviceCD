@@ -239,6 +239,9 @@ class EmstatStreamParser:
         if kind == "end_block":
             self.finished = True
             return {"type": "method_end"}
+        
+        if kind =="syntax_error":
+            return {"type": "error", "raw": raw}
 
         # ruido o mensajes no relevantes
         return {"type": "unknown", "raw": raw}
@@ -249,6 +252,8 @@ class EmstatStreamParser:
     def _classify(self, raw: str):
         if raw.startswith("P"):
             return "packet"
+        if raw.startswith("e!"):
+            return "syntax_error"
         if raw == "-":
             return "scan_switch"
         if raw.startswith("C"):
@@ -269,7 +274,6 @@ class EmstatStreamParser:
         if parsed is None:
             return None
         decoded = self._decode(parsed)
-        print(parsed)
         self.context["point"] = parsed["index"][0]
 
         decoded.update(

@@ -327,11 +327,11 @@ class EventPlotter(ttk.Frame):
                     # si la cola se llena, descarta (mejor que bloquear TCP)
                     pass
         self.flag_recording = False
-        self.sock.close()
+        self.sock.close() if self.sock else None
         print("TCP reader stopped.")
-        
         self.reader_th=None
-        self.stop()
+        self.stop_event.set()
+        
 
     def _tcp_processor(self):
         parser = EmstatStreamParser(experiment=self.method)
@@ -367,6 +367,15 @@ class EventPlotter(ttk.Frame):
                         )
                     except Exception:
                         pass
+                if "method" in event["type"] :
+                    if event['type'] == 'method':
+                        self._set_status(f"Method: {event['type']} {event['method_id']}")
+                        print("Method:", event['method_id'])
+                    elif event['type'] == 'method_end':
+                        self._set_status(f"Method: {event['type']}")
+
+                    else:
+                        print("Event method unknow: ", event)
             elif msg.get("type") == "emstat_end":
                 print("END OF EXPERIMENT")
                 self._set_status("End of experiment.")
@@ -374,6 +383,7 @@ class EventPlotter(ttk.Frame):
                 break
         print("TCP processor stopped.")
         self.processor_th = None
+        self.stop()
 
     # def _tcp_reader(self):
     #     print(f"starting tcp on port {self.tcp_port} and address {self.ip_sender} …")

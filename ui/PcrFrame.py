@@ -332,6 +332,12 @@ class PCRFrame(ttk.Frame):
             for temp in self.data_temperature:
                 writer.writerow([temp])
         print(f"Data saved to {filename}")
+        filename_photo = f"photodetector_data_{timestamp.strftime('%Y%m%d_%H%M%S')}.csv"
+        with open(filename_photo, "w", newline="") as file:
+            writer = csv.writer(file)
+            writer.writerow(["photodetector"])
+            for phot in self.data_photodetector:
+                writer.writerow([phot])
 
     def callback_start_experiment(self):
         if self.running_experiment:
@@ -749,6 +755,8 @@ class PCRFrame(ttk.Frame):
                 time.sleep(1)
                 self.pin_pcr.write(False)
                 print(f"fluorescence voltage: {v_fluo}")
+                self.data_photodetector.append(v_fluo)
+            
 
             print("PCR cycles complete, reading fluorescence")
             self.fase = "Extension"
