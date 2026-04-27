@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
-from cgitb import enable
-from Drivers.DriverStepperSys import spinMotorAngleDriver
+
 import threading
 from templates.utils import read_settings_from_file
 from Drivers.EmstatUtils import construc_nscans_script_cv
@@ -230,7 +229,8 @@ def create_widgets_cv(parent, columns=2):
     enable_motor_check = ttk.Checkbutton(frame_motor_settings, text="Enable Motor", variable=enable_motor, style="Custom.TCheckbutton")
     enable_motor_check.grid(row=0, column=0, columnspan=2, padx=5, pady=5, sticky="n")
     entries_motor.append(enable_motor)
-    ttk.Label(frame_motor_settings, text="Angle (°, max 30):", style="Custom.TLabel").grid(row=0, column=1, padx=5, pady=5, sticky="w")
+
+    ttk.Label(frame_motor_settings, text="Angle (°, max 30):", style="Custom.TLabel").grid(row=1, column=0, padx=5, pady=5, sticky="w")
     svar_angle = ttk.StringVar(value="30")
     angle_entry = ttk.Entry(frame_motor_settings, font=font_entry, textvariable=svar_angle, width=5)
     angle_entry.grid(row=1, column=1, padx=5, pady=5, sticky="w")
@@ -239,7 +239,7 @@ def create_widgets_cv(parent, columns=2):
     ttk.Label(frame_motor_settings, text="Speed (%):", style="Custom.TLabel").grid(row=2, column=0, padx=5, pady=5, sticky="w")
     svar_speed = ttk.StringVar(value="10")
     speed_entry = ttk.Entry(frame_motor_settings, font=font_entry, textvariable=svar_speed, width=5)
-    speed_entry.grid(row=1, column=2, padx=5, pady=5, sticky="w")
+    speed_entry.grid(row=2, column=1, padx=5, pady=5, sticky="w")
     entries_motor.append(svar_speed)
 
     return entries, current_range_var, entries_motor
@@ -486,6 +486,8 @@ class CVFrame(ttk.Frame):
                 print("Ya hay un hilo activo, no se puede iniciar otro.")
                 return
             self.stop_event = threading.Event() if self.stop_event is None else self.stop_event
+            from Drivers.DriverStepperSys import spinMotorAngleDriver
+
             thread_motor = threading.Thread(
                 target=spinMotorAngleDriver,
                 args=(angle, speed_percentage * max_rpm / 100, max_rpm, None, True, self.stop_event, None),
