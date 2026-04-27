@@ -410,6 +410,7 @@ class CVFrame(ttk.Frame):
             enable_motor = self.entries_motor[0].get()
             if enable_motor:
                 self.start_spin_motor_angle()
+            print("script sent")
         except ValueError:
             self.show_inputs_frame()
             print("Error: Check input values.")
