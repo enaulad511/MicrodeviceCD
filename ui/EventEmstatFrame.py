@@ -162,6 +162,7 @@ class EventPlotter(ttk.Frame):
     def start(self):
         """Crea socket, lanza hilo TCP productor y procesador."""
         if self.running:
+            self._set_status("Already running.")
             return
 
         try:
