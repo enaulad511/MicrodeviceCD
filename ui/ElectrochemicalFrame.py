@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+from templates.constants import font_text_combobox
 from ttkbootstrap.scrolled import ScrolledFrame
 from templates.constants import font_text
 
@@ -26,10 +27,7 @@ class ElectrochemicalFrame(ttk.Frame):
         content_frame.rowconfigure(1, weight=1)
 
         # Combobox for test selection
-        ttk.Label(
-            content_frame, text="Select Electrochemical Test:", style="Custom.TLabel"
-        ).grid(row=0, column=0, padx=10, pady=10, sticky="e")
-
+        ttk.Label(content_frame, text="Select Electrochemical Test:", style="Custom.TLabel").grid(row=0, column=0, padx=10, pady=10, sticky="e")
         self.test_selector = ttk.Combobox(
             content_frame,
             values=[
@@ -39,7 +37,7 @@ class ElectrochemicalFrame(ttk.Frame):
             ],
             state="readonly",
             width=30,
-            font=font_text,
+            font=font_text_combobox,
         )
         self.test_selector.grid(row=0, column=1, padx=10, pady=10, sticky="w")
         self.test_selector.bind("<<ComboboxSelected>>", self.on_test_selected)
@@ -54,11 +52,9 @@ class ElectrochemicalFrame(ttk.Frame):
 
     def on_test_selected(self, event):
         selected_test = self.test_selector.get()
-
         # Clear previous frame
         if self.current_test_frame:
             self.current_test_frame.destroy()
-
         # Load the selected test frame
         print(f"Selected test: {selected_test}")
         ip_sender = self.callback_ip() if self.callback_ip else "localhost"
@@ -76,9 +72,7 @@ class ElectrochemicalFrame(ttk.Frame):
                     callback_get_ip_sender=self.callback_ip,
                 )
             case _:
-                placeholder = ttk.Label(
-                    self.test_frame_container, text=f"{selected_test} UI coming soon..."
-                )
+                placeholder = ttk.Label(self.test_frame_container, text=f"{selected_test} UI coming soon...")
                 # placeholder.grid(row=0, column=0, sticky="nsew")
                 self.current_test_frame = placeholder
         self.current_test_frame.grid(row=0, column=0, sticky="nsew", pady=5)

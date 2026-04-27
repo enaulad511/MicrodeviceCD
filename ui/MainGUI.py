@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+import threading
+from concurrent.futures import thread
 from templates.utils import read_settings_from_file
 from templates.constants import secrets
 from templates.constants import font_text
@@ -46,9 +48,7 @@ def configure_styles():
         "Custom.TLabelframe.Label", font=font_labels_frame
     )
     style.configure("Custom.TNotebook.Tab", font=font_tabs)  # pyrefly: ignore
-    style.configure(
-        "Custom.TCombobox.Text", background="green", font=font_entry
-    )  # pyrefly: ignore
+    style.configure("Custom.TCombobox.Text", background="green", font=font_entry)  # pyrefly: ignore
     style.configure("info.TButton", font=font_buttons)  # pyrefly: ignore
     style.configure("success.TButton", font=font_buttons)  # pyrefly: ignore
     style.configure("danger.TButton", font=font_buttons)  # pyrefly: ignore
@@ -99,6 +99,7 @@ class MainGUI(ttk.Window):
         self.title("\u03bcAA")
         self.style_gui = configure_styles()
         self.ip_sender = "localhost"
+        self.client_tester = None
         self.protocol("WM_DELETE_WINDOW", self.on_close_window)
         self.option_add("*TCombobox*Listbox.font", font_text)
         self.option_add("*Combobox*Listbox.font", font_text)
@@ -108,9 +109,7 @@ class MainGUI(ttk.Window):
         if secrets.get("environment", "") != "dev":
             from Drivers.ReaderADS import Ads1115Reader
 
-            self.ads = Ads1115Reader(
-                address=0x48, fsr=ads_fsr, sps=64, single_shot=False
-            )
+            self.ads = Ads1115Reader(address=0x48, fsr=ads_fsr, sps=64, single_shot=False)
             # self.ads.check_diff_health(p=0, n=1, samples=30)
         # --------------------Start Animation -------------------
         # self.show_gif_toplevel()
@@ -121,9 +120,7 @@ class MainGUI(ttk.Window):
         # --------------------notebook-------------------
         self.connected = ttk.BooleanVar(value=False)
         self.frame_content = ttk.Frame(self)
-        self.frame_content.grid(
-            row=0, column=0, sticky="nsew", padx=(5, 10), pady=(3, 3)
-        )
+        self.frame_content.grid(row=0, column=0, sticky="nsew", padx=(5, 10), pady=(3, 3))
         self.frame_content.columnconfigure(0, weight=1)
         self.frame_content.rowconfigure(0, weight=1)
         # ------------------main tabs-------------------
@@ -138,17 +135,11 @@ class MainGUI(ttk.Window):
         self.tab_pcr = PCRFrame(self.main_notebook, self.ads)
         self.main_notebook.add(self.tab_pcr, text=main_tabs_texts[0], padding=10)
         # ------------------Electrochemical tab-------------------
-        self.tab_electrochemical = ElectrochemicalFrame(
-            self.main_notebook, self.callback_ip
-        )
-        self.main_notebook.add(
-            self.tab_electrochemical, text=main_tabs_texts[1], padding=10
-        )
+        self.tab_electrochemical = ElectrochemicalFrame(self.main_notebook, self.callback_ip)
+        self.main_notebook.add(self.tab_electrochemical, text=main_tabs_texts[1], padding=10)
         # ------------------Manual Control tab-------------------
         self.tab_manual_control = ttk.Frame(self.main_notebook)
-        self.main_notebook.add(
-            self.tab_manual_control, text=main_tabs_texts[2], padding=10
-        )
+        self.main_notebook.add(self.tab_manual_control, text=main_tabs_texts[2], padding=10)
         self.tab_manual_control.columnconfigure(0, weight=1)
         self.tab_manual_control.rowconfigure(0, weight=1)
         # ------------------Manual Control tabs-------------------
@@ -211,7 +202,7 @@ class MainGUI(ttk.Window):
         ).grid(row=0, column=2, sticky="e", padx=15, pady=15)
 
         # ----------------------after init ----------------------
-        self.after(2000, self.try_connect_disc)
+        self.after(2000, self.on_button_test_disc)
 
     def callback_ip(self):
         return self.ip_sender
@@ -266,44 +257,39 @@ class MainGUI(ttk.Window):
             self.config_frame.focus_force()
 
     def on_button_test_disc(self):
-        if self.try_connect_disc():
-            # dialog mesagge
-            Messagebox.show_info(
-                title="Connection",
-                message="Disc Connected",
-            )
-        else:
-            # dialog mesagge
-            Messagebox.show_error(
-                title="Connection",
-                message="Disc Disconnected",
-            )
+        # self.thread_tester_con = threading.Thread(target=self.try_connect_disc)
+        # self.thread_tester_con.start()
+        self.try_connect_disc()
+
+    def on_message_tester(self, text, address, temps_list):
+        try:
+            lf = float(temps_list[2])
+            self.ip_sender = str(address[0])
+            print("ip sender: ", self.ip_sender, " temp: ", lf)
+            self.txt_connected.set("Disc Connected")
+        except Exception:
+            print("Error at testing connection...")
+            self.txt_connected.set("Disc Disconnected")
+        if self.client_tester is not None:
+            self.client_tester.stop_testing()
+            self.client_tester = None
 
     def try_connect_disc(self):
-        client = UdpClient(
+        if self.client_tester is not None:
+            print("Stop client tester")
+            self.client_tester.stop()
+            self.client_tester = None
+            return
+        self.client_tester = UdpClient(
             port=5005,
             buffer_size=512,
             allow_broadcast=True,  # Important for broadcast payloads
             local_ip="",  # "" listens on all interfaces (wlan0, eth0, etc.)
             recv_timeout_sec=1.0,  # lets loop check stop flag periodically
-            on_message=None,
+            on_message=lambda t, a, t_d: self.on_message_tester(t, a, t_d),
             parse_float=True,  # Arduino sends a numeric string
         )
-        try:
-            client.start()
-            time.sleep(2.0)
-            lf = client.get_status_disc()
-            if lf is not None and lf:
-                self.ip_sender = str(client.latest_addr())
-                print("ip sender: ", self.ip_sender)
-                self.txt_connected.set("Disc Connected")
-                client.stop()
-                return True
-        except KeyboardInterrupt:
-            print("Error at testing connection...")
-        finally:
-            client.stop()
-        return False
+        self.client_tester.start()
 
     def on_close_window(self):
         self.destroy()

@@ -68,10 +68,12 @@ def create_widgets_swv(parent, callbacks, n_cols=2):
     frame = ttk.LabelFrame(parent, text="Square Wave Voltammetry Settings")
     frame.grid(row=0, column=0, padx=10, pady=10, sticky="nswe")
     frame.columnconfigure(0, weight=1)
+    frame.configure(style="Custom.TLabelframe")
     entries_pre = []
     frame_pre = ttk.LabelFrame(frame, text="Pre-treatment")
     frame_pre.grid(row=0, column=0, padx=10, pady=10, sticky="nswe")
     frame_pre.columnconfigure(tuple(range(4)), weight=1)
+    frame_pre.configure(style="Custom.TLabelframe")
     for i, (lbl, val) in enumerate(LABELS_PRE.items()):
         row = i // 2
         col = i % 2
@@ -84,6 +86,7 @@ def create_widgets_swv(parent, callbacks, n_cols=2):
     frame_entries = ttk.LabelFrame(frame, text="Parameters")
     frame_entries.grid(row=1, column=0, padx=10, pady=10, sticky="nswe")
     frame_entries.columnconfigure(tuple(range(n_cols * 2)), weight=1)
+    frame_entries.configure(style="Custom.TLabelframe")
     entries = []
     for i, lbl in enumerate(LABELS):
         col = i % n_cols
@@ -110,6 +113,7 @@ def create_widgets_swv(parent, callbacks, n_cols=2):
     # ===== CURRENT RANGE SELECTOR =====
     frame_selectors = ttk.LabelFrame(frame, text="Current Range")
     frame_selectors.grid(row=2, column=0, padx=(5, 20), pady=10, sticky="nswe")
+    frame_selectors.configure(style="Custom.TLabelframe")
     # NEW: variable compartida para los radio buttons
     current_range_var = ttk.StringVar(value="4.7e-8")  # valor por defecto
     # NEW: creación horizontal de radio buttons
@@ -121,24 +125,34 @@ def create_widgets_swv(parent, callbacks, n_cols=2):
             variable=current_range_var,
         ).grid(row=0, column=col, padx=5, pady=5, sticky="nswe")
     frame_selectors.columnconfigure(tuple(range(len(CURRENT_RANGES))), weight=1)
-    frame_buttons = ttk.LabelFrame(frame, text="Actions")
-    frame_buttons.grid(row=0, column=1, pady=10, sticky="nswe")
-    frame_buttons.columnconfigure(0, weight=1)
+
+    return entries, measure_var, current_range_var, entries_pre
+
+def create_buttons_sqwv(parent, callbacks):
+    # ===== CONTROL BUTTONS =====
+    frame_buttons = ttk.LabelFrame(parent, text="Actions")
+    frame_buttons.grid(row=1, column=0, pady=10, sticky="nswe")
+    frame_buttons.columnconfigure((0, 1, 2), weight=1)
+    frame_buttons.configure(style="Custom.TLabelframe")
     ttk.Button(
         frame_buttons,
         text="Generate Profile & Script",
         style="info.TButton",
         command=callbacks["callback_generate_profile"],
-    ).grid(row=0, column=0, pady=10)
+    ).grid(row=0, column=0, pady=10, sticky="n")
     ttk.Button(
         frame_buttons,
         text="Send Script",
         style="info.TButton",
         command=callbacks["callback_send"],
-    ).grid(row=1, column=0, pady=10)
-
-    return entries, measure_var, current_range_var, entries_pre
-
+    ).grid(row=0, column=1, pady=10, sticky="n")
+    ttk.Button(
+        frame_buttons,
+        text="Show Inputs",
+        style="danger.TButton",
+        command=callbacks["callback_show_inputs"],
+    ).grid(row=0, column=2, pady=10, sticky="n")
+    
 
 class SWVFrame(ttk.Frame):
     def __init__(self, parent, ip_sender="localhost", callback_get_ip_sender=None):
@@ -150,27 +164,37 @@ class SWVFrame(ttk.Frame):
         content_frame = ttk.Frame(self)
         content_frame.grid(row=0, column=0, sticky="nsew")
         content_frame.columnconfigure(0, weight=1)
-
+        
+        self.frame_entries = ttk.Frame(content_frame)
+        self.frame_entries.grid(row=0, column=0, sticky="nsew")
+        self.frame_entries.columnconfigure(0, weight=1)
         callbacks = {
             "callback_generate_profile": self.callback_generate_profile,
             "callback_send": self.send_script,
+            "callback_show_inputs": self.show_inputs_frame,
         }
         self.entries, self.measure_var, self.current_range, self.entries_pre = (
-            create_widgets_swv(content_frame, callbacks)
+            create_widgets_swv(self.frame_entries, callbacks)
         )
-
+        self.frame_buttons = ttk.Frame(content_frame)
+        self.frame_buttons.grid(row=1, column=0, sticky="nsew")
+        self.frame_buttons.columnconfigure(0, weight=1)
+        create_buttons_sqwv(self.frame_buttons, callbacks)
+        
         self.profile_frame = ttk.LabelFrame(content_frame, text="SWV Profile Preview")
-        self.profile_frame.grid(row=1, column=0, padx=(5, 15), pady=10, sticky="nswe")
+        self.profile_frame.grid(row=2, column=0, padx=(5, 15), pady=10, sticky="nswe")
+        self.profile_frame.configure(style="Custom.TLabelframe")
         self.profile_frame.grid_forget()
 
         self.script_box = ScrolledText(content_frame, height=15)
-        self.script_box.grid(row=2, column=0, padx=(5, 15), pady=10, sticky="nswe")
+        self.script_box.grid(row=3, column=0, padx=(5, 15), pady=10, sticky="nswe")
         self.script_box.grid_forget()
 
         self.canvas = None
         self.frame_plotter = ttk.LabelFrame(self, text="Live Data Plotter")
-        self.frame_plotter.grid(row=3, column=0, padx=10, pady=10, sticky="nsew")
+        self.frame_plotter.grid(row=4, column=0, padx=10, pady=10, sticky="nsew")
         self.frame_plotter.columnconfigure(0, weight=1)
+        self.frame_plotter.configure(style="Custom.TLabelframe")
         self.generate_payload()
         self.callback_generate_profile()
         self.udp_plotter = EventPlotter(
@@ -184,6 +208,10 @@ class SWVFrame(ttk.Frame):
             payload=self.payload,
         )
         self.udp_plotter.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
+        self.frame_plotter.grid_forget()
+
+    def show_inputs_frame(self):
+        self.frame_entries.grid(row=0, column=0, sticky="nsew")
         self.frame_plotter.grid_forget()
 
     def callback_generate_profile(self):
@@ -277,9 +305,9 @@ class SWVFrame(ttk.Frame):
             self.script_box.delete("1.0", "end")
             self.script_box.insert("end", script)
             self.profile_frame.grid(
-                row=1, column=0, padx=(5, 15), pady=10, sticky="nswe"
+                row=2, column=0, padx=(5, 15), pady=10, sticky="nswe"
             )
-            self.script_box.grid(row=2, column=0, padx=(5, 15), pady=10, sticky="nswe")
+            self.script_box.grid(row=3, column=0, padx=(5, 15), pady=10, sticky="nswe")
             self.frame_plotter.grid_forget()
         except ValueError:
             print("Error: Check input values.")
@@ -338,6 +366,7 @@ class SWVFrame(ttk.Frame):
         return script.strip()
 
     def send_script(self):
+        self.frame_entries.grid_forget()
         self.generate_payload()
         ip_sender = self.callback_ip() if self.callback_ip else "localhost"
         self.udp_plotter.update_val_experiment(
@@ -346,7 +375,7 @@ class SWVFrame(ttk.Frame):
             payload=self.payload,
             ip_sender=ip_sender,
         )
-        self.frame_plotter.grid(row=3, column=0, padx=10, pady=10, sticky="nsew")
+        self.frame_plotter.grid(row=4, column=0, padx=10, pady=10, sticky="nsew")
         self.profile_frame.grid_forget()
         self.script_box.grid_forget()
 

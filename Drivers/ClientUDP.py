@@ -76,6 +76,7 @@ class UdpClient:
         self.status_disc = False
         self.latest_temp = None
         self.latest_lock = threading.Lock()
+        self.count_timeout = 0
 
         self.debug = debug
 
@@ -113,13 +114,9 @@ class UdpClient:
         self._stop_evt.clear()
         self._sock = self._create_socket()  # pyrefly: ignore
 
-        self._thread = threading.Thread(
-            target=self._run_loop, daemon=True
-        )  # pyrefly: ignore
+        self._thread = threading.Thread(target=self._run_loop, daemon=True)  # pyrefly: ignore
         self._thread.start()  # pyrefly: ignore
-        print(
-            f"[UdpClient] Listening on {self.local_ip or '0.0.0.0'}:{self.port} (threaded)"
-        )
+        print(f"[UdpClient] Listening on {self.local_ip or '0.0.0.0'}:{self.port} (threaded)")
 
     def stop(self):
         """Stop the background thread and close the socket."""
@@ -138,15 +135,30 @@ class UdpClient:
             self._thread = None
         print("[UdpClient] Stopped.")
 
+    def stop_testing(self):
+        """Stop the background thread and close the socket."""
+        self._stop_evt.set()
+        if self._sock:
+            try:
+                # Send a dummy packet to unblock recvfrom if needed (optional)
+                # socket.socket(...).sendto(b'', ('127.0.0.1', self.port))
+                self._sock.close()
+            except Exception:
+                pass
+            self._sock = None
+
+        if self._thread:
+            # self._thread.join(timeout=2.0)
+            self._thread = None
+        print("[UdpClient] Stopped.")
+
     def listen_forever(self):
         """
         Blocking mode: run the receive loop in the current thread.
         Useful for simple scripts.
         """
         self._sock = self._create_socket()  # pyrefly: ignore
-        print(
-            f"[UdpClient] Listening on {self.local_ip or '0.0.0.0'}:{self.port} (blocking)"
-        )
+        print(f"[UdpClient] Listening on {self.local_ip or '0.0.0.0'}:{self.port} (blocking)")
         try:
             self._run_loop()
         finally:
@@ -173,6 +185,7 @@ class UdpClient:
 
                 now = time.time()
                 self.status_disc = True
+                self.count_timeout = 0
                 self._latest_addr = addr[0]
                 # print(data, addr)
                 with self.latest_lock:
@@ -184,13 +197,25 @@ class UdpClient:
                                 (addr,),
                                 [0, 0, self.latest_temp.value, self.latest_temp.ts],
                             )
-
                         except Exception as e:
                             print(f"[UdpClient] on_message error: {e}")
 
             except BlockingIOError:
                 time.sleep(0.0005)
-            except Exception:
+            except TimeoutError:
+                self.count_timeout += 1
+                print(f"[UdpClient] Timeout #{self.count_timeout}, disc status: {self.status_disc}")
+                if self.count_timeout > 5:
+                    self._stop_evt.set()
+                    if self.on_message:
+                        self.on_message(
+                            "Error timeout",
+                            (0,),
+                            [0, 0, None, None],
+                        )
+                    break
+            except Exception as e:
+                print("str error: ", str(e))
                 time.sleep(0.0005)
 
     def initial_file(self, filename="data_temps.csv", prefixcolum=""):

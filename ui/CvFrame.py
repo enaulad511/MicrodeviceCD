@@ -1,4 +1,8 @@
 # -*- coding: utf-8 -*-
+from cgitb import enable
+from Drivers.DriverStepperSys import spinMotorAngleDriver
+import threading
+from templates.utils import read_settings_from_file
 from Drivers.EmstatUtils import construc_nscans_script_cv
 from templates.utils import convert_si_integer_full
 from ui.EventEmstatFrame import EventPlotter
@@ -59,6 +63,8 @@ CURRENT_RANGES = {
     "500 uA": 918e-6,  # 918 µA
     "1 mA": 1.0e-3,  # 1 mA
 }
+
+thread_lock = threading.Lock()
 
 
 class ShowMethodScript(ttk.Toplevel):
@@ -142,16 +148,8 @@ class ShowProfileFrame(ttk.Toplevel):
             start, end, label = seg
             mid_time = (start + end) / 2
             mid_potential = potentials[int(len(potentials) * mid_time / times[-1])]
-            color = (
-                "orange"
-                if label == "Forward"
-                else "green"
-                if label == "Reverse"
-                else "purple"
-            )
-            ax.text(
-                mid_time, mid_potential, label, ha="center", color=color, fontsize=9
-            )
+            color = "orange" if label == "Forward" else "green" if label == "Reverse" else "purple"
+            ax.text(mid_time, mid_potential, label, ha="center", color=color, fontsize=9)
 
         ax.axhline(E_begin, color="gray", linestyle=":", linewidth=1)
         ax.axhline(E_vertex1, color="red", linestyle=":", linewidth=1)
@@ -176,12 +174,12 @@ class ShowProfileFrame(ttk.Toplevel):
         self.destroy()
 
 
-def create_widgets_cv(parent, callbacks: dict, columns=2):
+def create_widgets_cv(parent, columns=2):
     entries = []
     parent.columnconfigure(0, weight=1)
     inputs_frame = ttk.Frame(parent)
     inputs_frame.grid(row=0, column=0, padx=(5, 20), pady=10, sticky="nswe")
-    inputs_frame.columnconfigure((0, 1), weight=1)
+    inputs_frame.columnconfigure(0, weight=1)
     # ===== CV SETTINGS =====
     frame1 = ttk.LabelFrame(inputs_frame, text="Cyclic Voltammetry Settings")
     frame1.grid(row=0, column=0, padx=(5, 10), pady=10, sticky="nswe")
@@ -198,9 +196,7 @@ def create_widgets_cv(parent, callbacks: dict, columns=2):
 
         for i, lbl in enumerate(subset):
             row = i
-            ttk.Label(frame1, text=lbl, style="Custom.TLabel").grid(
-                row=row, column=col * 2, padx=5, pady=5, sticky="w"
-            )
+            ttk.Label(frame1, text=lbl, style="Custom.TLabel").grid(row=row, column=col * 2, padx=5, pady=5, sticky="w")
 
             entry = ttk.Entry(frame1, font=font_entry)
             entry.insert(0, DEFAUL_VALUES_CV[start + i])
@@ -210,6 +206,7 @@ def create_widgets_cv(parent, callbacks: dict, columns=2):
     # ===== CURRENT RANGE SELECTOR =====
     frame_selectors = ttk.LabelFrame(inputs_frame, text="Current Range")
     frame_selectors.grid(row=1, column=0, padx=(5, 20), pady=10, sticky="nswe")
+    frame_selectors.configure(style="Custom.TLabelframe")
 
     # NEW: variable compartida para los radio buttons
     current_range_var = ttk.StringVar(value="4.7e-8")  # valor por defecto
@@ -222,34 +219,64 @@ def create_widgets_cv(parent, callbacks: dict, columns=2):
             value=value,
             variable=current_range_var,
         ).grid(row=0, column=col, padx=5, pady=5, sticky="nswe")
+    # --------------------------------------------------------------------------------
+    # -----------------------------Motor Settings-------------------------------------
+    entries_motor: list = []
+    frame_motor_settings = ttk.LabelFrame(inputs_frame, text="Motor Settings")
+    frame_motor_settings.grid(row=2, column=0, padx=(5, 20), pady=10, sticky="nswe")
+    frame_motor_settings.columnconfigure((0, 1), weight=1)
+    # enable motor checkbox
+    enable_motor = ttk.BooleanVar(value=False)
+    enable_motor_check = ttk.Checkbutton(frame_motor_settings, text="Enable Motor", variable=enable_motor, style="Custom.TCheckbutton")
+    enable_motor_check.grid(row=0, column=0, columnspan=2, padx=5, pady=5, sticky="n")
+    entries_motor.append(enable_motor)
+    ttk.Label(frame_motor_settings, text="Angle (°, max 30):", style="Custom.TLabel").grid(row=0, column=1, padx=5, pady=5, sticky="w")
+    svar_angle = ttk.StringVar(value="30")
+    angle_entry = ttk.Entry(frame_motor_settings, font=font_entry, textvariable=svar_angle, width=5)
+    angle_entry.grid(row=1, column=1, padx=5, pady=5, sticky="w")
+    entries_motor.append(svar_angle)
 
+    ttk.Label(frame_motor_settings, text="Speed (%):", style="Custom.TLabel").grid(row=2, column=0, padx=5, pady=5, sticky="w")
+    svar_speed = ttk.StringVar(value="10")
+    speed_entry = ttk.Entry(frame_motor_settings, font=font_entry, textvariable=svar_speed, width=5)
+    speed_entry.grid(row=1, column=2, padx=5, pady=5, sticky="w")
+    entries_motor.append(svar_speed)
+
+    return entries, current_range_var, entries_motor
+
+
+def create_buttons_cv(parent, callbacks):
     # ===== CONTROL BUTTONS =====
-    frame_controls = ttk.Frame(inputs_frame)
-    frame_controls.grid(row=0, column=1, pady=10, sticky="nswe")
-    frame_controls.columnconfigure(0, weight=1)
+    frame_controls = ttk.Frame(parent)
+    frame_controls.grid(row=0, column=0, pady=10, sticky="nswe")
+    frame_controls.columnconfigure((0, 1, 2, 3), weight=1)
 
     ttk.Button(
         frame_controls,
         text="Generate CV Profile",
         style="info.TButton",
         command=callbacks.get("callback_generate_profile", ()),
-    ).grid(row=0, column=0, pady=5, sticky="nswe")
+    ).grid(row=0, column=0, pady=5, sticky="n")
 
     ttk.Button(
         frame_controls,
         text="Show MethodScript",
         style="info.TButton",
         command=callbacks.get("callback_show_script", ()),
-    ).grid(row=1, column=0, pady=5, sticky="nswe")
+    ).grid(row=0, column=1, pady=5, sticky="n")
 
     ttk.Button(
         frame_controls,
         text="Send Script",
         style="info.TButton",
         command=callbacks.get("callback_send_script", ()),
-    ).grid(row=2, column=0, pady=5, sticky="nswe")
-
-    return entries, current_range_var
+    ).grid(row=0, column=2, pady=5, sticky="n")
+    ttk.Button(
+        frame_controls,
+        text="Show Inputs",
+        style="danger.TButton",
+        command=callbacks.get("callback_show_inputs", ()),
+    ).grid(row=0, column=3, pady=5, sticky="n")
 
 
 class CVFrame(ttk.Frame):
@@ -270,6 +297,8 @@ class CVFrame(ttk.Frame):
         self.ShowMethodScrit = None
         self.ShowProfile = None
         self.callback_ip = callback_get_ip_sender
+        self.thread_motor = None
+
         # ---------------------------------------
 
         content_frame = ttk.Frame(self)
@@ -280,11 +309,22 @@ class CVFrame(ttk.Frame):
             "callback_generate_profile": self.callback_generate_profile,
             "callback_show_script": self.callback_show_methodscript,
             "callback_send_script": self.callback_send_script,
+            "callback_show_inputs": self.show_inputs_frame,
         }
-        self.entries, self.current_range = create_widgets_cv(content_frame, callbacks)
+        self.frame_entries = ttk.Frame(content_frame)
+        self.frame_entries.grid(row=0, column=0, sticky="nsew")
+        self.frame_entries.columnconfigure(0, weight=1)
+        self.entries, self.current_range, self.entries_motor = create_widgets_cv(self.frame_entries)
+
+        self.frame_buttons = ttk.Frame(content_frame)
+        self.frame_buttons.grid(row=1, column=0, sticky="nsew")
+        self.frame_buttons.columnconfigure(0, weight=1)
+        create_buttons_cv(self.frame_buttons, callbacks)
+
         self.frame_plotter = ttk.LabelFrame(self, text="Live Data Plotter")
         self.frame_plotter.grid(row=1, column=0, padx=10, pady=10, sticky="nsew")
         self.frame_plotter.columnconfigure(0, weight=1)
+        self.frame_plotter.configure(style="Custom.TLabelframe")
         self.udp_plotter = EventPlotter(
             self.frame_plotter,
             "cv",
@@ -294,8 +334,14 @@ class CVFrame(ttk.Frame):
             max_points=5000,
             update_interval_ms=80,
             payload=self.payload,
+            frames_to_hide=[self.frame_entries],
+            on_end_expriment=self.on_end_experiment,
         )
         self.udp_plotter.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
+        self.frame_plotter.grid_forget()
+
+    def show_inputs_frame(self):
+        self.frame_entries.grid(row=0, column=0, sticky="nsew")
         self.frame_plotter.grid_forget()
 
     def create_payload_cv(self):
@@ -358,12 +404,14 @@ class CVFrame(ttk.Frame):
             self.update_data_script()
             self.create_payload_cv()
             ip_sender = self.callback_ip() if self.callback_ip else "localhost"
-            self.udp_plotter.update_val_experiment(
-                x_key="E_V", y_key="I_A", payload=self.payload, ip_sender=ip_sender
-            )
+            self.frame_entries.grid_forget()
+            self.udp_plotter.update_val_experiment(x_key="E_V", y_key="I_A", payload=self.payload, ip_sender=ip_sender)
             self.frame_plotter.grid(row=1, column=0, padx=10, pady=10, sticky="nsew")
+            enable_motor = self.entries_motor[0].get()
+            if enable_motor:
+                self.start_spin_motor_angle()
         except ValueError:
-            self.frame_plotter.grid_forget()
+            self.show_inputs_frame()
             print("Error: Check input values.")
             return
 
@@ -422,6 +470,38 @@ class CVFrame(ttk.Frame):
             self.payload.get("n_sc", DEFAUL_VALUES_CV[12]),
         )
         return script
+
+    def start_spin_motor_angle(self):
+        settings: dict = read_settings_from_file()
+        max_rpm = settings.get("max_rpm", 700)
+        print("Iniciar modo oscilador")
+        angle = float(self.entries_motor[1])
+        speed_percentage = float(self.entries_motor[2].get())
+        print(f"Ángulo: {angle}°, Velocidad: {speed_percentage:2f}%")
+        if angle > 45:
+            print("El ángulo máximo es 45°")
+            return
+        with thread_lock:
+            if self.thread_motor and self.thread_motor.is_alive():
+                print("Ya hay un hilo activo, no se puede iniciar otro.")
+                return
+            self.stop_event = threading.Event() if self.stop_event is None else self.stop_event
+            thread_motor = threading.Thread(
+                target=spinMotorAngleDriver,
+                args=(angle, speed_percentage * max_rpm / 100, max_rpm, None, True, self.stop_event, None),
+            )
+            thread_motor.start()
+            print("Modo oscilador iniciado")
+
+    def on_end_experiment(self):
+        self.stop_event.set()
+        if self.thread_motor is None:
+            print("No motor thread to stop.")
+            return
+        self.thread_motor.join()
+        self.thread_motor = None
+        self.stop_event = None
+        print("Experimento finalizado. Motor detenido.")
 
 
 if __name__ == "__main__":

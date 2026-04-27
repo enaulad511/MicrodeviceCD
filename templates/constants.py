@@ -8,6 +8,7 @@ __date__ = "$ 08/10/2025  at 09:46 a.m. $"
 font_title = ("Arial", 28, "bold")
 font_title_n = ("Arial", 28, "normal")
 font_text = ("Arial", 16, "normal")
+font_text_combobox = ("Arial", 19, "normal")
 font_tabs = ("Arial", 11, "bold")
 font_buttons = ("Arial", 16, "normal")
 font_buttons_small = ("Arial", 14, "normal")

@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+from templates.constants import serial_port_encoder
 import serial
 import threading
 import time
@@ -10,6 +11,83 @@ __author__ = "Edisson A. Naula"
 __date__ = "$ 19/02/2026  at 08:11 a.m. $"
 
 STEPS_PER_REV = 6400
+
+
+def spinMotorAngleDriver(angle, rpm, max_rpm, n_times=None, flag_continue=False, stop_event=None, drv=None):
+    """
+    Versión global que usa los helpers del objeto global 'drv':
+      - drv._cmd_mode(4)
+      - drv._cmd_vel(hz)
+      - drv._cmd_set(angle)
+      - drv._cmd_stop()
+    Requiere que 'drv' tenga 'steps_per_rev' o usa 400 por defecto.
+    Requiere 'stop_event' global si se usa modo continuo.
+    """
+    import time as _t
+
+    if drv is None:
+        drv = DriverStepperSys(en_pin=12, enable_active_high=False, uart_port=serial_port_encoder)
+        drv.enable_driver(True)
+        return
+    if stop_event is None:
+        print("[spinMotorAngle] stop_event no proporcionado, se requiere para control de parada.")
+        return
+    try:
+        angle = float(angle)
+        rpm = float(rpm)
+        max_rpm = float(max_rpm)
+    except Exception as e:
+        raise ValueError(f"Parámetros inválidos: {e}")
+
+    if angle <= 0:
+        drv.stop()
+        print("[spinMotorAngle] angle <= 0; STOP.")
+        return
+
+    rpm_eff = max(min(abs(rpm), abs(max_rpm)), 0.0)
+    speed_hz = rpm_eff * (STEPS_PER_REV / 60.0)
+    if speed_hz <= 0.0:
+        drv.stop()
+        print("[spinMotorAngle] Velocidad resultante = 0 Hz; STOP.")
+        return
+
+    drv.run_sweep(angle, speed_hz)
+
+    vel_deg_s = speed_hz * (360.0 / STEPS_PER_REV)
+    if vel_deg_s <= 0:
+        drv.stop()
+        return
+
+    T_cycle = (4.0 * abs(angle)) / vel_deg_s
+    T_cycle *= 1.03  # 3% de margen
+
+    try:
+        if n_times is not None:
+            n_times = int(n_times)
+            if n_times <= 0:
+                print("[spinMotorAngle] n_times<=0; STOP.")
+            else:
+                total_time = n_times * T_cycle
+                print(f"[spinMotorAngle] SWEEP {n_times} ciclos: ±{angle}°, Hz={speed_hz:.1f}, T_ciclo≈{T_cycle:.3f}s, T_total≈{total_time:.3f}s")
+                elapsed = 0.0
+                step = 0.01
+                while elapsed < total_time:
+                    if stop_event.is_set():
+                        print("[spinMotorAngle] stop_event detectado; abortando.")
+                        break
+                    _t.sleep(step)
+                    elapsed += step
+        else:
+            if flag_continue:
+                print(f"[spinMotorAngle] SWEEP continuo: ±{angle}° @ {rpm_eff} rpm (Hz={speed_hz:.1f})")
+                while not stop_event.is_set():
+                    _t.sleep(0.02)
+            else:
+                print(f"[spinMotorAngle] SWEEP 1 ciclo: ±{angle}°, T≈{T_cycle:.3f}s")
+                _t.sleep(T_cycle)
+    finally:
+        drv.stop()
+        print("Motor detenido")
 
 
 class DriverStepperSys:
@@ -51,14 +129,10 @@ class DriverStepperSys:
             cfg = {
                 self.en_pin: gpiod.LineSettings(
                     direction=Direction.OUTPUT,
-                    output_value=Value.ACTIVE
-                    if self.enable_active_high
-                    else Value.INACTIVE,
+                    output_value=Value.ACTIVE if self.enable_active_high else Value.INACTIVE,
                 )
             }
-            self._gpio_request = gpiod.request_lines(
-                chip, consumer="stepper-enable", config=cfg
-            )
+            self._gpio_request = gpiod.request_lines(chip, consumer="stepper-enable", config=cfg)
 
         # ---- UART ----
         # ¡Asegúrate que coincida con el formato del Pico (8N1)!
@@ -136,9 +210,7 @@ class DriverStepperSys:
                 pos = float(pos_s)
                 rpm = float(rpm_s)
                 with self._stat_lock:
-                    self._last_status.update(
-                        {"pos_deg": pos, "rpm": rpm, "ts": time.time()}
-                    )
+                    self._last_status.update({"pos_deg": pos, "rpm": rpm, "ts": time.time()})
                 # print("Estado actualizado:", self._last_status)
             except Exception:
                 pass

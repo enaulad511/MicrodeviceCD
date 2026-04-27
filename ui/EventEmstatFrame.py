@@ -44,12 +44,15 @@ class EventPlotter(ttk.Frame):
         x_key="E_V",
         y_key="I_A",
         payload=None,
+        frames_to_hide=None,
+        on_end_expriment=lambda: print("Experiment finished"),
         **kwargs,
     ):
         super().__init__(master, **kwargs)
         # payload para el experimento
         self.payload_exp = payload
-
+        self.on_end_experiment=on_end_expriment
+        self.frames_to_hide = [] if frames_to_hide is None else frames_to_hide
         # --- Parámetros de comunicación y plotting ---
         self.tcp_port = tcp_port
         self.ip_sender = ip_sender
@@ -102,9 +105,7 @@ class EventPlotter(ttk.Frame):
         controls = ttk.Frame(self)
         controls.pack(side=ttk.TOP, fill=ttk.X, pady=6)
 
-        self.btn_start = ttk.Button(
-            controls, text="▶ Start listening", bootstyle="success", command=self.start
-        )
+        self.btn_start = ttk.Button(controls, text="▶ Start listening", bootstyle="success", command=self.start)
         self.btn_stop = ttk.Button(
             controls,
             text="⏹ Stop",
@@ -112,12 +113,8 @@ class EventPlotter(ttk.Frame):
             command=self.stop,
             state=ttk.DISABLED,
         )
-        self.btn_clear = ttk.Button(
-            controls, text="🗑 Clean", bootstyle="secondary", command=self.clear_plot
-        )
-        self.btn_save = ttk.Button(
-            controls, text="💾 Save", bootstyle="secondary", command=self.save_data
-        )
+        self.btn_clear = ttk.Button(controls, text="🗑 Clean", bootstyle="secondary", command=self.clear_plot)
+        self.btn_save = ttk.Button(controls, text="💾 Save", bootstyle="secondary", command=self.save_data)
         self.btn_custom_plot = ttk.Button(
             controls,
             text="📊 Custom Plot",
@@ -151,6 +148,14 @@ class EventPlotter(ttk.Frame):
         self.ax.set_ylabel(self.y_label)
         self.canvas.draw_idle()
 
+    def hide_frames(self, flag=True):
+        if flag:
+            for item in self.frames_to_hide:
+                item.grid_remove()
+        else:
+            for item in self.frames_to_hide:
+                item.grid()
+
     # ---------------------------
     # API pública
     # ---------------------------
@@ -166,7 +171,7 @@ class EventPlotter(ttk.Frame):
             # TCP streaming robusto
             self.sock.settimeout(None)  # TCP en modo bloqueante
             self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-
+            self.hide_frames(flag=True)
         except OSError as e:
             self._set_status(f"Error de socket: {e}")
             return
@@ -177,15 +182,11 @@ class EventPlotter(ttk.Frame):
         self.running = True
 
         # Lanza hilo productor (solo lectura TCP)
-        self.reader_th = threading.Thread(
-            target=self._tcp_reader, daemon=True, name="TCPReader"
-        )
+        self.reader_th = threading.Thread(target=self._tcp_reader, daemon=True, name="TCPReader")
         self.reader_th.start()
 
         # Lanza hilo consumidor (parsing y lógica)
-        self.processor_th = threading.Thread(
-            target=self._tcp_processor, daemon=True, name="TCPProcessor"
-        )
+        self.processor_th = threading.Thread(target=self._tcp_processor, daemon=True, name="TCPProcessor")
         self.processor_th.start()
 
         # UI
@@ -200,6 +201,7 @@ class EventPlotter(ttk.Frame):
         if not self.running:
             return
         print("Stopping …")
+        self.hide_frames(flag=False)
         self.total_data.append(self.storage_dict.copy())
         self.storage_dict.clear()
         self.stop_event.set()
@@ -226,6 +228,7 @@ class EventPlotter(ttk.Frame):
         self.btn_stop.configure(state=ttk.DISABLED)
         self._cancel_update()
         self._set_status("Estado: detenido")
+        self.on_end_experiment()
 
     def clear_plot(self):
         """Limpia datos y resetea el gráfico."""
@@ -260,12 +263,8 @@ class EventPlotter(ttk.Frame):
             with open(f"{path}/IV_data_{time.strftime('%Y%m%d_%H%M')}.csv", "w") as f:
                 f.write(f"sample,{self.x_key}, {self.y_key}, cycle\n")
                 for index, event in enumerate(self.total_data):
-                    f.write(
-                        f"{index}, {event.get(self.x_key)}, {event.get(self.y_key)}, {event.get('cycle')}\n"
-                    )
-            self._set_status(
-                f"Data saved to file: IV_data_{time.strftime('%Y%m%d_%H%M')}.csv"
-            )
+                    f.write(f"{index}, {event.get(self.x_key)}, {event.get(self.y_key)}, {event.get('cycle')}\n")
+            self._set_status(f"Data saved to file: IV_data_{time.strftime('%Y%m%d_%H%M')}.csv")
         except Exception as e:
             self._set_status(f"Error saving data: {e}")
             print(f"Error saving data: {e}")
@@ -289,9 +288,7 @@ class EventPlotter(ttk.Frame):
     def on_close_config_legend(self, legend_list, prefix_legend="M-"):
         # self.config_legend.destroy()
         self.config_legend = None
-        self.legends_list = (
-            legend_list if legend_list and len(legend_list) > 0 else None
-        )
+        self.legends_list = legend_list if legend_list and len(legend_list) > 0 else None
         self.prefix_legend = prefix_legend
         self._update_legends()
 
@@ -329,9 +326,8 @@ class EventPlotter(ttk.Frame):
         self.flag_recording = False
         self.sock.close() if self.sock else None
         print("TCP reader stopped.")
-        self.reader_th=None
+        self.reader_th = None
         self.stop_event.set()
-        
 
     def _tcp_processor(self):
         parser = EmstatStreamParser(experiment=self.method)
@@ -367,11 +363,11 @@ class EventPlotter(ttk.Frame):
                         )
                     except Exception:
                         pass
-                if "method" in event["type"] :
-                    if event['type'] == 'method':
+                if "method" in event["type"]:
+                    if event["type"] == "method":
                         self._set_status(f"Method: {event['type']} {event['method_id']}")
-                        print("Method:", event['method_id'])
-                    elif event['type'] == 'method_end':
+                        print("Method:", event["method_id"])
+                    elif event["type"] == "method_end":
                         self._set_status(f"Method: {event['type']}")
 
                     else:
@@ -494,10 +490,7 @@ class EventPlotter(ttk.Frame):
             handles = [line for line in self.lines_by_m.values()]
             labels = self.legends_list
             if len(labels) < len(handles):
-                labels = labels + [
-                    f"{self.prefix_legend}{m}"
-                    for m in range(len(labels) + 1, len(handles) + 1)
-                ]
+                labels = labels + [f"{self.prefix_legend}{m}" for m in range(len(labels) + 1, len(handles) + 1)]
             elif len(labels) > len(handles):
                 labels = labels[: len(handles)]
         else:
@@ -508,11 +501,7 @@ class EventPlotter(ttk.Frame):
 
     def _build_style_cycle(self):
         """Genera un ciclo de estilos color/linestyle para distintas mediciones."""
-        colors = (
-            plt.rcParams["axes.prop_cycle"]
-            .by_key()
-            .get("color", ["b", "g", "r", "c", "m", "y", "k"])
-        )
+        colors = plt.rcParams["axes.prop_cycle"].by_key().get("color", ["b", "g", "r", "c", "m", "y", "k"])
         linestyles = ["-", "--", "-.", ":"]
         styles = []
         for ls in linestyles:
@@ -529,9 +518,7 @@ class EventPlotter(ttk.Frame):
 
         idx = (m - 1) % len(self._style_cycle)
         c, ls = self._style_cycle[idx]
-        (line,) = self.ax.plot(
-            [], [], linestyle=ls, color=c, marker="o", markersize=3, label=f"M{m}"
-        )
+        (line,) = self.ax.plot([], [], linestyle=ls, color=c, marker="o", markersize=3, label=f"M{m}")
 
         # Si el color es muy claro, mejora visibilidad del marcador:
         line.set_markeredgecolor("0.3")
@@ -578,15 +565,9 @@ class LegendManagerWindow(ttk.Toplevel):
 
         self.entry_new = ttk.Entry(controls)
         self.entry_new.pack(side=ttk.LEFT, padx=4)
-        self.btn_add = ttk.Button(
-            controls, text="➕ Add", bootstyle="success", command=self.add_legend
-        )
-        self.btn_remove = ttk.Button(
-            controls, text="🗑 Delete", bootstyle="danger", command=self.remove_selected
-        )
-        self.btn_edit = ttk.Button(
-            controls, text="✏️ Editar", bootstyle="primary", command=self.on_edit_line
-        )
+        self.btn_add = ttk.Button(controls, text="➕ Add", bootstyle="success", command=self.add_legend)
+        self.btn_remove = ttk.Button(controls, text="🗑 Delete", bootstyle="danger", command=self.remove_selected)
+        self.btn_edit = ttk.Button(controls, text="✏️ Editar", bootstyle="primary", command=self.on_edit_line)
         self.btn_add.pack(side=ttk.LEFT, padx=4)
         self.btn_remove.pack(side=ttk.LEFT, padx=4)
         self.btn_edit.pack(side=ttk.LEFT, padx=4)
@@ -598,9 +579,7 @@ class LegendManagerWindow(ttk.Toplevel):
         self.entry_prefix.pack(fill=ttk.X, padx=10, pady=6)
 
         # --- Botón cerrar ---
-        self.btn_close = ttk.Button(
-            self, text="Close", bootstyle="secondary", command=self.on_close
-        )
+        self.btn_close = ttk.Button(self, text="Close", bootstyle="secondary", command=self.on_close)
         self.btn_close.pack(pady=6)
 
         # Cargar leyendas actuales
@@ -686,9 +665,7 @@ class LegendManagerWindow(ttk.Toplevel):
 def demo():
     app = ttk.Window(themename="darkly")  # o "flatly", "cosmo", etc.
     app.title("UDP IV Plotter (ttkbootstrap)")
-    plotter = EventPlotter(
-        app, udp_port=5005, buffer_size=4096, max_points=5000, update_interval_ms=80
-    )
+    plotter = EventPlotter(app, udp_port=5005, buffer_size=4096, max_points=5000, update_interval_ms=80)
 
     # Cierre limpio
     def on_close():
@@ -705,9 +682,7 @@ if __name__ == "__main__":
     #    demo()
     app = ttk.Window(themename="litera")
     app.title("UDP IV Plotter (ttkbootstrap)")
-    plotter = EventPlotter(
-        app, udp_port=5005, buffer_size=4096, max_points=5000, update_interval_ms=80
-    )
+    plotter = EventPlotter(app, udp_port=5005, buffer_size=4096, max_points=5000, update_interval_ms=80)
     plotter.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
 
     def on_close():

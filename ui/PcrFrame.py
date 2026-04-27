@@ -32,7 +32,7 @@ def check_temp_higher(temp, target_temp):
     return temp >= target_temp
 
 
-def create_widgets_pcr(parent, callbacks: dict):
+def create_widgets_pcr(parent):
     entries = []
 
     # Frame: Configuración PCR
@@ -61,14 +61,13 @@ def create_widgets_pcr(parent, callbacks: dict):
         entry.grid(row=row, column=col * 2 + 1, padx=5, pady=5)
         entries.append(entry)
     frame1.columnconfigure(tuple(range(2 * columns)), weight=1)
-    frame_label = ttk.Frame(parent, style="Custom.TFrame")
-    frame_label.grid(row=1, column=0, sticky="nswe")
-    frame_label.columnconfigure(0, weight=1)
-    svar_temperature = ttk.StringVar(value="")
-    ttk.Label(frame_label, textvariable=svar_temperature, style="Custom.TLabel").grid(row=0, column=0, padx=5, pady=5, sticky="nswe")
-    entries.append(svar_temperature)  # pyrefly:ignore
-    frame_buttons = ttk.Frame(parent)
-    frame_buttons.grid(row=2, column=0, sticky="nswe")
+
+    return entries
+
+
+def create_buttons(master, callbacks, svar_status):
+    frame_buttons = ttk.Frame(master)
+    frame_buttons.grid(row=0, column=0, sticky="nswe")
     frame_buttons.columnconfigure(tuple(range(4)), weight=1)
     # Botón para generar perfil
     ttk.Button(
@@ -99,7 +98,10 @@ def create_widgets_pcr(parent, callbacks: dict):
         style="info.TButton",
         command=callbacks.get("callback_save_data", ()),
     ).grid(row=0, column=3, padx=10, sticky="nswe")
-    return entries
+    frame_label = ttk.Frame(master, style="Custom.TFrame")
+    frame_label.grid(row=1, column=0, sticky="nswe")
+    frame_label.columnconfigure(0, weight=1)
+    ttk.Label(frame_label, textvariable=svar_status, style="Custom.TLabel").grid(row=0, column=0, padx=5, pady=5, sticky="nswe")
 
 
 class PCRFrame(ttk.Frame):
@@ -123,6 +125,9 @@ class PCRFrame(ttk.Frame):
         content_frame = ScrolledFrame(self, autohide=True)
         content_frame.grid(row=0, column=0, sticky="nsew")
         content_frame.columnconfigure(0, weight=1)
+        self.frame_entries = ttk.Frame(content_frame)
+        self.frame_entries.grid(row=0, column=0, sticky="nswe")
+        self.frame_entries.columnconfigure(0, weight=1)
         self.prefix_row = "temps_pcr"
 
         callbacks = {
@@ -131,15 +136,18 @@ class PCRFrame(ttk.Frame):
             "callback_stop_experiment": self.callback_stop_experiment,
             "callback_save_data": self.save_data_temps_file,
         }
-        self.entries = create_widgets_pcr(content_frame, callbacks)
-
+        self.entries = create_widgets_pcr(self.frame_entries)
+        self.svar_status = ttk.StringVar(value="Ready")
+        self.frame_buttons = ttk.Frame(content_frame)
+        self.frame_buttons.grid(row=1, column=0, sticky="nswe")
+        self.frame_buttons.columnconfigure(0, weight=1)
+        create_buttons(self.frame_buttons, callbacks, self.svar_status)
         # Frame para mostrar el gráfico
         self.profile_frame = ttk.LabelFrame(content_frame, text="Profile Preview")
         self.profile_frame.grid(row=3, column=0, padx=10, pady=10, sticky="nswe")
         self.profile_frame.configure(style="Custom.TLabelframe")
-
+        
         self.canvas = None  # Para almacenar el gráfico incrustado
-
         self.callback_generate_profile()  # Generar el gráfico inicial
         self.data_temperature = []
         self.data_photodetector = []
@@ -272,18 +280,12 @@ class PCRFrame(ttk.Frame):
         # Filtro rápido y estable
         alpha = 0.3
         self.temp = alpha * lf + (1 - alpha) * self.temp
-        # self.temps_filter.pop(0)
-        # self.temps_filter.append(lf)
-        # lf = sum(self.temps_filter) / len(self.temps_filter)
-
-        # # Actualizar temperatura global de control
-        # self.temp = lf
         self.data_temperature.append(self.temp)
 
         # Actualizar UI solo cuando toca
         if time.time() - self.last_display > self.ts_display:
             msg = f"Temperature: {lf:.2f} °C\nState: {self.fase}"
-            self.entries[-1].set(msg)
+            self.svar_status.set(msg)
             self.last_display = time.time()
 
         # Actualizar gráfica cada N muestras
@@ -307,14 +309,40 @@ class PCRFrame(ttk.Frame):
         self.canvas.get_tk_widget().pack(fill="both", expand=True)
         self.canvas.draw()
 
-    def update_graph_temperature(self):
+    # def update_graph_temperature(self):
+    #     if self.canvas is None:
+    #         print("Canvas is not initialized.")
+    #         return
+    #     self.line.set_xdata(range(len(self.data_temperature)))
+    #     self.line.set_ydata(self.data_temperature)
+    #     self.ax.relim()
+    #     self.ax.autoscale_view()
+    #     self.canvas.draw_idle()
+    def update_graph_temperature(self, window_size=1000):
         if self.canvas is None:
-            print("Canvas is not initialized.")
             return
-        self.line.set_xdata(range(len(self.data_temperature)))
-        self.line.set_ydata(self.data_temperature)
+
+        n = len(self.data_temperature)
+        if n == 0:
+            return
+
+        # Índice inicial de la ventana
+        start = max(0, n - window_size)
+
+        # Datos visibles
+        y = self.data_temperature[start:n]
+        x = range(start, n)
+
+        self.line.set_xdata(x)
+        self.line.set_ydata(y)
+
+        # Mantener ventana deslizante en X
+        self.ax.set_xlim(start, n - 1)
+
+        # Recalcular solo el eje Y
         self.ax.relim()
-        self.ax.autoscale_view()
+        self.ax.autoscale_view(scalex=False, scaley=True)
+
         self.canvas.draw_idle()
 
     def save_data_temps_file(self):
@@ -339,6 +367,8 @@ class PCRFrame(ttk.Frame):
         if self.running_experiment:
             return
         self.running_experiment = True
+        # hide entries frame
+        self.frame_entries.grid_forget()
         print("Experimento iniciado")
         # retrieve data from entries
         high_temp = float(self.entries[0].get())
@@ -354,7 +384,6 @@ class PCRFrame(ttk.Frame):
             f"Denaturing Time: {denat_time}, Denaturing Temp: {denat_temp}",
         )
         print(msg)
-
         self.init_temperature_graph()
         thread_experiment = threading.Thread(
             target=self.experiment_pcr,
@@ -859,12 +888,14 @@ class PCRFrame(ttk.Frame):
 
     def callback_stop_experiment(self):
         global sistemaMotor
-        print("Experimento detenido")
+        self.frame_entries.grid(row=0, column=0, padx=5, pady=5, sticky="nswe")
         if self.stop_event_motor is None:
             print("No experiment running")
+            self.running_experiment = False
             return
         if self.stop_udp_listenner is None:
             print("No experiment running")
+            self.running_experiment = False
             return
         self.stop_event_motor.set()
         self.stop_udp_listenner.set()
@@ -872,6 +903,7 @@ class PCRFrame(ttk.Frame):
         # stop temperature
         self.client_temperature.stop()
         self.running_experiment = False
+
         time.sleep(1)
         if sistemaMotor is not None:
             sistemaMotor.stop()
