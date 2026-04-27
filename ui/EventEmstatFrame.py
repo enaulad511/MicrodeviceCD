@@ -2,7 +2,6 @@
 from Drivers.EmstatUtils import EmstatStreamParser
 from Drivers.EmstatUtils import LineBufferedSocketReader
 import json
-from tkinter.constants import END
 import socket
 import threading
 import queue
@@ -51,7 +50,7 @@ class EventPlotter(ttk.Frame):
         super().__init__(master, **kwargs)
         # payload para el experimento
         self.payload_exp = payload
-        self.on_end_experiment=on_end_expriment
+        self.on_end_experiment = on_end_expriment
         self.frames_to_hide = [] if frames_to_hide is None else frames_to_hide
         # --- Parámetros de comunicación y plotting ---
         self.tcp_port = tcp_port
@@ -121,14 +120,14 @@ class EventPlotter(ttk.Frame):
             bootstyle="secondary",
             command=self.custom_plot_axes,
         )
-        self.lbl_status = ttk.Label(controls, text="State: stopped.", anchor="w")
+        self.lbl_status = ttk.Label(self, text="State: stopped.", anchor="w")
 
         self.btn_start.pack(side=ttk.LEFT, padx=4)
         self.btn_stop.pack(side=ttk.LEFT, padx=4)
         self.btn_clear.pack(side=ttk.LEFT, padx=4)
         self.btn_save.pack(side=ttk.LEFT, padx=4)
         self.btn_custom_plot.pack(side=ttk.LEFT, padx=4)
-        self.lbl_status.pack(side=ttk.RIGHT, padx=4)
+        self.lbl_status.pack(side=ttk.LEFT, padx=4)
 
         # self.pack(fill=ttk.BOTH, expand=True)
 
@@ -167,6 +166,7 @@ class EventPlotter(ttk.Frame):
             return
 
         try:
+            print(self.ip_sender, self.tcp_port)
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.sock.connect((self.ip_sender, self.tcp_port))
 
@@ -175,9 +175,9 @@ class EventPlotter(ttk.Frame):
             self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             self.hide_frames(flag=True)
         except OSError as e:
-            self._set_status(f"Error de socket: {e}")
+            self._set_status(f"Socket Error: {e}")
             return
-
+        print("reseting states")
         # Reset estado
         self.stop_event.clear()
         self.flag_recording = True
@@ -203,7 +203,6 @@ class EventPlotter(ttk.Frame):
         if not self.running:
             return
         print("Stopping …")
-        self.hide_frames(flag=False)
         self.total_data.append(self.storage_dict.copy())
         self.storage_dict.clear()
         self.stop_event.set()

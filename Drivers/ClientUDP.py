@@ -194,7 +194,7 @@ class UdpClient:
                         try:
                             self.on_message(
                                 text,
-                                (addr,),
+                                (addr[0],),
                                 [0, 0, self.latest_temp.value, self.latest_temp.ts],
                             )
                         except Exception as e:

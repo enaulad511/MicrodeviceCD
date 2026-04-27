@@ -10,7 +10,6 @@ __author__ = "Edisson A. Naula"
 __date__ = "$ 11/11/2025 at 14:45 p.m. $"
 
 import ttkbootstrap as ttk
-from tkinter.scrolledtext import ScrolledText
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
@@ -72,7 +71,7 @@ class ShowMethodScript(ttk.Toplevel):
         self.title("Method Script")
         self.parent = parent
         # self.geometry("600x400")
-        self.script_box = ScrolledText(self, height=20)
+        self.script_box = ttk.ScrolledText(self, height=20)
         self.script_box.pack(fill="both", expand=True, padx=10, pady=10)
         self.script_box.insert("end", script)
         self.script_box.configure(state="disabled")
@@ -497,13 +496,15 @@ class CVFrame(ttk.Frame):
             print("Modo oscilador iniciado")
 
     def on_end_experiment(self):
-        self.stop_event.set()
+        self.show_inputs_frame()
         if self.thread_motor is None:
             print("No motor thread to stop.")
             return
         self.thread_motor.join()
         self.thread_motor = None
-        self.stop_event = None
+        if self.stop_event is not None:
+            self.stop_event.set()
+            self.stop_event = None
         print("Experimento finalizado. Motor detenido.")
 
 
