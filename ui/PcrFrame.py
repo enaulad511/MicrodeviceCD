@@ -38,7 +38,7 @@ def create_widgets_pcr(parent):
     # Frame: Configuración PCR
     frame1 = ttk.LabelFrame(parent, text="PCR Configuration")
     frame1.grid(row=0, column=0, padx=10, pady=10, sticky="nswe")
-    frame1.configure(style="Custom.TLabelframe")
+    # frame1.configure(style="Custom.TLabelframe")
 
     labels = [
         "High Temp (°C):",
