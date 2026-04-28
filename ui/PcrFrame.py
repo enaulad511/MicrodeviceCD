@@ -54,7 +54,7 @@ def create_widgets_pcr(parent):
         "Ext. Time F.: ",
     ]
     columns = 2
-    default_values = ["60", "40", "10", "10", "3", "700", "30", "68", "6", "68", "300"]
+    default_values = ["94", "55", "15", "15", "3", "700", "30", "94", "6", "68", "300"]
     for i, lbl in enumerate(labels):
         row = i // columns
         col = i % columns
