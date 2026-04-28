@@ -279,7 +279,7 @@ class PCRFrame(ttk.Frame):
             self.temp_ts = temps_list[3]
         except Exception:
             lf = self.temp
-            self.temp_ts = time.time()
+            self.temp_ts = 0.8
         # Filtro rápido y estable
         alpha = 0.3
         self.temp = alpha * lf + (1 - alpha) * self.temp
@@ -556,7 +556,6 @@ class PCRFrame(ttk.Frame):
             # heat to temp
             self.fase = "Denaturation"
             self.pin_heating.write(True)  # pyrefly: ignore
-            self.temp_ts = time.time()
             try:
                 KP = pidGains.get("KP_denat", 0.2)
                 WINDOW = pidGains.get("win_denat", 0.05)
@@ -587,11 +586,6 @@ class PCRFrame(ttk.Frame):
             # Denaturation Hold (control proporcional por ventana)
             # ------------------------------------------------------------
             self.fase = "Denaturation Hold"
-            # KI = 0.7  # medio
-            # I_MAX = 0.55
-            # KP_HOLD = 0.15  # más suave que en calentamiento
-            # TEMP_BAND = 0.05  # margen muerto muy pequeño
-            # WINDOW = ts * 0.9
             try:
                 KP_HOLD = pidGains.get("KP_h_denat", 0.2)
                 WINDOW = pidGains.get("win_h_denat", ts * 0.9)
@@ -754,7 +748,7 @@ class PCRFrame(ttk.Frame):
                 # Asegurar apagado final
                 self.pin_heating.write(False)
                 # ---------------------------------------------------
-                # reach high temp
+                # reach ext temp
                 self.fase = "Reach ext temp"
                 exts_temp = ext_temp
                 settings = read_settings_from_file()
@@ -803,7 +797,7 @@ class PCRFrame(ttk.Frame):
                 print(f"Temperature reached: {self.temp} °C")
                 # -------------------------------------------------------------------
                 # hold extension temperature
-                self.fase = "extension temp Hold"
+                self.fase = "extension temp Hold "
                 time_ext = ext_time
                 exts_temp = ext_temp
                 print(f"Holding extension temperature for {time_ext} seconds")
@@ -850,7 +844,7 @@ class PCRFrame(ttk.Frame):
 
             print("PCR cycles complete, reading fluorescence")
             self.fase = "Extension"
-            time_extension = 300
+            time_extension = ext_time_final
             try:
                 KP_HOLD = pidGains.get("KP_h_ext", 0.1)
                 WINDOW = pidGains.get("win_h_ext", ts * 0.9)
@@ -864,7 +858,7 @@ class PCRFrame(ttk.Frame):
             self.hold_temperature(
                 68,
                 time_extension,
-                ts / 2,
+                ts,
                 self.stop_udp_listenner,
                 self.pin_heating,
                 KI,
@@ -877,10 +871,10 @@ class PCRFrame(ttk.Frame):
             self.pin_heating.write(False)
             time.sleep(0.5)
             self.pin_pcr.write(True)
-            time.sleep(1)
+            time.sleep(0.5)
             v_fluo_final = ads.read_voltage(0, averages=4)
             print(f"Final fluorescence voltage: {v_fluo_final}")
-            time.sleep(1)
+            time.sleep(0.5)
             self.fase = "Final"
             self.pin_pcr.write(False)
             self.pin_heating.close()
