@@ -204,8 +204,8 @@ class UdpClient:
                 time.sleep(0.0005)
             except TimeoutError:
                 self.count_timeout += 1
-                print(f"[UdpClient] Timeout #{self.count_timeout}, disc status: {self.status_disc}")
-                if self.count_timeout > 5:
+                # print(f"[UdpClient] Timeout #{self.count_timeout}, disc status: {self.status_disc}")
+                if self.count_timeout > 8:
                     self._stop_evt.set()
                     if self.on_message:
                         self.on_message(
