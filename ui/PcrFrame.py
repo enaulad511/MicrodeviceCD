@@ -49,9 +49,12 @@ def create_widgets_pcr(parent):
         "RPM Cooling:",
         "Denaturing time (s):",
         "Denaturing Temp:",
+        "Ext. Time:",
+        "Ext. Temp:",
+        "Ext. Time F.: ",
     ]
     columns = 2
-    default_values = ["60", "40", "10", "10", "1", "700", "180", "68"]
+    default_values = ["60", "40", "10", "10", "3", "700", "30", "68", "6", "68", "300"]
     for i, lbl in enumerate(labels):
         row = i // columns
         col = i % columns
@@ -146,7 +149,7 @@ class PCRFrame(ttk.Frame):
         self.profile_frame = ttk.LabelFrame(content_frame, text="Profile Preview")
         self.profile_frame.grid(row=3, column=0, padx=10, pady=10, sticky="nswe")
         self.profile_frame.configure(style="Custom.TLabelframe")
-        
+
         self.canvas = None  # Para almacenar el gráfico incrustado
         self.callback_generate_profile()  # Generar el gráfico inicial
         self.data_temperature = []
@@ -379,6 +382,10 @@ class PCRFrame(ttk.Frame):
         rpm = float(self.entries[5].get())
         denat_time = float(self.entries[6].get())
         denat_temp = float(self.entries[7].get())
+        ext_time = float(self.entries[8].get())
+        ext_temp = float(self.entries[9].get())
+        ext_time_final = float(self.entries[10].get())
+
         msg = (
             f"High Temp: {high_temp}, Low Temp: {low_temp}, Time High: {time_high}, Time Low: {time_low}, Cycles: {cycles}, RPM: {rpm}",
             f"Denaturing Time: {denat_time}, Denaturing Temp: {denat_temp}",
@@ -397,6 +404,9 @@ class PCRFrame(ttk.Frame):
                 denat_temp,
                 cycles,
                 self.ads,
+                ext_time,
+                ext_temp,
+                ext_time_final,
             ),
         )
         thread_experiment.start()
@@ -464,6 +474,9 @@ class PCRFrame(ttk.Frame):
         denat_temp,
         cycles,
         ads,
+        ext_time,
+        ext_temp,
+        ext_time_final,
     ):
         global thread_motor, sistemaMotor
         # cliente temperature
@@ -743,7 +756,7 @@ class PCRFrame(ttk.Frame):
                 # ---------------------------------------------------
                 # reach high temp
                 self.fase = "Reach ext temp"
-                exts_temp = 72
+                exts_temp = ext_temp
                 settings = read_settings_from_file()
                 pidGains = settings.get("pidControllerRPM", {})
                 try:
@@ -791,9 +804,9 @@ class PCRFrame(ttk.Frame):
                 # -------------------------------------------------------------------
                 # hold extension temperature
                 self.fase = "extension temp Hold"
-                time_ext = 6
-                exts_temp = 72
-                print(f"Holding LOW temperature for {time_ext} seconds")
+                time_ext = ext_time
+                exts_temp = ext_temp
+                print(f"Holding extension temperature for {time_ext} seconds")
                 settings = read_settings_from_file()
                 pidGains = settings.get("pidControllerRPM", {})
                 try:
