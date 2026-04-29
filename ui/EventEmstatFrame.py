@@ -490,7 +490,7 @@ class EventPlotter(ttk.Frame):
 
         idx = (m - 1) % len(self._style_cycle)
         c, ls = self._style_cycle[idx]
-        (line,) = self.ax.plot([], [], linestyle=ls, color=c, marker="o", markersize=3, label=f"M{m}")
+        (line,) = self.ax.plot([], [], linestyle=ls, linewidth=2.5, color=c, marker="o", markersize=3, label=f"M{m}")
 
         # Si el color es muy claro, mejora visibilidad del marcador:
         line.set_markeredgecolor("0.3")
