@@ -285,6 +285,7 @@ class CVFrame(ttk.Frame):
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=1)
         self.payload = {}
+        self.stop_event = None
         # ----------------variables--------------
         self.t_equilibration = float(DEFAUL_VALUES_CV[0])
         self.E_begin = float(DEFAUL_VALUES_CV[1])

@@ -36,7 +36,7 @@ class ElectrochemicalFrame(ttk.Frame):
                 "Electrochemical Impedance",
             ],
             state="readonly",
-            width=30,
+            width=25,
             font=font_text_combobox,
         )
         self.test_selector.grid(row=0, column=1, padx=10, pady=10, sticky="w")
