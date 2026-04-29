@@ -1,13 +1,10 @@
 # -*- coding: utf-8 -*-
-import threading
-from concurrent.futures import thread
+from templates.constants import font_footer
 from templates.utils import read_settings_from_file
 from templates.constants import secrets
 from templates.constants import font_text
 from ui.TemperatureFrame import TemperatureFrame
 from templates.constants import font_buttons_small
-from ttkbootstrap.dialogs.dialogs import Messagebox
-import time
 from Drivers.ClientUDP import UdpClient
 from ui.ConfigFrame import ConfigFrame
 
@@ -120,7 +117,7 @@ class MainGUI(ttk.Window):
         # --------------------notebook-------------------
         self.connected = ttk.BooleanVar(value=False)
         self.frame_content = ttk.Frame(self)
-        self.frame_content.grid(row=0, column=0, sticky="nsew", padx=(5, 10), pady=(3, 3))
+        self.frame_content.grid(row=0, column=0, sticky="nsew", padx=(5, 10), pady=(1, 1))
         self.frame_content.columnconfigure(0, weight=1)
         self.frame_content.rowconfigure(0, weight=1)
         # ------------------main tabs-------------------
@@ -133,13 +130,13 @@ class MainGUI(ttk.Window):
 
         # ------------------PCR tab-------------------
         self.tab_pcr = PCRFrame(self.main_notebook, self.ads)
-        self.main_notebook.add(self.tab_pcr, text=main_tabs_texts[0], padding=10)
+        self.main_notebook.add(self.tab_pcr, text=main_tabs_texts[0], padding=1)
         # ------------------Electrochemical tab-------------------
         self.tab_electrochemical = ElectrochemicalFrame(self.main_notebook, self.callback_ip)
-        self.main_notebook.add(self.tab_electrochemical, text=main_tabs_texts[1], padding=10)
+        self.main_notebook.add(self.tab_electrochemical, text=main_tabs_texts[1], padding=1)
         # ------------------Manual Control tab-------------------
         self.tab_manual_control = ttk.Frame(self.main_notebook)
-        self.main_notebook.add(self.tab_manual_control, text=main_tabs_texts[2], padding=10)
+        self.main_notebook.add(self.tab_manual_control, text=main_tabs_texts[2], padding=1)
         self.tab_manual_control.columnconfigure(0, weight=1)
         self.tab_manual_control.rowconfigure(0, weight=1)
         # ------------------Manual Control tabs-------------------
@@ -180,26 +177,26 @@ class MainGUI(ttk.Window):
         self.notebook.add(self.tab5, text=tab_texts[4])
         # # --------------------footer-------------------
         self.frame_footer = ttk.Frame(self)
-        self.frame_footer.grid(row=1, column=0, sticky="nswe", padx=5, pady=1)
+        self.frame_footer.grid(row=1, column=0, sticky="nswe", padx=5)
         self.txt_connected = ttk.StringVar(value="Disc Disconnected")
         ttk.Label(
             self.frame_footer,
             textvariable=self.txt_connected,
-            font=font_tabs,
+            font=font_footer,
             style="Custom.TLabel",
-        ).grid(row=0, column=0, sticky="ns", padx=15, pady=15)
+        ).grid(row=0, column=0, sticky="ns", padx=15, pady=1)
         ttk.Button(
             self.frame_footer,
             text="Test Connection Disc",
             style="CustomPrimary.TButton",
             command=self.on_button_test_disc,
-        ).grid(row=0, column=1, sticky="e", padx=15, pady=15)
+        ).grid(row=0, column=1, sticky="e", padx=15, pady=1)
         ttk.Button(
             self.frame_footer,
             text="Configuration",
             style="CustomPrimary.TButton",
             command=self.open_configurations,
-        ).grid(row=0, column=2, sticky="e", padx=15, pady=15)
+        ).grid(row=0, column=2, sticky="e", padx=15, pady=1)
 
         # ----------------------after init ----------------------
         self.after(2000, self.on_button_test_disc)

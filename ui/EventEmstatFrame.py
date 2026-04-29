@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+from matplotlib.figure import Figure
 from Drivers.EmstatUtils import EmstatStreamParser
 from Drivers.EmstatUtils import LineBufferedSocketReader
 import json
@@ -81,11 +82,33 @@ class EventPlotter(ttk.Frame):
         self.after_id = None
 
         # --- Estado del gráfico ---
+        # plt.style.use("seaborn-v0_8-darkgrid")
+
+        DPI = 100
+        WIDTH_PX = 800
+        HEIGHT_PX = 450  # ✅ más bajo para pantallas pequeñas
+
+        self.fig = Figure(figsize=(WIDTH_PX / DPI, HEIGHT_PX / DPI), dpi=DPI)
+
         plt.style.use("seaborn-v0_8-darkgrid")
-        self.fig, self.ax = plt.subplots(figsize=(10, 6))
+
+        # DPI = 100
+        # self.fig = Figure(figsize=(8, 4.5), dpi=DPI)
+        self.ax = self.fig.add_subplot(111)
+        # self.fig, self.ax = plt.subplots(figsize=(10, 6))
         self.ax.set_title(self.title)
         self.ax.set_xlabel(self.x_label)
         self.ax.set_ylabel(self.y_label)
+
+        self.canvas_frame = ttk.Frame(self, height=480)
+        self.canvas_frame.pack(side=ttk.TOP, fill=ttk.X)
+        self.canvas_frame.pack_propagate(False)
+
+        self.canvas = FigureCanvasTkAgg(self.fig, self.canvas_frame)
+        self.canvas.get_tk_widget().pack(fill=ttk.BOTH, expand=True)
+
+        self.toolbar = NavigationToolbar2Tk(self.canvas, self, pack_toolbar=False)
+        self.toolbar.pack(side=ttk.TOP, fill=ttk.X)
 
         # Por medición (m): deques y Line2D
         self.x_key = x_key
@@ -96,10 +119,11 @@ class EventPlotter(ttk.Frame):
         self._style_cycle = self._build_style_cycle()
 
         # --- Embedding de Matplotlib en ttkbootstrap ---
-        self.canvas = FigureCanvasTkAgg(self.fig, self)
-        self.toolbar = NavigationToolbar2Tk(self.canvas, self, pack_toolbar=False)
-        self.toolbar.pack(side=ttk.TOP, fill=ttk.X)
-        self.canvas.get_tk_widget().pack(side=ttk.TOP, fill=ttk.BOTH, expand=True)
+        # self.canvas = FigureCanvasTkAgg(self.fig, self)
+        # self.toolbar = NavigationToolbar2Tk(self.canvas, self, pack_toolbar=False)
+        # self.toolbar.pack(side=ttk.TOP, fill=ttk.X)
+        # # self.canvas.get_tk_widget().pack(side=ttk.TOP, fill=ttk.BOTH, expand=True)
+        # self.canvas.get_tk_widget().pack(side=ttk.TOP, fill=ttk.X, expand=False)
 
         # --- Controles ---
         controls = ttk.Frame(self)
@@ -384,63 +408,6 @@ class EventPlotter(ttk.Frame):
         print("TCP processor stopped.")
         self.processor_th = None
         self.stop()
-
-    # def _tcp_reader(self):
-    #     print(f"starting tcp on port {self.tcp_port} and address {self.ip_sender} …")
-    #     self.flag_recording = False
-    #     # s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    #     # s.connect((CD_IP, TCP_PORT))
-    #     if self.sock is None:
-    #         print("First create a socket")
-    #         return
-    #     self.sock.sendall((json.dumps(self.payload_exp) + "\n").encode())
-    #     self.flag_recording = True
-    #     reader = LineBufferedSocketReader(self.sock)
-    #     parser = EmstatStreamParser(experiment=self.method)
-    #     start_time = time.time()
-    #     while not self.stop_event.is_set():
-    #         if time.time() - start_time > 120:
-    #             self.sock.sendall(b'{"type":"keepalive"}\n')
-    #             start_time = time.time()
-    #         lines = reader.read_lines()
-    #         if lines is None:
-    #             print("TCP closed by server")
-    #             continue
-    #         for line in lines:
-    #             if line.startswith("EMSTAT:"):
-    #                 raw_json = line[len("EMSTAT:") :]
-
-    #                 try:
-    #                     msg = json.loads(raw_json)
-
-    #                 except Exception:
-    #                     continue
-    #                 print(msg)
-    #                 if msg.get("type") == "emstat_data":
-    #                     event = parser.feed_raw(msg["raw"])
-    #                     print(event)
-    #                     if event:
-    #                         if event["type"] == "data":
-    #                             self.total_data.append(event)
-    #                             # print("EVENT:", event)
-
-    #                             self.q_points.put(
-    #                                 (
-    #                                     event.get(self.x_key, 0.0),
-    #                                     event.get(self.y_key, 0.0),
-    #                                     event.get("cycle", 0),
-    #                                 )
-    #                             )
-    #                         else:
-    #                             print("EVENT:", event)
-    #                 elif msg.get("type") == "emstat_end":
-    #                     print("END OF EXPERIMENT")
-    #                     self.stop_event.set()
-    #                     break
-    #     self.flag_recording = False
-    #     print("Recording stopped.")
-    #     self._set_status("End of Experiment")
-    #     # self.stop()
 
     # ---------------------------
     # Loop de actualización (UI)

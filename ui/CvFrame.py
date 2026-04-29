@@ -283,7 +283,7 @@ class CVFrame(ttk.Frame):
         ttk.Frame.__init__(self, parent)
         self.parent = parent
         self.columnconfigure(0, weight=1)
-        self.rowconfigure(0, weight=1)
+        self.rowconfigure((0,1), weight=1)
         self.payload = {}
         self.stop_event = None
         # ----------------variables--------------
@@ -322,7 +322,7 @@ class CVFrame(ttk.Frame):
         create_buttons_cv(self.frame_buttons, callbacks)
 
         self.frame_plotter = ttk.LabelFrame(self, text="Live Data Plotter")
-        self.frame_plotter.grid(row=1, column=0, padx=10, pady=10, sticky="nsew")
+        self.frame_plotter.grid(row=1, column=0, padx=10, pady=2, sticky="nsew")
         self.frame_plotter.columnconfigure(0, weight=1)
         self.frame_plotter.configure(style="Custom.TLabelframe")
         self.udp_plotter = EventPlotter(
@@ -340,9 +340,10 @@ class CVFrame(ttk.Frame):
         self.udp_plotter.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
         self.frame_plotter.grid_forget()
 
-    def show_inputs_frame(self):
+    def show_inputs_frame(self, hide=True):
         self.frame_entries.grid(row=0, column=0, sticky="nsew")
-        self.frame_plotter.grid_forget()
+        if hide:
+            self.frame_plotter.grid_forget()
 
     def create_payload_cv(self):
         try:
