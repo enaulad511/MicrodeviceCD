@@ -404,11 +404,13 @@ class CVFrame(ttk.Frame):
             self.create_payload_cv()
             ip_sender = self.callback_ip() if self.callback_ip else "localhost"
             self.frame_entries.grid_forget()
-            self.udp_plotter.update_val_experiment(x_key="E_V", y_key="I_A", payload=self.payload, ip_sender=ip_sender)
-            self.frame_plotter.grid(row=1, column=0, padx=10, pady=10, sticky="nsew")
+            sent_callback = None
             enable_motor = self.entries_motor[0].get()
             if enable_motor:
-                self.start_spin_motor_angle()
+                sent_callback = self.start_spin_motor_angle
+            self.udp_plotter.update_val_experiment(x_key="E_V", y_key="I_A", payload=self.payload, ip_sender=ip_sender, callback_spin_motor=sent_callback)
+            self.frame_plotter.grid(row=1, column=0, padx=10, pady=10, sticky="nsew")
+
             print("script sent")
         except ValueError:
             self.show_inputs_frame()
@@ -475,7 +477,7 @@ class CVFrame(ttk.Frame):
         settings: dict = read_settings_from_file()
         max_rpm = settings.get("max_rpm", 700)
         print("Iniciar modo oscilador")
-        angle = float(self.entries_motor[1])
+        angle = float(self.entries_motor[1].get())
         speed_percentage = float(self.entries_motor[2].get())
         print(f"Ángulo: {angle}°, Velocidad: {speed_percentage:2f}%")
         if angle > 45:

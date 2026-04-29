@@ -56,6 +56,7 @@ class EventPlotter(ttk.Frame):
         self.tcp_port = tcp_port
         self.ip_sender = ip_sender
         self.buffer_size = buffer_size
+        self.callback_motor = None
         self.max_points = max_points
         self.update_interval_ms = update_interval_ms
         self.prefix_legend = "M-"
@@ -190,7 +191,8 @@ class EventPlotter(ttk.Frame):
         # Lanza hilo consumidor (parsing y lógica)
         self.processor_th = threading.Thread(target=self._tcp_processor, daemon=True, name="TCPProcessor")
         self.processor_th.start()
-
+        if self.callback_motor is not None:
+            self.callback_motor()
         # UI
         self.btn_start.configure(state=ttk.DISABLED)
         self.btn_stop.configure(state=ttk.NORMAL)
@@ -270,7 +272,7 @@ class EventPlotter(ttk.Frame):
             self._set_status(f"Error saving data: {e}")
             print(f"Error saving data: {e}")
 
-    def update_val_experiment(self, x_key, y_key, payload, ip_sender):
+    def update_val_experiment(self, x_key, y_key, payload, ip_sender, callback_spin_motor):
         if self.flag_recording:
             print("not posible to update payload while running experiment")
             return
@@ -278,6 +280,7 @@ class EventPlotter(ttk.Frame):
         self.y_key = y_key
         self.payload_exp = payload
         self.ip_sender = ip_sender
+        self.callback_motor = callback_spin_motor
 
     def custom_plot_axes(self):
         if self.config_legend is not None:
