@@ -343,8 +343,12 @@ class PCRFrame(ttk.Frame):
         self.ax.set_xlim(start, n - 1)
 
         # Recalcular solo el eje Y
-        self.ax.relim()
-        self.ax.autoscale_view(scalex=False, scaley=True)
+        # self.ax.relim()
+        # self.ax.autoscale_view(scalex=False, scaley=True)
+        
+        # Eje Y fijo
+        self.ax.set_ylim(0, 100)
+
 
         self.canvas.draw_idle()
 
