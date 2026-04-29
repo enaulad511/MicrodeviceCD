@@ -502,16 +502,18 @@ class CVFrame(ttk.Frame):
             return thread_motor
 
     def on_end_experiment(self, thread_motor=None):
+        if self.stop_event is not None:
+            self.stop_event.set()
+            self.stop_event = None
         self.show_inputs_frame(hide=False)
         self.thread_motor = None
         if self.thread_motor is None:
             print("No motor thread to stop.")
             return
-        self.thread_motor.join()
-        self.thread_motor = None
-        if self.stop_event is not None:
-            self.stop_event.set()
-            self.stop_event = None
+        else:
+            self.thread_motor.join()
+            self.thread_motor = None
+    
         print("Experimento finalizado. Motor detenido.")
 
 
