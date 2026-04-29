@@ -45,7 +45,7 @@ class EventPlotter(ttk.Frame):
         y_key="I_A",
         payload=None,
         frames_to_hide=None,
-        on_end_expriment=lambda: print("Experiment finished"),
+        on_end_expriment=lambda x: print(f"Experiment finished: {str(x)}"),
         **kwargs,
     ):
         super().__init__(master, **kwargs)
@@ -58,6 +58,7 @@ class EventPlotter(ttk.Frame):
         self.ip_sender = ip_sender
         self.buffer_size = buffer_size
         self.callback_motor = None
+        self.thread_motor = None
         self.max_points = max_points
         self.update_interval_ms = update_interval_ms
         self.prefix_legend = "M-"
@@ -216,7 +217,7 @@ class EventPlotter(ttk.Frame):
         self.processor_th = threading.Thread(target=self._tcp_processor, daemon=True, name="TCPProcessor")
         self.processor_th.start()
         if self.callback_motor is not None:
-            self.callback_motor()
+            self.thread_motor = self.callback_motor()
         # UI
         self.btn_start.configure(state=ttk.DISABLED)
         self.btn_stop.configure(state=ttk.NORMAL)
@@ -255,7 +256,7 @@ class EventPlotter(ttk.Frame):
         self.btn_stop.configure(state=ttk.DISABLED)
         self._cancel_update()
         self._set_status("Estado: detenido")
-        self.on_end_experiment()
+        self.on_end_experiment(self.thread_motor)
 
     def clear_plot(self):
         """Limpia datos y resetea el gráfico."""
