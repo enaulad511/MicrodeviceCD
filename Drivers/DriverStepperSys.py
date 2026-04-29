@@ -28,7 +28,7 @@ def spinMotorAngleDriver(angle, rpm, max_rpm, n_times=None, flag_continue=False,
     if drv is None:
         drv = DriverStepperSys(en_pin=12, enable_active_high=False, uart_port=serial_port_encoder)
         drv.enable_driver(True)
-        return
+        
     if stop_event is None:
         print("[spinMotorAngle] stop_event no proporcionado, se requiere para control de parada.")
         return
