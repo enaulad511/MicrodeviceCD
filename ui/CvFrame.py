@@ -500,7 +500,7 @@ class CVFrame(ttk.Frame):
             print("Modo oscilador iniciado")
 
     def on_end_experiment(self):
-        self.show_inputs_frame()
+        self.show_inputs_frame(hide=False)
         if self.thread_motor is None:
             print("No motor thread to stop.")
             return
