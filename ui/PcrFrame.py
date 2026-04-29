@@ -347,7 +347,7 @@ class PCRFrame(ttk.Frame):
         # self.ax.autoscale_view(scalex=False, scaley=True)
         
         # Eje Y fijo
-        self.ax.set_ylim(0, 100)
+        self.ax.set_ylim(-5, 105)
 
 
         self.canvas.draw_idle()
