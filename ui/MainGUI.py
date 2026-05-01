@@ -60,6 +60,8 @@ def configure_styles():
         "Custom.Treeview.Heading", font=("Arial", 18, "bold")
     )  # pyrefly: ignore
     style.configure("Vertical.TScrollbar", arrowsize=20)  # pyrefly: ignore
+    style.configure("Custom.TCheckbutton", font=font_text)  # pyrefly: ignore
+    style.configure("Custom.TRadiobutton", font=font_text)  # pyrefly: ignore
     return style
 
 

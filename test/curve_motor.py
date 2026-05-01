@@ -27,7 +27,7 @@ if __name__ == "__main__":
     try:
         sistemaMotor.avanzar(50)
         while passed_time < t_test:
-            raw_data = sistemaMotor.leer_encoder()
+            raw_data = sistemaMotor.leer_encoder(t_s)
             rpm_actual = sistemaMotor.get_rpm()
             current_time = time.perf_counter()
             # print(f"RPM actual: {rpm_actual}")

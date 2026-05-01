@@ -155,7 +155,9 @@ class DriverEncoderSys:
             # self.ser.flush()
             self.ser.write(b"GET\n")
             all_data = self.ser.read_all()
-            print("Datos recibidos:", all_data)
+            if all_data is None or len(all_data) == 0:
+                print("No se recibieron datos del Pico.")
+                return None
             lines = all_data.decode("utf-8").split("\n")
             # raw_data = self.ser.readline()
             # self.raw_data = raw_data.decode('utf-8').strip()

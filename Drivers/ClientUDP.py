@@ -268,7 +268,7 @@ if __name__ == "__main__":
     # client.listen_forever()
 
     # Option B: threaded listener with callback
-    def handle_message(text: str, addr: tuple, temps_dict: dict):
+    def handle_message(text: str, addr: tuple, temps_dict: list):
         # You can parse JSON, write to CSV, update a plot, etc.
         # For your Arduino, payload is a temperature string like "23.58"
         try:

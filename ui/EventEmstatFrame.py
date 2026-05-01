@@ -28,7 +28,6 @@ class EventPlotter(ttk.Frame):
     - Grafica las variables recibidas en los eventos detectados.
     - Control de inicio/detención desde botones
     """
-
     def __init__(
         self,
         master,
@@ -68,7 +67,6 @@ class EventPlotter(ttk.Frame):
         self.method = method
         self.x_label = x_label
         self.y_label = y_label
-
         # --- Estado de ejecución ---
         self.q_points = queue.Queue(maxsize=20000)  # grande, pero finita
         self.q_tcp_lines = queue.Queue(maxsize=20000)  # grande, pero finita
@@ -81,22 +79,13 @@ class EventPlotter(ttk.Frame):
         self.running = False
         self.flag_recording = False
         self.after_id = None
-
         # --- Estado del gráfico ---
-        # plt.style.use("seaborn-v0_8-darkgrid")
-
         DPI = 100
-        WIDTH_PX = 800
-        HEIGHT_PX = 450  # ✅ más bajo para pantallas pequeñas
-
-        self.fig = Figure(figsize=(WIDTH_PX / DPI, HEIGHT_PX / DPI), dpi=DPI)
-
+        WIDTH_PX = 700
+        HEIGHT_PX = 350  # ✅ más bajo para pantallas pequeñas
+        self.fig = Figure(figsize=(WIDTH_PX / DPI, HEIGHT_PX / DPI), dpi=DPI, layout="compressed")
         plt.style.use("seaborn-v0_8-darkgrid")
-
-        # DPI = 100
-        # self.fig = Figure(figsize=(8, 4.5), dpi=DPI)
         self.ax = self.fig.add_subplot(111)
-        # self.fig, self.ax = plt.subplots(figsize=(10, 6))
         self.ax.set_title(self.title)
         self.ax.set_xlabel(self.x_label)
         self.ax.set_ylabel(self.y_label)
@@ -118,13 +107,6 @@ class EventPlotter(ttk.Frame):
         self.y_by_m = {}
         self.lines_by_m = {}
         self._style_cycle = self._build_style_cycle()
-
-        # --- Embedding de Matplotlib en ttkbootstrap ---
-        # self.canvas = FigureCanvasTkAgg(self.fig, self)
-        # self.toolbar = NavigationToolbar2Tk(self.canvas, self, pack_toolbar=False)
-        # self.toolbar.pack(side=ttk.TOP, fill=ttk.X)
-        # # self.canvas.get_tk_widget().pack(side=ttk.TOP, fill=ttk.BOTH, expand=True)
-        # self.canvas.get_tk_widget().pack(side=ttk.TOP, fill=ttk.X, expand=False)
 
         # --- Controles ---
         controls = ttk.Frame(self)
@@ -490,7 +472,7 @@ class EventPlotter(ttk.Frame):
 
         idx = (m - 1) % len(self._style_cycle)
         c, ls = self._style_cycle[idx]
-        (line,) = self.ax.plot([], [], linestyle=ls, linewidth=2.5, color=c, marker="o", markersize=3, label=f"M{m}")
+        (line,) = self.ax.plot([], [], linestyle=ls, linewidth=4.5, color=c, marker="o", markersize=3, label=f"M{m}")
 
         # Si el color es muy claro, mejora visibilidad del marcador:
         line.set_markeredgecolor("0.3")
@@ -561,14 +543,14 @@ class LegendManagerWindow(ttk.Toplevel):
     def refresh_list(self):
         """Recarga la lista con las mediciones actuales del plotter."""
         if self.lines_list is None:
-            self.listbox.delete(0, END)
+            self.listbox.delete(0, ttk.END)
             for m in self.plotter.lines_by_m.keys():
-                self.listbox.insert(END, f"M{m}")
-                self.lines_list = self.listbox.get(0, END)
+                self.listbox.insert(ttk.END, f"M{m}")
+                self.lines_list = self.listbox.get(0, ttk.END)
         else:
-            self.listbox.delete(0, END)
+            self.listbox.delete(0, ttk.END)
             for item in self.lines_list:
-                self.listbox.insert(END, item)
+                self.listbox.insert(ttk.END, item)
 
     def add_legend(self):
         """Agrega una nueva medición vacía (línea sin datos)."""
@@ -581,7 +563,7 @@ class LegendManagerWindow(ttk.Toplevel):
         if name in self.plotter.lines_by_m:
             return
         self.lines_list.append(name)
-        self.entry_new.delete(0, END)
+        self.entry_new.delete(0, ttk.END)
         self.refresh_list()
 
     def remove_selected(self):
@@ -590,6 +572,9 @@ class LegendManagerWindow(ttk.Toplevel):
         if not sel:
             return
         idx = sel[0]
+        if self.lines_list is None:
+            print("No lines_list")
+            return
         new_list = [x for i, x in enumerate(self.lines_list) if i != idx]
         self.lines_list = new_list
         self.refresh_list()
@@ -603,7 +588,7 @@ class LegendManagerWindow(ttk.Toplevel):
         # extraer linea
         self.idx_sel = sel[0]
         text = self.listbox.get(self.idx_sel)
-        self.entry_new.delete(0, END)
+        self.entry_new.delete(0, ttk.END)
         self.entry_new.insert(0, text)
 
     def on_edit_line(self):
@@ -637,7 +622,7 @@ class LegendManagerWindow(ttk.Toplevel):
 def demo():
     app = ttk.Window(themename="darkly")  # o "flatly", "cosmo", etc.
     app.title("UDP IV Plotter (ttkbootstrap)")
-    plotter = EventPlotter(app, udp_port=5005, buffer_size=4096, max_points=5000, update_interval_ms=80)
+    plotter = EventPlotter(app,"cv", udp_port=5005, buffer_size=4096, max_points=5000, update_interval_ms=80)
 
     # Cierre limpio
     def on_close():
@@ -654,7 +639,7 @@ if __name__ == "__main__":
     #    demo()
     app = ttk.Window(themename="litera")
     app.title("UDP IV Plotter (ttkbootstrap)")
-    plotter = EventPlotter(app, udp_port=5005, buffer_size=4096, max_points=5000, update_interval_ms=80)
+    plotter = EventPlotter(app, "cv", udp_port=5005, buffer_size=4096, max_points=5000, update_interval_ms=80)
     plotter.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
 
     def on_close():

@@ -122,7 +122,8 @@ class DriverStepperSys:
         self.enable_active_high = bool(enable_active_high)
         self.chip = chip
         self.ack_timeout = float(ack_timeout)
-
+        self._rx_thread = None
+        self.ser = None
         # ---- GPIO (ENABLE) opcional ----
         self._gpio_request = None
         if self.en_pin is not None:

@@ -215,7 +215,7 @@ def create_widgets_cv(parent, columns=2):
             frame_selectors,
             text=text,
             value=value,
-            variable=current_range_var,
+            variable=current_range_var, style='Custom.TRadiobutton'
         ).grid(row=0, column=col, padx=5, pady=5, sticky="nswe")
     # --------------------------------------------------------------------------------
     # -----------------------------Motor Settings-------------------------------------

@@ -274,7 +274,7 @@ class EmstatStreamParser:
         if parsed is None:
             return None
         decoded = self._decode(parsed)
-        self.context["point"] = parsed["index"][0]
+        self.context["point"] = int(parsed["index"][0])
 
         decoded.update(
             {
