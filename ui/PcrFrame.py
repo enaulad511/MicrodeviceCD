@@ -641,7 +641,7 @@ class PCRFrame(ttk.Frame):
                     return
                 integral = 0
                 self.pin_heating.write(True)  # pyrefly: ignore
-                while 1.5 < abs(high_temp - self.temp) and not self.stop_udp_listenner.is_set():
+                while 0.5 < abs(high_temp - self.temp) and not self.stop_udp_listenner.is_set():
                     # # heat straigh foward to the 75 % of setpoint
                     # if self.temp <= high_temp * 0.4:
                     #     continue
@@ -715,7 +715,7 @@ class PCRFrame(ttk.Frame):
                     True,
                     sistemaMotor,
                     None,
-                    stop_func=lambda: self.stop_event_motor.is_set() or abs(self.temp - low_temp) <= 9.5,
+                    stop_func=lambda: self.stop_event_motor.is_set() or abs(self.temp - low_temp) <= 5.5,
                     stop_event=self.stop_event_motor,
                 )
                 while self.temp > low_temp + 1.5 and not self.stop_udp_listenner.is_set():

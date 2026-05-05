@@ -28,6 +28,7 @@ class EventPlotter(ttk.Frame):
     - Grafica las variables recibidas en los eventos detectados.
     - Control de inicio/detención desde botones
     """
+
     def __init__(
         self,
         master,
@@ -35,7 +36,7 @@ class EventPlotter(ttk.Frame):
         tcp_port=5006,
         ip_sender="localhost",
         buffer_size=4096,
-        max_points=5000,
+        max_points=10000,
         update_interval_ms=80,
         title="CV",
         x_label="E(V)",
@@ -622,7 +623,7 @@ class LegendManagerWindow(ttk.Toplevel):
 def demo():
     app = ttk.Window(themename="darkly")  # o "flatly", "cosmo", etc.
     app.title("UDP IV Plotter (ttkbootstrap)")
-    plotter = EventPlotter(app,"cv", udp_port=5005, buffer_size=4096, max_points=5000, update_interval_ms=80)
+    plotter = EventPlotter(app, "cv", udp_port=5005, buffer_size=4096, max_points=5000, update_interval_ms=80)
 
     # Cierre limpio
     def on_close():
