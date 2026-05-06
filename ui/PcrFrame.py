@@ -338,7 +338,7 @@ class PCRFrame(ttk.Frame):
     #     self.ax.relim()
     #     self.ax.autoscale_view()
     #     self.canvas.draw_idle()
-    def update_graph_temperature(self, window_size=1000):
+    def update_graph_temperature(self, window_size=5000):
         if self.canvas is None:
             return
 
@@ -504,6 +504,7 @@ class PCRFrame(ttk.Frame):
         # write a predix line with al parameters of experiment
         # prefix_col = f" high_temp: {high_temp}-L "
         self.total_cycles = cycles
+        self.cycles_complete = 0
 
         settings = read_settings_from_file()
         pidGains = settings.get("pidControllerRPM", {})
