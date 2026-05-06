@@ -297,7 +297,7 @@ class PCRFrame(ttk.Frame):
             msg_elapsed_time = f"Time passed: {mins_elapsed} m {elapsed_pcr_time % 60:.1f} s -- cycles: {self.cycles_complete}"
             if self.cycles_complete > 0:
                 time_cycle = time.time() - self.start_cycle_time
-                total_estimated_time = time_cycle * self.total_cycles
+                total_estimated_time = time_cycle * (self.total_cycles - self.cycles_complete)
                 msg_estimated_time = f" -- Estimated finish: {int(total_estimated_time / 60)}mins {total_estimated_time % 60:.1f}s"
                 msg_elapsed_time += msg_estimated_time
             total_msg[0] = f"Temperature: {lf:.2f} °C\tState: {self.fase}"
@@ -503,6 +503,7 @@ class PCRFrame(ttk.Frame):
         self.stop_udp_listenner = threading.Event() if self.stop_udp_listenner is None else self.stop_udp_listenner
         # write a predix line with al parameters of experiment
         # prefix_col = f" high_temp: {high_temp}-L "
+        self.total_cycles = cycles
 
         settings = read_settings_from_file()
         pidGains = settings.get("pidControllerRPM", {})
@@ -587,7 +588,7 @@ class PCRFrame(ttk.Frame):
                 return
             while self.temp < denat_temp and not self.stop_udp_listenner.is_set():
                 # heat straigh foward to the 75 % of setpoint
-                if self.temp <= denat_temp * 0.6:
+                if self.temp <= denat_temp * 0.80:
                     continue
                 age = time.time() - self.temp_ts
                 if age > MAX_AGE:
@@ -641,6 +642,8 @@ class PCRFrame(ttk.Frame):
                 # init cycle
                 # -------------------------------------------------------------------
                 # -------------------------------------------------------------------
+                self.start_cycle_time = time.time()
+                self.cycles_complete = current_cycle
                 # reach high temp
                 self.fase = "Reach High temp"
                 settings = read_settings_from_file()
