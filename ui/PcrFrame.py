@@ -291,7 +291,7 @@ class PCRFrame(ttk.Frame):
 
         # Actualizar UI solo cuando toca
         if time.time() - self.last_display > self.ts_display:
-            total_msg = self.svar_status.get().split("<-->")
+            total_msg = self.svar_status.get().split("\n")
             elapsed_pcr_time = time.time() - self.start_pcr_time
             mins_elapsed = int(elapsed_pcr_time / 60)
             msg_elapsed_time = f"Time passed: {mins_elapsed} m {elapsed_pcr_time % 60:.1f} s -- cycles: {self.cycles_complete}"
@@ -305,7 +305,7 @@ class PCRFrame(ttk.Frame):
                 total_msg.append(msg_elapsed_time)
             else:
                 total_msg[1] = msg_elapsed_time
-            self.svar_status.set("<-->".join(total_msg))
+            self.svar_status.set("\n".join(total_msg))
             self.last_display = time.time()
 
         # Actualizar gráfica cada N muestras
@@ -790,11 +790,7 @@ class PCRFrame(ttk.Frame):
                     return
                 integral = 0
                 self.pin_heating.write(True)  # pyrefly: ignore
-                while 1.5 < abs(exts_temp - self.temp) and not self.stop_udp_listenner.is_set():
-                    # # heat straigh foward to the 75 % of setpoint
-                    # if self.temp <= high_temp * 0.4:
-                    #     continue
-                    # # print(f"Temperature: {self.temp} °C")
+                while 0.5 < abs(exts_temp - self.temp) and not self.stop_udp_listenner.is_set():
                     if current_cycle == 0 and self.temp < exts_temp:
                         break
                     age = time.time() - self.temp_ts
