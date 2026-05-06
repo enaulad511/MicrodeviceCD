@@ -122,6 +122,10 @@ class PCRFrame(ttk.Frame):
         self.fase = "Initial"
         self.ts_display = 0.5
         self.last_display = time.time()
+        self.start_pcr_time = time.time()
+        self.cycles_complete = 0
+        self.start_cycle_time = time.time()
+        self.total_cycles = 0
         self.stop_event_motor = None
         self.stop_udp_listenner = None
         self.temp_update_counter = 0
@@ -287,8 +291,21 @@ class PCRFrame(ttk.Frame):
 
         # Actualizar UI solo cuando toca
         if time.time() - self.last_display > self.ts_display:
-            msg = f"Temperature: {lf:.2f} °C\nState: {self.fase}"
-            self.svar_status.set(msg)
+            total_msg = self.svar_status.get().split("<-->")
+            elapsed_pcr_time = time.time() - self.start_pcr_time
+            mins_elapsed = int(elapsed_pcr_time / 60)
+            msg_elapsed_time = f"Time passed: {mins_elapsed} m {elapsed_pcr_time % 60:.1f} s -- cycles: {self.cycles_complete}"
+            if self.cycles_complete > 0:
+                time_cycle = time.time() - self.start_cycle_time
+                total_estimated_time = time_cycle * self.total_cycles
+                msg_estimated_time = f" -- Estimated finish: {int(total_estimated_time / 60)}mins {total_estimated_time % 60:.1f}s"
+                msg_elapsed_time += msg_estimated_time
+            total_msg[0] = f"Temperature: {lf:.2f} °C\tState: {self.fase}"
+            if len(total_msg) < 2:
+                total_msg.append(msg_elapsed_time)
+            else:
+                total_msg[1] = msg_elapsed_time
+            self.svar_status.set("<-->".join(total_msg))
             self.last_display = time.time()
 
         # Actualizar gráfica cada N muestras
@@ -345,10 +362,9 @@ class PCRFrame(ttk.Frame):
         # Recalcular solo el eje Y
         # self.ax.relim()
         # self.ax.autoscale_view(scalex=False, scaley=True)
-        
+
         # Eje Y fijo
         self.ax.set_ylim(-5, 105)
-
 
         self.canvas.draw_idle()
 
@@ -513,6 +529,7 @@ class PCRFrame(ttk.Frame):
         # rotate motor ar rpm
         from Drivers.DriverStepperSys import DriverStepperSys
 
+        self.start_pcr_time = time.time()
         try:
             acceleration = float(pidGains.get("acceleration_spin", 200.0))
             direction = "CW"
