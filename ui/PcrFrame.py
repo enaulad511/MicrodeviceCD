@@ -170,7 +170,7 @@ class PCRFrame(ttk.Frame):
         create_buttons(self.frame_buttons, callbacks, self.svar_status)
         # Frame para mostrar el gráfico
         self.profile_frame = ttk.LabelFrame(content_frame, text="Profile Preview")
-        self.profile_frame.grid(row=3, column=0, padx=10, pady=10, sticky="nswe")
+        self.profile_frame.grid(row=3, column=0, padx=(2, 20), pady=10, sticky="nswe")
         self.profile_frame.configure(style="Custom.TLabelframe")
 
         self.canvas = None  # Para almacenar el gráfico incrustado

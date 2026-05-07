@@ -22,9 +22,7 @@ class TemperatureFrame(ttk.Frame):
       que devuelva la temperatura en °C como float.
     """
 
-    def __init__(
-        self, parent, sensor_reader="default", title="Temperature measurement"
-    ):
+    def __init__(self, parent, sensor_reader="default", title="Temperature measurement"):
         super().__init__(parent)
         self.parent = parent
         self.start_time = 0.0
@@ -35,9 +33,7 @@ class TemperatureFrame(ttk.Frame):
         self.temps_filter = [20, 20, 20, 20]  # temps for filtering
         # Función para leer temperatura (°C). Si no se pasa, usa simulación.
         self.sensor_reader = (
-            self._simulated_reader
-            if sensor_reader == "default"
-            else self._thermocouple_reader
+            self._simulated_reader if sensor_reader == "default" else self._thermocouple_reader
         )
         # Layout base
         self.columnconfigure(0, weight=1)
@@ -75,10 +71,8 @@ class TemperatureFrame(ttk.Frame):
             font=font_entry,
             width=6,
         )
-        self.unit_combo.grid(row=0, column=3, padx=5, pady=5, sticky="we")
-        self.unit_combo.bind(
-            "<<ComboboxSelected>>", lambda e: self.actualizar_grafico()
-        )
+        self.unit_combo.grid(row=0, column=3, padx=(2, 20), pady=5, sticky="we")
+        self.unit_combo.bind("<<ComboboxSelected>>", lambda e: self.actualizar_grafico())
 
         ttk.Button(
             control_frame,
@@ -106,7 +100,7 @@ class TemperatureFrame(ttk.Frame):
             text="Save CSV",
             command=self.guardar_csv,
             style="success.TButton",
-        ).grid(row=1, column=3, padx=5, pady=5, sticky="we")
+        ).grid(row=1, column=3, padx=(2, 20), pady=5, sticky="we")
 
         # --- Gráfico ---
         self.fig, self.ax = plt.subplots()
@@ -115,7 +109,7 @@ class TemperatureFrame(ttk.Frame):
         self.ax.set_ylabel("Temperature (°C)")
         self.canvas = FigureCanvasTkAgg(self.fig, master=content_frame)
         canvas_widget = self.canvas.get_tk_widget()
-        canvas_widget.grid(row=1, column=0, padx=10, pady=10, sticky="nsew")
+        canvas_widget.grid(row=1, column=0, padx=(2, 20), pady=10, sticky="nsew")
         canvas_widget.columnconfigure(0, weight=1)
         canvas_widget.rowconfigure(0, weight=1)
         canvas_widget.configure(

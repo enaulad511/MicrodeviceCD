@@ -19,7 +19,7 @@ def create_widgets_disco_input(parent, callbacks: dict):
     parent.rowconfigure((0, 1), weight=1)
     # Mode 1: Continuous rotation CW or CCW with RPM
     frame1 = ttk.LabelFrame(parent, text="Continuous Rotation")
-    frame1.grid(row=0, column=0, padx=10, pady=10, sticky="nswe")
+    frame1.grid(row=0, column=0, padx=(2, 20), pady=10, sticky="nswe")
     frame1.configure(style="Custom.TLabelframe")
     frame1.columnconfigure((0, 1), weight=1)
 
@@ -51,7 +51,7 @@ def create_widgets_disco_input(parent, callbacks: dict):
     frame1.rowconfigure((0, 1, 2), weight=1)
     # Mode 2: On/Off cycle
     frame2 = ttk.LabelFrame(parent, text="On/Off Cycle")
-    # frame2.grid(row=1, column=0, padx=10, pady=10, sticky="nswe")
+    # frame2.grid(row=1, column=0, padx=(2, 20), pady=10, sticky="nswe")
     frame2.configure(style="Custom.TLabelframe")
     frame2.columnconfigure((0, 1), weight=1)
 
@@ -98,7 +98,7 @@ def create_widgets_disco_input(parent, callbacks: dict):
 
     # Mode 3: Oscillator
     frame3 = ttk.LabelFrame(parent, text="Oscillator Mode")
-    frame3.grid(row=0, column=1, padx=10, pady=10, sticky="nswe")
+    frame3.grid(row=0, column=1, padx=(2, 20), pady=10, sticky="nswe")
     frame3.configure(style="Custom.TLabelframe")
     frame3.columnconfigure((0, 1), weight=1)
 
@@ -127,7 +127,7 @@ def create_widgets_disco_input(parent, callbacks: dict):
 
     # mode 4: go to zero require rpm
     frame4 = ttk.LabelFrame(parent, text="Go to Zero")
-    frame4.grid(row=1, column=0, padx=10, pady=10, sticky="nswe")
+    frame4.grid(row=1, column=0, padx=(2, 20), pady=10, sticky="nswe")
     frame4.configure(style="Custom.TLabelframe")
     frame4.columnconfigure((0, 1), weight=1)
     ttk.Label(frame4, text="RPM for zeroing:", style="Custom.TLabel").grid(

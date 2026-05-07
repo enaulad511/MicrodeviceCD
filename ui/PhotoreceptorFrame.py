@@ -33,7 +33,7 @@ class PhotoreceptorFrame(ttk.Frame):
 
         # Controles
         control_frame = ttk.LabelFrame(content_frame, text="Photoreceptor control")
-        control_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nswe")
+        control_frame.grid(row=0, column=0, padx=5, pady=10, sticky="nswe")
         control_frame.configure(style="Custom.TLabelframe")
         control_frame.rowconfigure((0, 1), weight=1)
         control_frame.columnconfigure((0, 1, 2), weight=1)
@@ -80,7 +80,7 @@ class PhotoreceptorFrame(ttk.Frame):
         self.canvas = FigureCanvasTkAgg(self.fig, master=graphic_frame)
         canvas_widget = self.canvas.get_tk_widget()
 
-        canvas_widget.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
+        canvas_widget.grid(row=0, column=0, padx=(2, 20), pady=10, sticky="nsew")
         canvas_widget.columnconfigure(0, weight=1)
         canvas_widget.rowconfigure(0, weight=1)
         canvas_widget.configure(

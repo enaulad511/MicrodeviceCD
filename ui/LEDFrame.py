@@ -12,10 +12,10 @@ __date__ = "$ 08/10/2025  at 09:32 a.m. $"
 
 
 def create_widgets_input(parent, callbacks: dict):
-    entries: list[Entry| StringVar] = []
+    entries: list[Entry | StringVar] = []
     # Control 1: Encender y apagar
     frame1 = ttk.LabelFrame(parent, text="Basic Control")
-    frame1.grid(row=0, column=0, padx=10, pady=10, sticky="nswe")
+    frame1.grid(row=0, column=0, padx=(5, 25), pady=10, sticky="nswe")
     frame1.configure(style="Custom.TLabelframe")
     frame1.columnconfigure((0, 1), weight=1)
 
@@ -34,7 +34,7 @@ def create_widgets_input(parent, callbacks: dict):
 
     # Control 2: Encender por tiempo
     frame2 = ttk.LabelFrame(parent, text="Timed On")
-    frame2.grid(row=0, column=1, padx=10, pady=10, sticky="nswe")
+    frame2.grid(row=0, column=1, padx=(2, 20), pady=10, sticky="nswe")
     frame2.configure(style="Custom.TLabelframe")
     frame2.columnconfigure((0, 1), weight=1)
 
@@ -54,7 +54,7 @@ def create_widgets_input(parent, callbacks: dict):
 
     # Control 3: Patrón de encendido
     frame3 = ttk.LabelFrame(parent, text="On pattern")
-    frame3.grid(row=1, column=0, padx=10, pady=10, sticky="nswe")
+    frame3.grid(row=1, column=0, padx=(2, 20), pady=10, sticky="nswe")
     frame3.configure(style="Custom.TLabelframe")
     frame3.columnconfigure((0, 1), weight=1)
 
@@ -67,7 +67,7 @@ def create_widgets_input(parent, callbacks: dict):
         values=["Square wave", "Staggered", "Ramp"],
         font=font_entry,
         textvariable=svar_pattern,
-        width=8
+        width=8,
     )
     pattern_combo.grid(row=0, column=1, padx=5, pady=5, sticky="nswe")
     pattern_combo.current(0)
@@ -141,14 +141,14 @@ class ControleLEDFrame(ttk.Frame):
             self._cleanup_jobs()
         else:
             print(f"Creando pin GPIO {led_heatin_pin}")
-            self.pin = GPIOPin(     # pyrefly: ignore
+            self.pin = GPIOPin(  # pyrefly: ignore
                 led_heatin_pin,
                 chip=self.chip,
                 consumer="led-ui",
                 active_low=self.active_low,
             )
             # Preconfigura como salida en bajo
-            self.pin.set_output(initial_high=False)     # pyrefly: ignore
+            self.pin.set_output(initial_high=False)  # pyrefly: ignore
 
     # ----------------- Helpers GUI/GPIO -----------------
     def _cleanup_jobs(self):
@@ -156,14 +156,14 @@ class ControleLEDFrame(ttk.Frame):
         try:
             if self._on_time_job is not None:
                 self.after_cancel(self._on_time_job)
-                self._on_time_job = None        # pyrefly: ignore
+                self._on_time_job = None  # pyrefly: ignore
         except Exception:
             self._on_time_job = None
 
         try:
             if self._pattern_job is not None:
                 self.after_cancel(self._pattern_job)
-                self._pattern_job = None        # pyrefly: ignore
+                self._pattern_job = None  # pyrefly: ignore
         except Exception:
             self._pattern_job = None
 
@@ -190,16 +190,16 @@ class ControleLEDFrame(ttk.Frame):
         # Apaga el LED y libera recursos
         self._cleanup_jobs()
         try:
-            self.pin.write(False)       # pyrefly: ignore
-            self.pin.close()        # pyrefly: ignore
+            self.pin.write(False)  # pyrefly: ignore
+            self.pin.close()  # pyrefly: ignore
         except Exception as e:
-            print(f"Error al cerrar el GPIO heating led: {e}")        
+            print(f"Error al cerrar el GPIO heating led: {e}")
 
     # ----------------- Callbacks públicos -----------------
     def callback_on(self):
         self.init_GPIO()
         self._cleanup_jobs()
-        self.pin.write(True)        # pyrefly: ignore
+        self.pin.write(True)  # pyrefly: ignore
         print("Encender LED")
 
     def callback_off(self):
@@ -210,7 +210,7 @@ class ControleLEDFrame(ttk.Frame):
         self._cleanup_jobs()
         self.pin.write(False)
         print("Apagar LED")
-        self.pin.close()       # pyrefly: ignore
+        self.pin.close()  # pyrefly: ignore
         self.pin = None
 
     def callback_on_time(self):
@@ -220,17 +220,17 @@ class ControleLEDFrame(ttk.Frame):
         if ms < 0:
             ms = 0
         self._cleanup_jobs()
-        self.pin.write(True)        # pyrefly: ignore
+        self.pin.write(True)  # pyrefly: ignore
         print(f"Encender LED por tiempo: {ms} ms")
 
         # Agenda apagado
-        self._on_time_job = self.after(ms, self._on_time_finish)        # pyrefly: ignore
+        self._on_time_job = self.after(ms, self._on_time_finish)  # pyrefly: ignore
 
     def _on_time_finish(self):
-        self.pin.write(False)       # pyrefly: ignore
+        self.pin.write(False)  # pyrefly: ignore
         self._on_time_job = None
         print("Tiempo finalizado: LED apagado")
-        self.pin.close()       # pyrefly: ignore
+        self.pin.close()  # pyrefly: ignore
         self.pin = None
 
     def callback_pattern(self):

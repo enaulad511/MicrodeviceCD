@@ -14,7 +14,7 @@ def create_widgets_fluorescente_input(parent, callbacks: dict):
 
     # Control 1: Encender y apagar
     frame1 = ttk.LabelFrame(parent, text="Basic Control")
-    frame1.grid(row=0, column=0, padx=10, pady=10, sticky="nswe")
+    frame1.grid(row=0, column=0, padx=(2, 20), pady=10, sticky="nswe")
     frame1.configure(style="Custom.TLabelframe")
     frame1.columnconfigure((0, 1), weight=1)
 
@@ -33,7 +33,7 @@ def create_widgets_fluorescente_input(parent, callbacks: dict):
 
     # Control 2: Encender por tiempo
     frame2 = ttk.LabelFrame(parent, text="Timed On")
-    frame2.grid(row=1, column=0, padx=10, pady=10, sticky="nswe")
+    frame2.grid(row=1, column=0, padx=(2, 20), pady=10, sticky="nswe")
     frame2.configure(style="Custom.TLabelframe")
     frame2.columnconfigure((0, 1), weight=1)
 
