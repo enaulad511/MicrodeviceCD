@@ -69,7 +69,7 @@ def create_widgets_pcr(parent):
         entry.insert(0, default_values[i])
         entry.grid(row=row, column=col * 2 + 1, padx=5, pady=5)
 
-        entry.bind("<FocusIn>", show_numeric_keyboard)
+        # entry.bind("<FocusIn>", show_numeric_keyboard)
 
         entries.append(entry)
     # frame1.bind("<FocusOut>", hide_keyboard)
