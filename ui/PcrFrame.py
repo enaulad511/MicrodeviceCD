@@ -783,6 +783,7 @@ class PCRFrame(ttk.Frame):
                     or self.temp < low_temp + 5.5,
                     stop_event=self.stop_event_motor,
                 )
+                print(self.temp, "low temp....dis")
                 while self.temp > low_temp + 0.5 and not self.stop_udp_listenner.is_set():
                     time.sleep(0.001)
                 print(f"Temperature reached: {self.temp} °C")
