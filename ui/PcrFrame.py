@@ -779,7 +779,8 @@ class PCRFrame(ttk.Frame):
                     sistemaMotor,
                     None,
                     stop_func=lambda: self.stop_event_motor.is_set()
-                    or abs(self.temp - low_temp) <= 5.5,
+                    or self.temp <= low_temp
+                    or self.temp < low_temp + 5.5,
                     stop_event=self.stop_event_motor,
                 )
                 while self.temp > low_temp + 0.5 and not self.stop_udp_listenner.is_set():
