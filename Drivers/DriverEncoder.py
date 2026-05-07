@@ -27,17 +27,11 @@ class DriverEncoderSys:
 
         # Configuración GPIO para EN_L y EN_R
         config = {
-            self.en_l: gpiod.LineSettings(
-                direction=Direction.OUTPUT, output_value=Value.INACTIVE
-            ),
-            self.en_r: gpiod.LineSettings(
-                direction=Direction.OUTPUT, output_value=Value.INACTIVE
-            ),
+            self.en_l: gpiod.LineSettings(direction=Direction.OUTPUT, output_value=Value.INACTIVE),
+            self.en_r: gpiod.LineSettings(direction=Direction.OUTPUT, output_value=Value.INACTIVE),
         }
 
-        self.request = gpiod.request_lines(
-            chip, consumer="motor-control", config=config
-        )
+        self.request = gpiod.request_lines(chip, consumer="motor-control", config=config)
 
         # UART para comunicación con Pico
         self.ser = serial.Serial(uart_port, baudrate, timeout=0.5, stopbits=2)

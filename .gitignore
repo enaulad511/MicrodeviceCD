@@ -39,3 +39,4 @@ pyrefly.toml
 files_test/
 test_*.py
 **.csv
+CLAUDE.md

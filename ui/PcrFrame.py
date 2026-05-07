@@ -52,13 +52,16 @@ def create_widgets_pcr(parent):
         "Ext. Time:",
         "Ext. Temp:",
         "Ext. Time F.: ",
+        "Initial Spin [s]: ",
     ]
     columns = 2
-    default_values = ["94", "55", "15", "15", "3", "700", "30", "94", "6", "68", "300"]
+    default_values = ["94", "55", "15", "15", "3", "700", "30", "94", "6", "68", "300", "15"]
     for i, lbl in enumerate(labels):
         row = i // columns
         col = i % columns
-        ttk.Label(frame1, text=lbl, style="Custom.TLabel").grid(row=row, column=col * 2, padx=5, pady=5, sticky="e")
+        ttk.Label(frame1, text=lbl, style="Custom.TLabel").grid(
+            row=row, column=col * 2, padx=5, pady=5, sticky="e"
+        )
         entry = ttk.Entry(frame1, font=font_entry)
         entry.insert(0, default_values[i])
         entry.grid(row=row, column=col * 2 + 1, padx=5, pady=5)
@@ -104,7 +107,9 @@ def create_buttons(master, callbacks, svar_status):
     frame_label = ttk.Frame(master, style="Custom.TFrame")
     frame_label.grid(row=1, column=0, sticky="nswe")
     frame_label.columnconfigure(0, weight=1)
-    ttk.Label(frame_label, textvariable=svar_status, style="Custom.TLabel").grid(row=0, column=0, padx=5, pady=5, sticky="nswe")
+    ttk.Label(frame_label, textvariable=svar_status, style="Custom.TLabel").grid(
+        row=0, column=0, padx=5, pady=5, sticky="nswe"
+    )
 
 
 class PCRFrame(ttk.Frame):
@@ -125,7 +130,9 @@ class PCRFrame(ttk.Frame):
         self.start_pcr_time = time.time()
         self.cycles_complete = 0
         self.start_cycle_time = time.time()
+        self.time_end_cycle = time.time()
         self.total_cycles = 0
+        self.teorical_time_pcr = 0
         self.stop_event_motor = None
         self.stop_udp_listenner = None
         self.temp_update_counter = 0
@@ -296,10 +303,12 @@ class PCRFrame(ttk.Frame):
             mins_elapsed = int(elapsed_pcr_time / 60)
             msg_elapsed_time = f"Time passed: {mins_elapsed} m {elapsed_pcr_time % 60:.1f} s -- cycles: {self.cycles_complete}"
             if self.cycles_complete > 0:
-                time_cycle = time.time() - self.start_cycle_time
+                time_cycle = self.time_end_cycle - self.start_cycle_time
                 total_estimated_time = time_cycle * (self.total_cycles - self.cycles_complete)
                 msg_estimated_time = f" -- Estimated finish: {int(total_estimated_time / 60)}mins {total_estimated_time % 60:.1f}s"
                 msg_elapsed_time += msg_estimated_time
+            else:
+                msg_estimated_time = f"-- Estimated finish: {int(self.teorical_time_pcr / 60)}mins {self.teorical_time_pcr % 60:.1f}s"
             total_msg[0] = f"Temperature: {lf:.2f} °C\tState: {self.fase}"
             if len(total_msg) < 2:
                 total_msg.append(msg_elapsed_time)
@@ -329,15 +338,6 @@ class PCRFrame(ttk.Frame):
         self.canvas.get_tk_widget().pack(fill="both", expand=True)
         self.canvas.draw()
 
-    # def update_graph_temperature(self):
-    #     if self.canvas is None:
-    #         print("Canvas is not initialized.")
-    #         return
-    #     self.line.set_xdata(range(len(self.data_temperature)))
-    #     self.line.set_ydata(self.data_temperature)
-    #     self.ax.relim()
-    #     self.ax.autoscale_view()
-    #     self.canvas.draw_idle()
     def update_graph_temperature(self, window_size=5000):
         if self.canvas is None:
             return
@@ -405,10 +405,13 @@ class PCRFrame(ttk.Frame):
         ext_time = float(self.entries[8].get())
         ext_temp = float(self.entries[9].get())
         ext_time_final = float(self.entries[10].get())
+        initia_spin_time = float(self.entries[11].get())
 
         msg = (
-            f"High Temp: {high_temp}, Low Temp: {low_temp}, Time High: {time_high}, Time Low: {time_low}, Cycles: {cycles}, RPM: {rpm}",
-            f"Denaturing Time: {denat_time}, Denaturing Temp: {denat_temp}",
+            f"High Temp: {high_temp}, Low Temp: {low_temp}, Time High: {time_high},"
+            f" Time Low: {time_low}, Cycles: {cycles}, RPM: {rpm}",
+            f"Denaturing Time: {denat_time}, Denaturing Temp: {denat_temp},"
+            f" initial spin {initia_spin_time} s",
         )
         print(msg)
         self.init_temperature_graph()
@@ -427,6 +430,7 @@ class PCRFrame(ttk.Frame):
                 ext_time,
                 ext_temp,
                 ext_time_final,
+                initia_spin_time,
             ),
         )
         thread_experiment.start()
@@ -497,15 +501,20 @@ class PCRFrame(ttk.Frame):
         ext_time,
         ext_temp,
         ext_time_final,
+        initial_spin_time,
     ):
         global thread_motor, sistemaMotor
         # cliente temperature
-        self.stop_udp_listenner = threading.Event() if self.stop_udp_listenner is None else self.stop_udp_listenner
+        self.stop_udp_listenner = (
+            threading.Event() if self.stop_udp_listenner is None else self.stop_udp_listenner
+        )
         # write a predix line with al parameters of experiment
         # prefix_col = f" high_temp: {high_temp}-L "
         self.total_cycles = cycles
         self.cycles_complete = 0
-
+        self.teorical_time_pcr = (
+            (time_high + time_low + ext_time) * cycles + denat_time + ext_time_final
+        )
         settings = read_settings_from_file()
         pidGains = settings.get("pidControllerRPM", {})
         try:
@@ -532,15 +541,20 @@ class PCRFrame(ttk.Frame):
         from Drivers.DriverStepperSys import DriverStepperSys
 
         self.start_pcr_time = time.time()
+
         try:
             acceleration = float(pidGains.get("acceleration_spin", 200.0))
             direction = "CW"
             rpm_setpoint = rpm
             if sistemaMotor is None:
                 print("Creating new driver instance")
-                sistemaMotor = DriverStepperSys(en_pin=12, enable_active_high=False, uart_port=serial_port_encoder)
+                sistemaMotor = DriverStepperSys(
+                    en_pin=12, enable_active_high=False, uart_port=serial_port_encoder
+                )
 
-            self.stop_event_motor = threading.Event() if self.stop_event_motor is None else self.stop_event_motor
+            self.stop_event_motor = (
+                threading.Event() if self.stop_event_motor is None else self.stop_event_motor
+            )
             # -------------------------------------------------------------------
             # initial spin with expecific time
             # -------------------------------------------------------------------
@@ -552,7 +566,7 @@ class PCRFrame(ttk.Frame):
                 900.0,
                 True,
                 sistemaMotor,
-                15,
+                time_exp=initial_spin_time,
                 stop_func=lambda: self.stop_event_motor.is_set(),
                 stop_event=self.stop_event_motor,
             )
@@ -736,7 +750,8 @@ class PCRFrame(ttk.Frame):
                     True,
                     sistemaMotor,
                     None,
-                    stop_func=lambda: self.stop_event_motor.is_set() or abs(self.temp - low_temp) <= 5.5,
+                    stop_func=lambda: self.stop_event_motor.is_set()
+                    or abs(self.temp - low_temp) <= 5.5,
                     stop_event=self.stop_event_motor,
                 )
                 while self.temp > low_temp + 1.5 and not self.stop_udp_listenner.is_set():

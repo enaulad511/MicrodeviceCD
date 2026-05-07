@@ -1,6 +1,9 @@
-import gpiod 
+# pyrefly: ignore [missing-import]
+import gpiod
 import threading
 from time import sleep
+
+# pyrefly: ignore [missing-import]
 from gpiod.line import Direction, Value
 
 
@@ -19,24 +22,16 @@ class MotorBTS7960:
             self.enable: gpiod.LineSettings(
                 direction=Direction.OUTPUT, output_value=Value.INACTIVE
             ),
-            self.rpwm: gpiod.LineSettings(
-                direction=Direction.OUTPUT, output_value=Value.INACTIVE
-            ),
-            self.lpwm: gpiod.LineSettings(
-                direction=Direction.OUTPUT, output_value=Value.INACTIVE
-            ),
+            self.rpwm: gpiod.LineSettings(direction=Direction.OUTPUT, output_value=Value.INACTIVE),
+            self.lpwm: gpiod.LineSettings(direction=Direction.OUTPUT, output_value=Value.INACTIVE),
         }
 
         # Solicita las líneas
-        self.request = gpiod.request_lines(
-            chip, consumer="motor-control", config=config
-        )
+        self.request = gpiod.request_lines(chip, consumer="motor-control", config=config)
 
         # Activa la línea EN
         self.request.set_value(self.enable, Value.ACTIVE)
-        print(
-            f"Motor habilitado en EN={self.enable}, RPWM={self.rpwm}, LPWM={self.lpwm}"
-        )
+        print(f"Motor habilitado en EN={self.enable}, RPWM={self.rpwm}, LPWM={self.lpwm}")
 
         # Variables para PWM dinámico
         self._duty = 0.0
