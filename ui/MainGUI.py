@@ -226,18 +226,35 @@ class MainGUI(ttk.Window):
 
     def maximize_window(self):
         try:
+            # Asegurarse de salir de fullscreen si estaba activo
             self.attributes("-fullscreen", False)
+
             system = platform.system()
 
             if system == "Windows":
+                # Método estándar en Windows
                 self.state("zoomed")
-            else:
-                # Fallback para Linux/macOS
+
+            elif system == "Linux":
+                # Método correcto para la mayoría de gestores de ventana modernos
+                try:
+                    self.attributes("-zoomed", True)
+                except Exception:
+                    # Fallback universal
+                    self.state("normal")
+                    self.update_idletasks()
+                    w = self.winfo_screenwidth()
+                    h = self.winfo_screenheight()
+                    self.geometry(f"{w}x{h}+0+0")
+
+            elif system == "Darwin":  # macOS
+                # macOS no soporta zoomed, se usa tamaño de pantalla
                 self.state("normal")
                 self.update_idletasks()
-                screen_width = self.winfo_screenwidth()
-                screen_height = self.winfo_screenheight()
-                self.geometry(f"{screen_width}x{screen_height}+0+0")
+                w = self.winfo_screenwidth()
+                h = self.winfo_screenheight()
+                self.geometry(f"{w}x{h}+0+0")
+
         except Exception as e:
             print(f"Error al maximizar la ventana: {e}")
 
