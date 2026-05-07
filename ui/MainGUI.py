@@ -240,7 +240,8 @@ class MainGUI(ttk.Window):
                 # Método correcto para la mayoría de gestores de ventana modernos
                 try:
                     self.attributes("-zoomed", True)
-                except Exception:
+                except Exception as e:
+                    print(e)
                     # Fallback universal
                     self.state("normal")
                     self.update_idletasks()
