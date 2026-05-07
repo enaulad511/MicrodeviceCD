@@ -153,16 +153,27 @@ def show_keyboard(event=None):
 
 
 keyboard_process = None
+keyboard_opening = False
 
 
 def show_numeric_keyboard(event=None):
-    global keyboard_process
-    if keyboard_process is None or keyboard_process.poll() is not None:
+    global keyboard_process, keyboard_opening
+
+    # Si ya está abierto o en proceso de abrirse, no hacer nada
+    if keyboard_process and keyboard_process.poll() is None:
+        return
+
+    if keyboard_opening:
+        return
+
+    keyboard_opening = True
+
+    try:
         keyboard_process = subprocess.Popen(
-            ["onboard", "--layout", "Numeric", "--no-focus"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            ["onboard", "--layout", "Numeric"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
         )
+    finally:
+        keyboard_opening = False
 
 
 def hide_keyboard(event=None):
