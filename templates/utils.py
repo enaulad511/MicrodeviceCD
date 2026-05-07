@@ -1,13 +1,12 @@
 # -*- coding: utf-8 -*-
 import json
+import subprocess
 
 __author__ = "Edisson A. Naula"
 __date__ = "$ 08/10/2025  at 11:20 a.m. $"
 
 
-def validar_entero(
-    valor: str | int, minimo: int, maximo: int
-) -> tuple[bool, int | str]:
+def validar_entero(valor: str | int, minimo: int, maximo: int) -> tuple[bool, int | str]:
     """Validate integer value
 
     :param valor: value to validate.
@@ -29,9 +28,7 @@ def validar_entero(
         return False, "El valor ingresado no es un número entero válido."
 
 
-def validar_flotante(
-    valor: str | float, minimo: float, maximo: float
-) -> tuple[bool, float | str]:
+def validar_flotante(valor: str | float, minimo: float, maximo: float) -> tuple[bool, float | str]:
     """Validate float value
 
     :param valor: value to evaluate
@@ -66,9 +63,7 @@ def read_settings_from_file(file_path: str = "resources/settings.json") -> dict:
     return settings
 
 
-def write_settings_to_file(
-    new_settings: dict, file_path="resources/settings.json"
-) -> bool:
+def write_settings_to_file(new_settings: dict, file_path="resources/settings.json") -> bool:
     settings = read_settings_from_file(file_path)
     settings.update(new_settings)
     try:
@@ -151,3 +146,11 @@ def convert_si_integer_full(value):
     factor, prefix = PREFIXES[-1 if step > 0 else 0]
     scaled = value / factor
     return f"{int(round(scaled))}{prefix}"
+
+
+def show_keyboard(event=None):
+    subprocess.Popen(["onboard"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def hide_keyboard(event=None):
+    subprocess.Popen(["pkill", "onboard"])
