@@ -782,7 +782,7 @@ class PCRFrame(ttk.Frame):
                     or abs(self.temp - low_temp) <= 5.5,
                     stop_event=self.stop_event_motor,
                 )
-                while self.temp > low_temp + 1.5 and not self.stop_udp_listenner.is_set():
+                while self.temp > low_temp + 0.5 and not self.stop_udp_listenner.is_set():
                     time.sleep(ts / 2)
                 print(f"Temperature reached: {self.temp} °C")
                 # -------------------------------------------------------------------
@@ -822,19 +822,19 @@ class PCRFrame(ttk.Frame):
                 settings = read_settings_from_file()
                 pidGains = settings.get("pidControllerRPM", {})
                 try:
-                    KP = pidGains.get("KP_high", 0.15)
-                    WINDOW = pidGains.get("win_high", 0.05)
-                    MAX_AGE = pidGains.get("m_age_high", 0.09)
-                    TEMP_BAND = pidGains.get("tband_high", 0.05)
-                    KI = pidGains.get("KI_high", 0.6)
-                    I_MAX = pidGains.get("imax_high", 0.5)
+                    KP = pidGains.get("KP_ext", 0.15)
+                    WINDOW = pidGains.get("win_ext", 0.05)
+                    MAX_AGE = pidGains.get("m_age_ext", 0.09)
+                    TEMP_BAND = pidGains.get("tband_ext", 0.05)
+                    KI = pidGains.get("KI_ext", 0.6)
+                    I_MAX = pidGains.get("imax_ext", 0.5)
                 except Exception:
                     print("error bad data reach high", pidGains)
                     self.stop_udp_listenner.set()
                     return
                 integral = 0
                 self.pin_heating.write(True)  # pyrefly: ignore
-                while 0.5 < abs(exts_temp - self.temp) and not self.stop_udp_listenner.is_set():
+                while 0.2 < abs(exts_temp - self.temp) and not self.stop_udp_listenner.is_set():
                     if current_cycle == 0 and self.temp < exts_temp:
                         break
                     age = time.time() - self.temp_ts
@@ -868,11 +868,11 @@ class PCRFrame(ttk.Frame):
                 settings = read_settings_from_file()
                 pidGains = settings.get("pidControllerRPM", {})
                 try:
-                    KP_HOLD = pidGains.get("KP_h_low", 0.1)
-                    WINDOW = pidGains.get("win_h_low", ts * 0.5)
-                    KI = pidGains.get("KI_h_low", 0.45)
-                    I_MAX = pidGains.get("imax_h_low", 0.5)
-                    TEMP_BAND = pidGains.get("tband_h_low", 0.05)
+                    KP_HOLD = pidGains.get("KP_h_ext", 0.1)
+                    WINDOW = pidGains.get("win_h_ext", ts * 0.5)
+                    KI = pidGains.get("KI_h_ext", 0.45)
+                    I_MAX = pidGains.get("imax_h_ext", 0.5)
+                    TEMP_BAND = pidGains.get("tband_h_ext", 0.05)
                 except Exception:
                     print("error data pid hold low")
                     self.stop_udp_listenner.set()
