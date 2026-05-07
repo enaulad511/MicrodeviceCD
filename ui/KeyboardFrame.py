@@ -1,3 +1,4 @@
+from tkinter import font
 import ttkbootstrap as ttk
 
 
@@ -19,9 +20,13 @@ class NumericKeyboard(ttk.Frame):
 
         for r, row in enumerate(buttons):
             for c, char in enumerate(row):
-                btn = ttk.Button(self, text=char, command=lambda ch=char: self.on_press(ch))
+                btn = ttk.Button(
+                    self,
+                    text=char,
+                    command=lambda ch=char: self.on_press(ch),
+                    style="CustomPrimary.TButton",
+                )
                 btn.grid(row=r, column=c, ipadx=10, ipady=10, sticky="nsew")
-
         for i in range(3):
             self.columnconfigure(i, weight=1)
         for i in range(len(buttons)):
