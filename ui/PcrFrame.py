@@ -72,7 +72,7 @@ def create_widgets_pcr(parent):
         entry.bind("<FocusIn>", show_numeric_keyboard)
 
         entries.append(entry)
-    frame1.bind("<FocusOut>", hide_keyboard)
+    # frame1.bind("<FocusOut>", hide_keyboard)
     frame1.columnconfigure(tuple(range(2 * columns)), weight=1)
 
     return entries
