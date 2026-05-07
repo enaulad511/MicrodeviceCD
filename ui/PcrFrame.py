@@ -780,7 +780,7 @@ class PCRFrame(ttk.Frame):
                     None,
                     stop_func=lambda: self.stop_event_motor.is_set()
                     or self.temp <= low_temp
-                    or self.temp < low_temp + 5.5,
+                    or self.temp < low_temp + 9.5,
                     stop_event=self.stop_event_motor,
                 )
                 print(self.temp, "low temp....dis")

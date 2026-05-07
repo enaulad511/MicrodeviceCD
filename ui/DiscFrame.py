@@ -218,6 +218,10 @@ def spinMotorRPM_ramped(
     # Bucle principal: acelera hasta objetivo y mantén
     star_time = time.perf_counter()
     while not stop_event.is_set():
+        if stop_func is not None:
+            if stop_func():
+                print("stop_func indicó que se debe detener, iniciando parada...")
+                break
         # Aproximación por rampa
         diff = target - cur
         if abs(diff) <= step:
@@ -232,10 +236,6 @@ def spinMotorRPM_ramped(
             elapsed = time.perf_counter() - star_time
             if elapsed >= time_exp:
                 print(f"Tiempo de ejecución {time_exp}s alcanzado, deteniendo motor.")
-                break
-        if stop_func is not None:
-            if stop_func():
-                print("stop_func indicó que se debe detener, iniciando parada...")
                 break
         time.sleep(ts)
     # Al salir por stop_event, opcionalmente desacelera suave a 0
