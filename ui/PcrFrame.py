@@ -19,6 +19,7 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 from ui.DiscFrame import spinMotorRPM_ramped
+from ui.KeyboardFrame import NumericKeyboard
 
 __author__ = "Edisson A. Naula"
 __date__ = "$ 21/10/2025 at 11:30 a.m. $"
@@ -158,6 +159,10 @@ class PCRFrame(ttk.Frame):
             "callback_save_data": self.save_data_temps_file,
         }
         self.entries = create_widgets_pcr(self.frame_entries)
+        self.keyboard = NumericKeyboard(self)
+        self.keyboard.place_forget()
+        for entry in self.entries:
+            entry.bind("<FocusIn>", self._on_entry_focus)
         self.svar_status = ttk.StringVar(value="Ready")
         self.frame_buttons = ttk.Frame(content_frame)
         self.frame_buttons.grid(row=1, column=0, sticky="nswe")
@@ -172,6 +177,22 @@ class PCRFrame(ttk.Frame):
         self.callback_generate_profile()  # Generar el gráfico inicial
         self.data_temperature = []
         self.data_photodetector = []
+
+    def _on_entry_focus(self, event):
+        entry = event.widget
+        self.keyboard.set_target(entry)
+        kb_w, kb_h = 300, 250
+        self.update_idletasks()
+        x = entry.winfo_rootx() - self.winfo_rootx()
+        y = entry.winfo_rooty() - self.winfo_rooty() + entry.winfo_height()
+        max_x = self.winfo_width() - kb_w
+        if max_x > 0:
+            x = max(0, min(x, max_x))
+        max_y = self.winfo_height() - kb_h
+        if max_y > 0 and y > max_y:
+            y = entry.winfo_rooty() - self.winfo_rooty() - kb_h
+        self.keyboard.place(x=x, y=y, width=kb_w, height=kb_h)
+        self.keyboard.lift()
 
     def callback_generate_profile(self):
         try:
