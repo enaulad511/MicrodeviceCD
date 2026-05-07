@@ -225,39 +225,42 @@ class MainGUI(ttk.Window):
                 self.main_notebook.tab(i, text=text)
 
     def maximize_window(self):
-        try:
-            # Asegurarse de salir de fullscreen si estaba activo
-            self.attributes("-fullscreen", False)
+        self.attributes("-fullscreen", False)
 
-            system = platform.system()
-            print(system)
+        print(
+            self.winfo_width(),
+            self.winfo_height(),
+            self.winfo_screenwidth(),
+            self.winfo_screenheight(),
+        )
 
-            if system == "Windows":
-                # Método estándar en Windows
-                self.state("zoomed")
+        system = platform.system()
 
-            elif system == "Linux":
-                # Método correcto para la mayoría de gestores de ventana modernos
-                try:
-                    self.attributes("-zoomed", True)
-                except Exception as e:
-                    print(e)
-                    # Fallback universal
-                    self.state("normal")
-                    self.update_idletasks()
-                    w = self.winfo_screenwidth()
-                    h = self.winfo_screenheight()
-                    self.geometry(f"{w}x{h}+0+0")
-            elif system == "Darwin":  # macOS
-                # macOS no soporta zoomed, se usa tamaño de pantalla
-                self.state("normal")
-                self.update_idletasks()
-                w = self.winfo_screenwidth()
-                h = self.winfo_screenheight()
-                self.geometry(f"{w}x{h}+0+0")
+        if system == "Windows":
+            self.state("zoomed")
 
-        except Exception as e:
-            print(f"Error al maximizar la ventana: {e}")
+        else:
+            # Linux / macOS
+            self.state("normal")
+
+            # Esperar a que el WM cree la ventana
+            self.update_idletasks()
+            self.wait_visibility(self)
+
+            # Intentar maximizar vía WM
+            try:
+                self.attributes("-zoomed", True)
+                self.update()
+            finally:
+                # Verificación REAL
+                w = self.winfo_width()
+                h = self.winfo_height()
+                sw = self.winfo_screenwidth()
+                sh = self.winfo_screenheight()
+
+                # Si el WM ignoró "-zoomed", forzamos fallback
+                if w < sw or h < sh:
+                    self.geometry(f"{sw}x{sh}+0+0")
 
     def show_gif_toplevel(self):
         # GifFrameApp(self)
