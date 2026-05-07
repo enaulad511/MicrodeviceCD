@@ -784,7 +784,7 @@ class PCRFrame(ttk.Frame):
                     stop_event=self.stop_event_motor,
                 )
                 while self.temp > low_temp + 0.5 and not self.stop_udp_listenner.is_set():
-                    time.sleep(ts / 2)
+                    time.sleep(0.001)
                 print(f"Temperature reached: {self.temp} °C")
                 # -------------------------------------------------------------------
                 # hold LOW temperature
@@ -906,7 +906,7 @@ class PCRFrame(ttk.Frame):
                 self.pin_pcr.write(False)
                 print(f"fluorescence voltage: {v_fluo}")
                 self.data_photodetector.append(v_fluo)
-
+                self.time_end_cycle = time.time()
             print("PCR cycles complete, reading fluorescence")
             self.fase = "Extension"
             time_extension = ext_time_final
