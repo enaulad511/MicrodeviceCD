@@ -152,5 +152,19 @@ def show_keyboard(event=None):
     subprocess.Popen(["onboard"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
+keyboard_process = None
+
+
+def show_numeric_keyboard(event=None):
+    global keyboard_process
+    if keyboard_process is None or keyboard_process.poll() is not None:
+        keyboard_process = subprocess.Popen(
+            ["onboard", "--layout", "Numeric"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
+
+
 def hide_keyboard(event=None):
-    subprocess.Popen(["pkill", "onboard"])
+    global keyboard_process
+    if keyboard_process:
+        keyboard_process.terminate()
+        keyboard_process = None

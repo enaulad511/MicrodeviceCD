@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 
+from templates.utils import show_numeric_keyboard
 from templates.utils import hide_keyboard
 from templates.utils import show_keyboard
 from datetime import datetime
@@ -68,10 +69,10 @@ def create_widgets_pcr(parent):
         entry.insert(0, default_values[i])
         entry.grid(row=row, column=col * 2 + 1, padx=5, pady=5)
 
-        entry.bind("<FocusIn>", show_keyboard)
-        entry.bind("<FocusOut>", hide_keyboard)
+        entry.bind("<FocusIn>", show_numeric_keyboard)
 
         entries.append(entry)
+    frame1.bind("<FocusOut>", hide_keyboard)
     frame1.columnconfigure(tuple(range(2 * columns)), weight=1)
 
     return entries
