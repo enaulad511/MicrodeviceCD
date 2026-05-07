@@ -230,6 +230,7 @@ class MainGUI(ttk.Window):
             self.attributes("-fullscreen", False)
 
             system = platform.system()
+            print(system)
 
             if system == "Windows":
                 # Método estándar en Windows
@@ -246,7 +247,6 @@ class MainGUI(ttk.Window):
                     w = self.winfo_screenwidth()
                     h = self.winfo_screenheight()
                     self.geometry(f"{w}x{h}+0+0")
-
             elif system == "Darwin":  # macOS
                 # macOS no soporta zoomed, se usa tamaño de pantalla
                 self.state("normal")
