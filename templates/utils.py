@@ -159,7 +159,9 @@ def show_numeric_keyboard(event=None):
     global keyboard_process
     if keyboard_process is None or keyboard_process.poll() is not None:
         keyboard_process = subprocess.Popen(
-            ["onboard", "--layout", "Numeric"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            ["onboard", "--layout", "Numeric", "--no-focus"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
 
 
