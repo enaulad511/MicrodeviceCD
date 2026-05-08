@@ -143,6 +143,8 @@ class PCRFrame(ttk.Frame):
         self.teorical_time_pcr = 0
         self.stop_event_motor = None
         self.stop_udp_listenner = None
+        self.thread_experiment = None
+        self.client_temperature = None
         self.temp_update_counter = 0
         content_frame = ScrolledFrame(self, autohide=True)
         content_frame.grid(row=0, column=0, sticky="nsew")
@@ -355,12 +357,24 @@ class PCRFrame(ttk.Frame):
         if self.canvas is not None:
             self.canvas.get_tk_widget().destroy()
         self.data_temperature = []  # Datos acumulados
+        self.data_photodetector = []
 
-        self.fig, self.ax = plt.subplots()
-        (self.line,) = self.ax.plot([], [], marker="o")
+        # Dos subplots apilados: arriba temperatura (denso), abajo fotodetector (1/ciclo)
+        self.fig, (self.ax, self.ax_photo) = plt.subplots(
+            2, 1, figsize=(4.5, 5.0), constrained_layout=True
+        )
+
+        (self.line,) = self.ax.plot([], [], marker="o", markersize=2)
         self.ax.set_title("Temperature (°C)")
         self.ax.set_xlabel("Samples")
         self.ax.set_ylabel("°C")
+        self.ax.grid(True)
+
+        (self.line_photo,) = self.ax_photo.plot([], [], marker="o", color="purple", linewidth=1.2)
+        self.ax_photo.set_title("Photodetector (V)")
+        self.ax_photo.set_xlabel("Cycle")
+        self.ax_photo.set_ylabel("V")
+        self.ax_photo.grid(True)
 
         self.canvas = FigureCanvasTkAgg(self.fig, master=self.profile_frame)
         self.canvas.get_tk_widget().pack(fill="both", expand=True)
@@ -394,6 +408,22 @@ class PCRFrame(ttk.Frame):
         # Eje Y fijo
         self.ax.set_ylim(-5, 105)
 
+        self.canvas.draw_idle()
+
+    def update_graph_photodetector(self):
+        if self.canvas is None or not hasattr(self, "line_photo"):
+            return
+        n = len(self.data_photodetector)
+        if n == 0:
+            return
+        x = list(range(1, n + 1))
+        y = list(self.data_photodetector)
+        self.line_photo.set_xdata(x)
+        self.line_photo.set_ydata(y)
+        self.ax_photo.set_xlim(0.5, max(n + 0.5, 1.5))
+        ymin, ymax = min(y), max(y)
+        margin = max(0.01, (ymax - ymin) * 0.1)
+        self.ax_photo.set_ylim(ymin - margin, ymax + margin)
         self.canvas.draw_idle()
 
     def save_data_temps_file(self):
@@ -443,7 +473,7 @@ class PCRFrame(ttk.Frame):
         )
         print(msg)
         self.init_temperature_graph()
-        thread_experiment = threading.Thread(
+        self.thread_experiment = threading.Thread(  # pyrefly: ignore
             target=self.experiment_pcr,
             args=(
                 high_temp,
@@ -461,7 +491,7 @@ class PCRFrame(ttk.Frame):
                 initia_spin_time,
             ),
         )
-        thread_experiment.start()
+        self.thread_experiment.start()  # pyrefly: ignore
 
     def hold_temperature(
         self,
@@ -515,6 +545,178 @@ class PCRFrame(ttk.Frame):
                     break
                 time.sleep(WINDOW / 10)
 
+    def _load_phase_pid(self, phase, ts):
+        # Lee parámetros de la fase desde settings.json en cada llamada,
+        # para que ediciones de ganancias durante el experimento tomen efecto.
+        settings = read_settings_from_file()
+        pid = settings.get("pidControllerRPM", {})
+        return {
+            "KP": pid.get(f"KP_{phase}", 0.15),
+            "KI": pid.get(f"KI_{phase}", 0.5),
+            "I_MAX": pid.get(f"imax_{phase}", 0.5),
+            "TEMP_BAND": pid.get(f"tband_{phase}", 0.05),
+            "WINDOW": pid.get(f"win_{phase}", ts * 0.9),
+            "MAX_AGE": pid.get(f"m_age_{phase}", 0.09),
+        }
+
+    def _reach_temperature_pi(
+        self, setpoint, params, stop_event, break_if_below=False, tolerance=0.5
+    ):
+        # Rampa PI hacia setpoint con anti-windup y descarte de temperatura vieja.
+        # El heater debe estar pre-armado por el caller; este método modula on/off.
+        KP = params["KP"]
+        KI = params["KI"]
+        I_MAX = params["I_MAX"]
+        TEMP_BAND = params["TEMP_BAND"]
+        WINDOW = params["WINDOW"]
+        MAX_AGE = params["MAX_AGE"]
+        integral = 0.0
+        while tolerance < abs(setpoint - self.temp) and not stop_event.is_set():
+            if break_if_below and self.temp < setpoint:
+                break
+            age = time.time() - self.temp_ts
+            if age > MAX_AGE:
+                # Temperatura vieja → no confiar
+                self.pin_heating.write(False)  # pyrefly: ignore
+                continue
+            error = setpoint - self.temp
+            integral += error * WINDOW
+            integral = max(-I_MAX, min(I_MAX, integral))
+            if abs(error) < TEMP_BAND:
+                power = 0.0
+            else:
+                power = KP * error + KI * integral
+            power = max(0.0, min(1.0, power))
+            on_time = power * WINDOW
+            if on_time > 0:
+                self.pin_heating.write(True)  # pyrefly: ignore
+                time.sleep(on_time)
+            self.pin_heating.write(False)  # pyrefly: ignore
+            time.sleep(WINDOW - on_time)
+
+    def _hold_phase(self, phase, setpoint, duration, ts):
+        params = self._load_phase_pid(phase, ts)
+        self.hold_temperature(
+            setpoint,
+            duration,
+            ts,
+            self.stop_udp_listenner,
+            self.pin_heating,
+            params["KI"],
+            params["I_MAX"],
+            params["KP"],
+            params["TEMP_BAND"],
+            params["WINDOW"],
+        )
+        self.pin_heating.write(False)  # pyrefly: ignore
+
+    def _read_fluorescence(self, ads, stabilize_s=1.0, post_read_s=1.0, averages=8):
+        # Enciende LED PCR, espera estabilización, lee, apaga. Soporta lectura diferencial.
+        settings = read_settings_from_file()
+        self.pin_pcr.write(True)  # pyrefly: ignore
+        time.sleep(stabilize_s)
+        if settings.get("photoreceptor", {}).get("use_diff", False):
+            v = ads.read_voltage_diff(0, 1, averages=averages)
+        else:
+            v = ads.read_voltage(0, averages=averages)
+        time.sleep(post_read_s)
+        self.pin_pcr.write(False)  # pyrefly: ignore
+        return v
+
+    def _run_cycle(
+        self,
+        idx,
+        high_temp,
+        low_temp,
+        time_high,
+        time_low,
+        rpm,
+        direction,
+        acceleration,
+        ts,
+        ext_time,
+        ext_temp,
+        ads,
+    ):
+        global sistemaMotor
+        self.start_cycle_time = time.time()
+        self.cycles_complete = idx
+
+        # Reach High temp (PI, tolerancia 0.5)
+        self.fase = "Reach High temp"
+        self.pin_heating.write(True)  # pyrefly: ignore
+        self._reach_temperature_pi(
+            high_temp,
+            self._load_phase_pid("high", ts),
+            self.stop_udp_listenner,
+            break_if_below=(idx == 0),
+            tolerance=0.5,
+        )
+        print(f"Temperature reached: {self.temp} °C")
+
+        # Hold High
+        self.fase = "Hold High temp"
+        print(f"Holding temperature for {time_high} seconds")
+        self._hold_phase("h_high", high_temp, time_high, ts)
+        print(f"Hold complete, cooling down to {low_temp} °C with motor spin")
+
+        # Cool down con giro del motor
+        self.fase = "Cooling"
+        self.stop_event_motor.clear()  # pyrefly: ignore
+        spinMotorRPM_ramped(
+            direction,
+            rpm,
+            ts,
+            acceleration,
+            900.0,
+            True,
+            sistemaMotor,
+            None,
+            stop_func=lambda: self.stop_event_motor.is_set()  # pyrefly: ignore
+            or self.temp <= low_temp
+            or self.temp < low_temp + 9.5,
+            stop_event=self.stop_event_motor,
+        )
+        print(self.temp, "low temp....dis")
+        while (
+            self.temp > low_temp + 0.5 and not self.stop_udp_listenner.is_set()
+        ):  # pyrefly: ignore
+            time.sleep(0.001)
+        print(f"Temperature reached: {self.temp} °C")
+
+        # Hold Low
+        self.fase = "LOW temp Hold"
+        print(f"Holding LOW temperature for {time_low} seconds")
+        self._hold_phase("h_low", low_temp, time_low, ts)
+
+        # Reach Ext temp (PI, tolerancia 0.2)
+        self.fase = "Reach ext temp"
+        self.pin_heating.write(True)  # pyrefly: ignore
+        self._reach_temperature_pi(
+            ext_temp,
+            self._load_phase_pid("ext", ts),
+            self.stop_udp_listenner,
+            break_if_below=(idx == 0),
+            tolerance=0.2,
+        )
+        print(f"Temperature reached: {self.temp} °C")
+
+        # Hold Ext
+        self.fase = "extension temp Hold "
+        print(f"Holding extension temperature for {ext_time} seconds")
+        self._hold_phase("h_ext", ext_temp, ext_time, ts)
+        print(f"Hold ext complete, end of cycle {idx}")
+
+        # Lectura de fluorescencia
+        time.sleep(0.5)
+        self.fase = "Reading Fluorescence"
+        print("Reading fluorescence...")
+        v_fluo = self._read_fluorescence(ads, stabilize_s=1.0, post_read_s=1.0, averages=8)
+        print(f"fluorescence voltage: {v_fluo}")
+        self.data_photodetector.append(v_fluo)
+        self.after(1, lambda: self.update_graph_photodetector())
+        self.time_end_cycle = time.time()
+
     def experiment_pcr(
         self,
         high_temp,
@@ -532,24 +734,28 @@ class PCRFrame(ttk.Frame):
         initial_spin_time,
     ):
         global thread_motor, sistemaMotor
-        # cliente temperature
+
         self.stop_udp_listenner = (
             threading.Event() if self.stop_udp_listenner is None else self.stop_udp_listenner
         )
-        # write a predix line with al parameters of experiment
-        # prefix_col = f" high_temp: {high_temp}-L "
         self.total_cycles = cycles
         self.cycles_complete = 0
         self.teorical_time_pcr = (
             (time_high + time_low + ext_time) * cycles + denat_time + ext_time_final
         )
+
         settings = read_settings_from_file()
         pidGains = settings.get("pidControllerRPM", {})
         try:
             ts = float(pidGains.get("ts_pcr", 0.05))
         except Exception:
             ts = 0.05
-        prefix_col = f"high_temp: {high_temp}-low_temp: {low_temp}-time_high: {time_high}-time_low: {time_low}-cycles: {cycles}-rpm: {rpm}-denat_temp: {denat_temp}-denat_time: {denat_time}-ts: {ts}"
+
+        prefix_col = (
+            f"high_temp: {high_temp}-low_temp: {low_temp}-time_high: {time_high}"
+            f"-time_low: {time_low}-cycles: {cycles}-rpm: {rpm}"
+            f"-denat_temp: {denat_temp}-denat_time: {denat_time}-ts: {ts}"
+        )
         self.temp = 20.0
         self.client_temperature = UdpClient(
             port=5005,
@@ -565,7 +771,7 @@ class PCRFrame(ttk.Frame):
         )
         self.prefix_row = prefix_col
         self.client_temperature.start()
-        # rotate motor ar rpm
+
         from Drivers.DriverStepperSys import DriverStepperSys
 
         self.start_pcr_time = time.time()
@@ -573,7 +779,6 @@ class PCRFrame(ttk.Frame):
         try:
             acceleration = float(pidGains.get("acceleration_spin", 200.0))
             direction = "CW"
-            rpm_setpoint = rpm
             if sistemaMotor is None:
                 print("Creating new driver instance")
                 sistemaMotor = DriverStepperSys(
@@ -583,12 +788,11 @@ class PCRFrame(ttk.Frame):
             self.stop_event_motor = (
                 threading.Event() if self.stop_event_motor is None else self.stop_event_motor
             )
-            # -------------------------------------------------------------------
-            # initial spin with expecific time
-            # -------------------------------------------------------------------
+
+            # Spin inicial con tiempo específico
             spinMotorRPM_ramped(
                 direction,
-                rpm_setpoint,
+                rpm,
                 ts,
                 acceleration,
                 900.0,
@@ -612,384 +816,126 @@ class PCRFrame(ttk.Frame):
                 consumer="test_pcr",
                 active_low=False,
             )
-            # Preconfigura como salida en bajo
             self.pin_pcr.set_output(initial_high=False)
 
-            # -------------------------------------------------------------------
-            # denaturization  process
-            # -------------------------------------------------------------------
-            # heat to temp
+            # ----- Denaturación: rampa P-only con feed-forward al 80 % del setpoint
             self.fase = "Denaturation"
             self.pin_heating.write(True)  # pyrefly: ignore
-            try:
-                KP = pidGains.get("KP_denat", 0.2)
-                WINDOW = pidGains.get("win_denat", 0.05)
-                MAX_AGE = pidGains.get("m_age_denat", 0.09)
-            except Exception:
-                print("erro bad data", pidGains)
-                self.stop_udp_listenner.set()
-                return
+            denat_p = self._load_phase_pid("denat", ts)
             while self.temp < denat_temp and not self.stop_udp_listenner.is_set():
-                # heat straigh foward to the 75 % of setpoint
+                # heat straigh foward to the 80 % of setpoint
                 if self.temp <= denat_temp * 0.80:
                     continue
                 age = time.time() - self.temp_ts
-                if age > MAX_AGE:
+                if age > denat_p["MAX_AGE"]:
                     # Temperatura vieja → no confiar
                     self.pin_heating.write(False)
                     continue
                 error = denat_temp - self.temp
-                power = max(0.0, min(1.0, KP * error))
-                on_time = power * WINDOW
+                power = max(0.0, min(1.0, denat_p["KP"] * error))
+                on_time = power * denat_p["WINDOW"]
                 if on_time > 0:
                     self.pin_heating.write(True)
                     time.sleep(on_time)
                 self.pin_heating.write(False)
-                time.sleep(WINDOW - on_time)
+                time.sleep(denat_p["WINDOW"] - on_time)
 
-            # ------------------------------------------------------------
-            # Denaturation Hold (control proporcional por ventana)
-            # ------------------------------------------------------------
+            # ----- Denaturation Hold
             self.fase = "Denaturation Hold"
-            try:
-                KP_HOLD = pidGains.get("KP_h_denat", 0.2)
-                WINDOW = pidGains.get("win_h_denat", ts * 0.9)
-                KI = pidGains.get("KI_h_denat", 0.7)
-                I_MAX = pidGains.get("imax_h_denat", 0.55)
-                TEMP_BAND = pidGains.get("tband_h_denat", 0.05)
-            except Exception:
-                print("erorr bad pid denat hold", pidGains)
-                self.stop_udp_listenner.set()
-                return
-            self.hold_temperature(
-                denat_temp,
-                denat_time,
-                ts,
-                self.stop_udp_listenner,
-                self.pin_heating,
-                KI,
-                I_MAX,
-                KP_HOLD,
-                TEMP_BAND,
-                WINDOW,
-            )
-
-            # Asegurar apagado final
-            self.pin_heating.write(False)
+            self._hold_phase("h_denat", denat_temp, denat_time, ts)
             print(f"Denaturation complete, temperature: {self.temp} °C")
-            # Preconfigura como salida en bajo
-            current_cycle = 0
-            print(f"start cycle {current_cycle}")
-            while current_cycle < cycles:
-                # -------------------------------------------------------------------
-                # init cycle
-                # -------------------------------------------------------------------
-                # -------------------------------------------------------------------
-                self.start_cycle_time = time.time()
-                self.cycles_complete = current_cycle
-                # reach high temp
-                self.fase = "Reach High temp"
-                settings = read_settings_from_file()
-                pidGains = settings.get("pidControllerRPM", {})
-                try:
-                    KP = pidGains.get("KP_high", 0.15)
-                    WINDOW = pidGains.get("win_high", 0.05)
-                    MAX_AGE = pidGains.get("m_age_high", 0.09)
-                    TEMP_BAND = pidGains.get("tband_high", 0.05)
-                    KI = pidGains.get("KI_high", 0.6)
-                    I_MAX = pidGains.get("imax_high", 0.5)
-                except Exception:
-                    print("error bad data reach high", pidGains)
-                    self.stop_udp_listenner.set()
-                    return
-                integral = 0
-                self.pin_heating.write(True)  # pyrefly: ignore
-                while 0.5 < abs(high_temp - self.temp) and not self.stop_udp_listenner.is_set():
-                    # # heat straigh foward to the 75 % of setpoint
-                    # if self.temp <= high_temp * 0.4:
-                    #     continue
-                    # # print(f"Temperature: {self.temp} °C")
-                    if current_cycle == 0 and self.temp < high_temp:
-                        break
-                    age = time.time() - self.temp_ts
-                    if age > MAX_AGE:
-                        # Temperatura vieja → no confiar
-                        self.pin_heating.write(False)
-                        continue
-                    error = high_temp - self.temp
-                    integral += error * WINDOW
-                    integral = max(-I_MAX, min(I_MAX, integral))
-                    if abs(error) < TEMP_BAND:
-                        power = 0.0
-                    else:
-                        power = KP_HOLD * error + KI * integral
-                    power = max(0.0, min(1.0, KP * error))
-                    on_time = power * WINDOW
 
-                    if on_time > 0:
-                        self.pin_heating.write(True)
-                        time.sleep(on_time)
-                    self.pin_heating.write(False)
-                    time.sleep(WINDOW - on_time)
-
-                print(f"Temperature reached: {self.temp} °C")
-                # -------------------------------------------------------------------
-                # hold High temperature
-                self.fase = "Hold High temp"
-                print(f"Holding temperature for {time_high} seconds")
-                settings = read_settings_from_file()
-                pidGains = settings.get("pidControllerRPM", {})
-                try:
-                    KP_HOLD = pidGains.get("KP_h_high", 0.1)
-                    WINDOW = pidGains.get("win_h_high", ts * 0.9)
-                    KI = pidGains.get("KI_h_high", 0.5)
-                    I_MAX = pidGains.get("imax_h_high", 0.5)
-                    TEMP_BAND = pidGains.get("tband_h_high", 0.05)
-                except Exception:
-                    print("error data pid hold h")
-                    self.stop_udp_listenner.set()
-                    return
-                self.hold_temperature(
+            # ----- Ciclos PCR
+            for idx in range(cycles):
+                if self.stop_udp_listenner.is_set():
+                    break
+                print(f"start cycle {idx}")
+                self._run_cycle(
+                    idx,
                     high_temp,
-                    time_high,
-                    ts,
-                    self.stop_udp_listenner,
-                    self.pin_heating,
-                    KI,
-                    I_MAX,
-                    KP_HOLD,
-                    TEMP_BAND,
-                    WINDOW,
-                )
-
-                self.pin_heating.write(False)
-                print(f"Hold complete, cooling down to {low_temp} °C with motor spin")
-                self.pin_heating.write(False)  # encender calor
-                # -------------------------------------------------------------------
-                # cool down with motor spin
-                self.fase = "Cooling"
-                self.stop_event_motor.clear()
-                spinMotorRPM_ramped(
-                    direction,
-                    rpm_setpoint,
-                    ts,
-                    acceleration,
-                    900.0,
-                    True,
-                    sistemaMotor,
-                    None,
-                    stop_func=lambda: self.stop_event_motor.is_set()
-                    or self.temp <= low_temp
-                    or self.temp < low_temp + 9.5,
-                    stop_event=self.stop_event_motor,
-                )
-                print(self.temp, "low temp....dis")
-                while self.temp > low_temp + 0.5 and not self.stop_udp_listenner.is_set():
-                    time.sleep(0.001)
-                print(f"Temperature reached: {self.temp} °C")
-                # -------------------------------------------------------------------
-                # hold LOW temperature
-                self.fase = "LOW temp Hold"
-                print(f"Holding LOW temperature for {time_low} seconds")
-                settings = read_settings_from_file()
-                pidGains = settings.get("pidControllerRPM", {})
-                try:
-                    KP_HOLD = pidGains.get("KP_h_low", 0.1)
-                    WINDOW = pidGains.get("win_h_low", ts * 0.5)
-                    KI = pidGains.get("KI_h_low", 0.45)
-                    I_MAX = pidGains.get("imax_h_low", 0.5)
-                    TEMP_BAND = pidGains.get("tband_h_low", 0.05)
-                except Exception:
-                    print("error data pid hold low")
-                    self.stop_udp_listenner.set()
-                    return
-                self.hold_temperature(
                     low_temp,
+                    time_high,
                     time_low,
+                    rpm,
+                    direction,
+                    acceleration,
                     ts,
-                    self.stop_udp_listenner,
-                    self.pin_heating,
-                    KI,
-                    I_MAX,
-                    KP_HOLD,
-                    TEMP_BAND,
-                    WINDOW,
+                    ext_time,
+                    ext_temp,
+                    ads,
                 )
-                # Asegurar apagado final
-                self.pin_heating.write(False)
-                # ---------------------------------------------------
-                # reach ext temp
-                self.fase = "Reach ext temp"
-                exts_temp = ext_temp
-                settings = read_settings_from_file()
-                pidGains = settings.get("pidControllerRPM", {})
-                try:
-                    KP = pidGains.get("KP_ext", 0.15)
-                    WINDOW = pidGains.get("win_ext", 0.05)
-                    MAX_AGE = pidGains.get("m_age_ext", 0.09)
-                    TEMP_BAND = pidGains.get("tband_ext", 0.05)
-                    KI = pidGains.get("KI_ext", 0.6)
-                    I_MAX = pidGains.get("imax_ext", 0.5)
-                except Exception:
-                    print("error bad data reach high", pidGains)
-                    self.stop_udp_listenner.set()
-                    return
-                integral = 0
-                self.pin_heating.write(True)  # pyrefly: ignore
-                while 0.2 < abs(exts_temp - self.temp) and not self.stop_udp_listenner.is_set():
-                    if current_cycle == 0 and self.temp < exts_temp:
-                        break
-                    age = time.time() - self.temp_ts
-                    if age > MAX_AGE:
-                        # Temperatura vieja → no confiar
-                        self.pin_heating.write(False)
-                        continue
-                    error = exts_temp - self.temp
-                    integral += error * WINDOW
-                    integral = max(-I_MAX, min(I_MAX, integral))
-                    if abs(error) < TEMP_BAND:
-                        power = 0.0
-                    else:
-                        power = KP_HOLD * error + KI * integral
-                    power = max(0.0, min(1.0, KP * error))
-                    on_time = power * WINDOW
 
-                    if on_time > 0:
-                        self.pin_heating.write(True)
-                        time.sleep(on_time)
-                    self.pin_heating.write(False)
-                    time.sleep(WINDOW - on_time)
-
-                print(f"Temperature reached: {self.temp} °C")
-                # -------------------------------------------------------------------
-                # hold extension temperature
-                self.fase = "extension temp Hold "
-                time_ext = ext_time
-                exts_temp = ext_temp
-                print(f"Holding extension temperature for {time_ext} seconds")
-                settings = read_settings_from_file()
-                pidGains = settings.get("pidControllerRPM", {})
-                try:
-                    KP_HOLD = pidGains.get("KP_h_ext", 0.1)
-                    WINDOW = pidGains.get("win_h_ext", ts * 0.5)
-                    KI = pidGains.get("KI_h_ext", 0.45)
-                    I_MAX = pidGains.get("imax_h_ext", 0.5)
-                    TEMP_BAND = pidGains.get("tband_h_ext", 0.05)
-                except Exception:
-                    print("error data pid hold low")
-                    self.stop_udp_listenner.set()
-                    return
-                self.hold_temperature(
-                    exts_temp,
-                    time_ext,
-                    ts,
-                    self.stop_udp_listenner,
-                    self.pin_heating,
-                    KI,
-                    I_MAX,
-                    KP_HOLD,
-                    TEMP_BAND,
-                    WINDOW,
-                )
-                # Asegurar apagado final
-                self.pin_heating.write(False)
-                print(f"Hold ext complete, end of cycle {current_cycle}")
-                current_cycle += 1
-                # end of cycle
-                self.pin_heating.write(False)
+            # ----- Extensión final + lectura de fluorescencia (solo si no se detuvo)
+            if not self.stop_udp_listenner.is_set():
+                print("PCR cycles complete, reading fluorescence")
+                self.fase = "Extension"
+                self._hold_phase("h_ext", 68, ext_time_final, ts)
                 time.sleep(0.5)
-                self.pin_pcr.write(True)
-                time.sleep(1)
-                print("Reading fluorescence...")
-                self.fase = "Reading Fluorescence"
-                v_fluo = ads.read_voltage(0, averages=4)
-                time.sleep(1)
-                self.pin_pcr.write(False)
-                print(f"fluorescence voltage: {v_fluo}")
-                self.data_photodetector.append(v_fluo)
-                self.time_end_cycle = time.time()
-            print("PCR cycles complete, reading fluorescence")
-            self.fase = "Extension"
-            time_extension = ext_time_final
-            try:
-                KP_HOLD = pidGains.get("KP_h_ext", 0.1)
-                WINDOW = pidGains.get("win_h_ext", ts * 0.9)
-                KI = pidGains.get("KI_h_ext", 0.5)
-                I_MAX = pidGains.get("imax_h_ext", 0.5)
-                TEMP_BAND = pidGains.get("tband_h_ext", 0.05)
-            except Exception:
-                print("error data pid hold h")
-                self.stop_udp_listenner.set()
-                return
-            self.hold_temperature(
-                68,
-                time_extension,
-                ts,
-                self.stop_udp_listenner,
-                self.pin_heating,
-                KI,
-                I_MAX,
-                KP_HOLD,
-                TEMP_BAND,
-                WINDOW,
-            )
-            # Asegurar apagado final
-            self.pin_heating.write(False)
-            time.sleep(0.5)
-            self.pin_pcr.write(True)
-            time.sleep(0.5)
-            v_fluo_final = ads.read_voltage(0, averages=4)
-            print(f"Final fluorescence voltage: {v_fluo_final}")
-            time.sleep(0.5)
-            self.fase = "Final"
-            self.pin_pcr.write(False)
-            self.pin_heating.close()
-            self.pin_pcr.close()
-            # save data temps
+                v_fluo_final = self._read_fluorescence(
+                    ads, stabilize_s=0.5, post_read_s=0.5, averages=4
+                )
+                print(f"Final fluorescence voltage: {v_fluo_final}")
+                self.fase = "Final"
+
             self.save_data_temps_file()
 
         except Exception as e:
             print(f"exception in experiment: {e}")
+        finally:
+            self._teardown_hardware()
+
+    def _teardown_hardware(self):
+        # Cierre idempotente de hardware: motor, UDP, pines GPIO. Seguro de invocar
+        # desde el hilo del experimento (en finally) o desde el hilo de UI (Stop).
+        global sistemaMotor
         if sistemaMotor is not None:
-            # sistemaMotor.stop()
-            sistemaMotor.close()
-        sistemaMotor = None
-        self.client_temperature.stop()
+            try:
+                sistemaMotor.stop()
+            except Exception as e:
+                print(f"error stopping motor: {e}")
+            try:
+                sistemaMotor.close()
+            except Exception as e:
+                print(f"error closing motor: {e}")
+            sistemaMotor = None
+        if self.client_temperature is not None:
+            try:
+                self.client_temperature.stop()
+            except Exception as e:
+                print(f"error stopping udp client: {e}")
+        if self.pin_heating is not None:
+            try:
+                self.pin_heating.write(False)  # pyrefly: ignore
+                self.pin_heating.close()
+            except Exception as e:
+                print(f"error closing pin_heating: {e}")
+            self.pin_heating = None
+        if self.pin_pcr is not None:
+            try:
+                self.pin_pcr.write(False)  # pyrefly: ignore
+                self.pin_pcr.close()
+            except Exception as e:
+                print(f"error closing pin_pcr: {e}")
+            self.pin_pcr = None
         self.running_experiment = False
-        self.pin_heating = None
-        self.pin_pcr = None
 
     def callback_stop_experiment(self):
-        global sistemaMotor
+        # Restaura UI y dispara la salida ordenada del hilo del experimento.
+        # El propio finally del experimento llama a _teardown_hardware; aquí solo
+        # señalizamos, esperamos al hilo, y tiramos red de seguridad si se colgó.
         self.frame_entries.grid(row=0, column=0, padx=5, pady=5, sticky="nswe")
-        if self.stop_event_motor is None:
-            print("No experiment running")
-            self.running_experiment = False
-            return
-        if self.stop_udp_listenner is None:
+        if self.stop_event_motor is None or self.stop_udp_listenner is None:
             print("No experiment running")
             self.running_experiment = False
             return
         self.stop_event_motor.set()
         self.stop_udp_listenner.set()
-        # stop motor
-        # stop temperature
-        self.client_temperature.stop()
-        self.running_experiment = False
-
-        time.sleep(1)
-        if sistemaMotor is not None:
-            sistemaMotor.stop()
-            sistemaMotor.close()
-            sistemaMotor = None
-        if self.pin_heating is not None:
-            self.pin_heating.write(False)
-            self.pin_heating.close()
-        if self.pin_pcr is not None:
-            self.pin_pcr.write(False)
-            self.pin_pcr.close()
-        self.pin_heating = None
-        self.pin_pcr = None
+        if self.thread_experiment is not None:
+            self.thread_experiment.join(timeout=3.0)
+            if self.thread_experiment.is_alive():
+                print("warning: experiment thread did not exit within 3s, forcing teardown")
+        # Red de seguridad: si el finally del experimento ya corrió, esto es no-op.
+        self._teardown_hardware()
         self.stop_event_motor = None
         self.stop_udp_listenner = None
-        sistemaMotor = None
+        self.thread_experiment = None

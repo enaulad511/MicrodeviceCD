@@ -38,8 +38,9 @@ def create_widgets_configuration(parent):
                 entry_widgets.append(entry)
                 subindex += 1
         else:
+            index += 1
             ttk.Label(parent, text=f"{k}:", style="Custom.TLabel").grid(
-                row=index+1, column=0, padx=5, pady=5, sticky="nswe"
+                row=index, column=0, padx=5, pady=5, sticky="nswe"
             )
             svar = ttk.StringVar(value=str(v))
             entry = ttk.Entry(parent, font=font_entry, textvariable=svar)
