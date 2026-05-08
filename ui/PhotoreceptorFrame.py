@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 
 
+from templates.utils import read_settings_from_file
+from ezdxf import read
 import ttkbootstrap as ttk
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
@@ -122,9 +124,11 @@ class PhotoreceptorFrame(ttk.Frame):
     def adquirir_dato(self):
         if not self.running:
             return
-
-        intensidad = self.ads.read_voltage_diff(0, 1, averages=8)
-        # intensidad = self.ads.read_voltage(0, averages=8)
+        settings = read_settings_from_file()
+        if settings["photoreceptor"]["use_diff"]:
+            intensidad = self.ads.read_voltage_diff(0, 1, averages=8)
+        else:
+            intensidad = self.ads.read_voltage(0, averages=8)
         timestamp = time.time()
 
         self.data.append(intensidad)
