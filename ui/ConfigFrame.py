@@ -79,7 +79,7 @@ class ConfigFrame(ttk.Toplevel):
     def _on_entry_focus(self, event):
         entry = event.widget
         self.keyboard.set_target(entry)
-        kb_w, kb_h = 300, 250
+        kb_w, kb_h = 360, 250
         self.update_idletasks()
         x = entry.winfo_rootx() - self.winfo_rootx()
         y = entry.winfo_rooty() - self.winfo_rooty() + entry.winfo_height()

@@ -9,12 +9,15 @@ from templates.constants import font_entry
 import threading
 import time
 
+from ui.KeyboardFrame import NumericKeyboard
+
 __author__ = "Edisson A. Naula"
 __date__ = "$ 08/10/2025  at 11:11 a.m. $"
 
 
 def create_widgets_disco_input(parent, callbacks: dict):
     entries = []
+    entry_widgets = []
     parent.columnconfigure((0, 1), weight=1)
     parent.rowconfigure((0, 1), weight=1)
     # Mode 1: Continuous rotation CW or CCW with RPM
@@ -41,6 +44,7 @@ def create_widgets_disco_input(parent, callbacks: dict):
     rpm_entry = ttk.Entry(frame1, font=font_entry, textvariable=svar_rpm, width=5)
     rpm_entry.grid(row=1, column=1, padx=5, pady=5, sticky="w")
     entries.append(svar_rpm)
+    entry_widgets.append(rpm_entry)
 
     ttk.Button(
         frame1,
@@ -62,6 +66,7 @@ def create_widgets_disco_input(parent, callbacks: dict):
     cycles_entry = ttk.Entry(frame2, font=font_entry, textvariable=svar_cycles, width=5)
     cycles_entry.grid(row=0, column=1, padx=5, pady=5, sticky="s")
     entries.append(svar_cycles)
+    entry_widgets.append(cycles_entry)
 
     ttk.Label(frame2, text="Acceleration time (ms):", style="Custom.TLabel").grid(
         row=1, column=0, padx=5, pady=5, sticky="w"
@@ -70,6 +75,7 @@ def create_widgets_disco_input(parent, callbacks: dict):
     accel_entry = ttk.Entry(frame2, font=font_entry, textvariable=svar_accel, width=5)
     accel_entry.grid(row=1, column=1, padx=5, pady=5, sticky="w")
     entries.append(svar_accel)
+    entry_widgets.append(accel_entry)
 
     ttk.Label(frame2, text="Target RPM:", style="Custom.TLabel").grid(
         row=2, column=0, padx=5, pady=5, sticky="w"
@@ -80,6 +86,7 @@ def create_widgets_disco_input(parent, callbacks: dict):
     )
     target_rpm_entry.grid(row=2, column=1, padx=5, pady=5, sticky="w")
     entries.append(svar_target_rpm)
+    entry_widgets.append(target_rpm_entry)
 
     ttk.Label(frame2, text="Deceleration time (ms):", style="Custom.TLabel").grid(
         row=3, column=0, padx=5, pady=5, sticky="w"
@@ -88,6 +95,7 @@ def create_widgets_disco_input(parent, callbacks: dict):
     decel_entry = ttk.Entry(frame2, font=font_entry, textvariable=svar_decel, width=5)
     decel_entry.grid(row=3, column=1, padx=5, pady=5, sticky="w")
     entries.append(svar_decel)
+    entry_widgets.append(decel_entry)
 
     ttk.Button(
         frame2,
@@ -109,6 +117,7 @@ def create_widgets_disco_input(parent, callbacks: dict):
     angle_entry = ttk.Entry(frame3, font=font_entry, textvariable=svar_angle, width=5)
     angle_entry.grid(row=0, column=1, padx=5, pady=5, sticky="w")
     entries.append(svar_angle)
+    entry_widgets.append(angle_entry)
 
     ttk.Label(frame3, text="Speed (%):", style="Custom.TLabel").grid(
         row=1, column=0, padx=5, pady=5, sticky="w"
@@ -117,6 +126,7 @@ def create_widgets_disco_input(parent, callbacks: dict):
     speed_entry = ttk.Entry(frame3, font=font_entry, textvariable=svar_speed, width=5)
     speed_entry.grid(row=1, column=1, padx=5, pady=5, sticky="w")
     entries.append(svar_speed)
+    entry_widgets.append(speed_entry)
 
     ttk.Button(
         frame3,
@@ -139,6 +149,7 @@ def create_widgets_disco_input(parent, callbacks: dict):
     )
     zero_rpm_entry.grid(row=0, column=1, padx=5, pady=5, sticky="w")
     entries.append(svar_zero_rpm)
+    entry_widgets.append(zero_rpm_entry)
     ttk.Button(
         frame4,
         text="Go to Zero",
@@ -153,7 +164,7 @@ def create_widgets_disco_input(parent, callbacks: dict):
         command=callbacks.get("callback_stop", ()),
     ).grid(row=1, column=1, pady=10, padx=5, sticky="nswe")
 
-    return entries
+    return entries, entry_widgets
 
 
 # Variables globales
@@ -195,7 +206,6 @@ def spinMotorRPM_ramped(
     if d not in ("CW", "CCW"):
         print("Dirección no válida. Usa 'CW' o 'CCW'.")
         return
-
     # Define el signo por dirección y limita objetivo
     sign = 1 if d == "CW" else -1
     target_abs = min(abs(setpoint_rpm), max_rpm)
@@ -253,7 +263,6 @@ def spinMotorRPM_ramped(
                 if int(status.get("rpm")) < 100:
                     break
                 time.sleep(ts)
-
     # # detec position and go to 0°
     # got to zero position
     drv.go_zero(50)
@@ -411,8 +420,28 @@ class ControlDiscFrame(ttk.Frame):
             "callback_stop": self.callback_stop,
             "callback_zero": self.callback_zero,
         }
-        self.entries = create_widgets_disco_input(content_frame, callbacks)
+        self.entries, entry_widgets = create_widgets_disco_input(content_frame, callbacks)
+        self.keyboard = NumericKeyboard(self)
+        self.keyboard.place_forget()
+        for entry in entry_widgets:
+            entry.bind("<FocusIn>", self._on_entry_focus)
         self.stop_event = None
+
+    def _on_entry_focus(self, event):
+        entry = event.widget
+        self.keyboard.set_target(entry)
+        kb_w, kb_h = 360, 250
+        self.update_idletasks()
+        x = entry.winfo_rootx() - self.winfo_rootx()
+        y = entry.winfo_rooty() - self.winfo_rooty() + entry.winfo_height()
+        max_x = self.winfo_width() - kb_w
+        if max_x > 0:
+            x = max(0, min(x, max_x))
+        max_y = self.winfo_height() - kb_h
+        if max_y > 0 and y > max_y:
+            y = entry.winfo_rooty() - self.winfo_rooty() - kb_h
+        self.keyboard.place(x=x, y=y, width=kb_w, height=kb_h)
+        self.keyboard.lift()
 
     def callback_spin(self):
         global thread_motor, drv

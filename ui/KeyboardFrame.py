@@ -16,7 +16,12 @@ class NumericKeyboard(ttk.Frame):
         super().__init__(parent, relief="raised")
         self.target_entry = None
 
-        buttons = [["7", "8", "9", "OK"], ["4", "5", "6"], ["1", "2", "3"], ["0", ".", "⌫"]]
+        buttons = [
+            ["7", "8", "9", "OK"],
+            ["4", "5", "6", "e"],
+            ["1", "2", "3", "-"],
+            ["±", "0", ".", "⌫"],
+        ]
 
         for r, row in enumerate(buttons):
             for c, char in enumerate(row):
@@ -27,7 +32,7 @@ class NumericKeyboard(ttk.Frame):
                     style="CustomPrimary.TButton",
                 )
                 btn.grid(row=r, column=c, ipadx=10, ipady=10, sticky="nsew")
-        for i in range(3):
+        for i in range(4):
             self.columnconfigure(i, weight=1)
         for i in range(len(buttons)):
             self.rowconfigure(i, weight=1)
@@ -44,6 +49,12 @@ class NumericKeyboard(ttk.Frame):
             current = self.target_entry.get()
             self.target_entry.delete(0, "end")
             self.target_entry.insert(0, current[:-1])
+
+        elif char == "±":
+            current = self.target_entry.get()
+            new = current[1:] if current.startswith("-") else "-" + current
+            self.target_entry.delete(0, "end")
+            self.target_entry.insert(0, new)
 
         elif char == "OK":
             self.place_forget()  # ocultar teclado (opcional)
