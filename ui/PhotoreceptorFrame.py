@@ -2,7 +2,6 @@
 
 
 from templates.utils import read_settings_from_file
-from ezdxf import read
 import ttkbootstrap as ttk
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
