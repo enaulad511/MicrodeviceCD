@@ -195,7 +195,9 @@ def create_widgets_cv(parent, columns=2):
 
         for i, lbl in enumerate(subset):
             row = i
-            ttk.Label(frame1, text=lbl, style="Custom.TLabel").grid(row=row, column=col * 2, padx=5, pady=5, sticky="w")
+            ttk.Label(frame1, text=lbl, style="Custom.TLabel").grid(
+                row=row, column=col * 2, padx=5, pady=5, sticky="w"
+            )
 
             entry = ttk.Entry(frame1, font=font_entry)
             entry.insert(0, DEFAUL_VALUES_CV[start + i])
@@ -216,7 +218,8 @@ def create_widgets_cv(parent, columns=2):
             frame_selectors,
             text=text,
             value=value,
-            variable=current_range_var, style='Custom.TRadiobutton'
+            variable=current_range_var,
+            style="Custom.TRadiobutton",
         ).grid(row=0, column=col, padx=5, pady=5, sticky="nswe")
     # --------------------------------------------------------------------------------
     # -----------------------------Motor Settings-------------------------------------
@@ -226,17 +229,26 @@ def create_widgets_cv(parent, columns=2):
     frame_motor_settings.columnconfigure((0, 1), weight=1)
     # enable motor checkbox
     enable_motor = ttk.BooleanVar(value=False)
-    enable_motor_check = ttk.Checkbutton(frame_motor_settings, text="Enable Motor", variable=enable_motor, style="Custom.TCheckbutton")
+    enable_motor_check = ttk.Checkbutton(
+        frame_motor_settings,
+        text="Enable Motor",
+        variable=enable_motor,
+        style="Custom.TCheckbutton",
+    )
     enable_motor_check.grid(row=0, column=0, columnspan=2, padx=5, pady=5, sticky="n")
     entries_motor.append(enable_motor)
 
-    ttk.Label(frame_motor_settings, text="Angle (°, max 30):", style="Custom.TLabel").grid(row=1, column=0, padx=5, pady=5, sticky="w")
+    ttk.Label(frame_motor_settings, text="Angle (°, max 30):", style="Custom.TLabel").grid(
+        row=1, column=0, padx=5, pady=5, sticky="w"
+    )
     svar_angle = ttk.StringVar(value="30")
     angle_entry = ttk.Entry(frame_motor_settings, font=font_entry, textvariable=svar_angle, width=5)
     angle_entry.grid(row=1, column=1, padx=5, pady=5, sticky="w")
     entries_motor.append(svar_angle)
 
-    ttk.Label(frame_motor_settings, text="Speed (%):", style="Custom.TLabel").grid(row=2, column=0, padx=5, pady=5, sticky="w")
+    ttk.Label(frame_motor_settings, text="Speed (%):", style="Custom.TLabel").grid(
+        row=2, column=0, padx=5, pady=5, sticky="w"
+    )
     svar_speed = ttk.StringVar(value="10")
     speed_entry = ttk.Entry(frame_motor_settings, font=font_entry, textvariable=svar_speed, width=5)
     speed_entry.grid(row=2, column=1, padx=5, pady=5, sticky="w")
@@ -285,7 +297,7 @@ class CVFrame(ttk.Frame):
         ttk.Frame.__init__(self, parent)
         self.parent = parent
         self.columnconfigure(0, weight=1)
-        self.rowconfigure((0,1), weight=1)
+        self.rowconfigure((0, 1), weight=1)
         self.payload = {}
         self.stop_event = None
         # ----------------variables--------------
@@ -316,21 +328,26 @@ class CVFrame(ttk.Frame):
         self.frame_entries = ttk.Frame(content_frame)
         self.frame_entries.grid(row=0, column=0, sticky="nsew")
         self.frame_entries.columnconfigure(0, weight=1)
-        self.entries, self.current_range, self.entries_motor, motor_entry_widgets = create_widgets_cv(self.frame_entries)
+        self.entries, self.current_range, self.entries_motor, motor_entry_widgets = (
+            create_widgets_cv(self.frame_entries)
+        )
         self.keyboard = NumericKeyboard(self)
         self.keyboard.place_forget()
         for entry in list(self.entries) + motor_entry_widgets:
             entry.bind("<FocusIn>", self._on_entry_focus)
 
         self.frame_buttons = ttk.Frame(content_frame)
-        self.frame_buttons.grid(row=1, column=0, sticky="nsew")
+        self.frame_buttons.grid(row=1, column=0, sticky="nsew", padx=(5, 25))
         self.frame_buttons.columnconfigure(0, weight=1)
         create_buttons_cv(self.frame_buttons, callbacks)
 
         self.frame_plotter = ttk.LabelFrame(self, text="Live Data Plotter")
-        self.frame_plotter.grid(row=1, column=0, padx=10, pady=2, sticky="nsew")
+        self.frame_plotter.grid(row=1, column=0, padx=5, pady=2, sticky="nsew")
         self.frame_plotter.columnconfigure(0, weight=1)
         self.frame_plotter.configure(style="Custom.TLabelframe")
+        self.frame_plotter.columnconfigure(0, weight=1)
+        self.frame_plotter.rowconfigure(0, weight=1)
+
         self.udp_plotter = EventPlotter(
             self.frame_plotter,
             "cv",
@@ -343,7 +360,7 @@ class CVFrame(ttk.Frame):
             frames_to_hide=[self.frame_entries],
             on_end_expriment=self.on_end_experiment,
         )
-        self.udp_plotter.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
+        self.udp_plotter.grid(row=0, column=0, padx=(5, 15), sticky="nsew")
         self.frame_plotter.grid_forget()
 
     def show_inputs_frame(self, hide=True):
@@ -432,10 +449,17 @@ class CVFrame(ttk.Frame):
             enable_motor = self.entries_motor[0].get()
             if enable_motor:
                 sent_callback = self.start_spin_motor_angle
-            self.udp_plotter.update_val_experiment(x_key="E_V", y_key="I_A", payload=self.payload, ip_sender=ip_sender, callback_spin_motor=sent_callback)
-            self.frame_plotter.grid(row=1, column=0, padx=10, pady=10, sticky="nsew")
-
+            self.udp_plotter.update_val_experiment(
+                x_key="E_V",
+                y_key="I_A",
+                payload=self.payload,
+                ip_sender=ip_sender,
+                callback_spin_motor=sent_callback,
+            )
+            self.frame_plotter.grid(row=1, column=0, padx=(0, 25), pady=2, sticky="nsew")
             print("script sent")
+            # set scrollbar to 
+            
         except ValueError:
             self.show_inputs_frame()
             print("Error: Check input values.")
@@ -516,7 +540,15 @@ class CVFrame(ttk.Frame):
 
             thread_motor = threading.Thread(
                 target=spinMotorAngleDriver,
-                args=(angle, speed_percentage * max_rpm / 100, max_rpm, None, True, self.stop_event, None),
+                args=(
+                    angle,
+                    speed_percentage * max_rpm / 100,
+                    max_rpm,
+                    None,
+                    True,
+                    self.stop_event,
+                    None,
+                ),
             )
             thread_motor.start()
             print("Modo oscilador iniciado")
@@ -535,7 +567,7 @@ class CVFrame(ttk.Frame):
         else:
             self.thread_motor.join()
             self.thread_motor = None
-    
+
         print("Experimento finalizado. Motor detenido.")
 
 

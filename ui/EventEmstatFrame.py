@@ -2,7 +2,9 @@
 from matplotlib.figure import Figure
 from Drivers.EmstatUtils import EmstatStreamParser
 from Drivers.EmstatUtils import LineBufferedSocketReader
+import csv
 import json
+import os
 import socket
 import threading
 import queue
@@ -14,7 +16,7 @@ import matplotlib
 matplotlib.use("TkAgg")  # backend para Tk
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
-from tkinter.filedialog import askdirectory
+from tkinter.filedialog import askdirectory, askopenfilename
 import ttkbootstrap as ttk
 import tkinter as tk
 
@@ -73,6 +75,7 @@ class EventPlotter(ttk.Frame):
         self.q_tcp_lines = queue.Queue(maxsize=20000)  # grande, pero finita
         self.storage_dict = {}  # registro parcial de informacion
         self.total_data = []  # registro total de informacion
+        self.loaded_lines = []  # Line2D agregadas desde archivos CSV cargados
         self.stop_event = threading.Event()
         self.reader_th = None
         self.processor_th = None
@@ -82,8 +85,8 @@ class EventPlotter(ttk.Frame):
         self.after_id = None
         # --- Estado del gráfico ---
         DPI = 100
-        WIDTH_PX = 700
-        HEIGHT_PX = 350  # ✅ más bajo para pantallas pequeñas
+        WIDTH_PX = 600
+        HEIGHT_PX = 250  # ✅ más bajo para pantallas pequeñas
         self.fig = Figure(figsize=(WIDTH_PX / DPI, HEIGHT_PX / DPI), dpi=DPI, layout="compressed")
         plt.style.use("seaborn-v0_8-darkgrid")
         self.ax = self.fig.add_subplot(111)
@@ -91,8 +94,47 @@ class EventPlotter(ttk.Frame):
         self.ax.set_xlabel(self.x_label)
         self.ax.set_ylabel(self.y_label)
 
-        self.canvas_frame = ttk.Frame(self, height=480)
-        self.canvas_frame.pack(side=ttk.TOP, fill=ttk.X)
+        # --- Controles (packed antes que el canvas para que aparezcan arriba) ---
+        controls = ttk.Frame(self)
+        controls.pack(side=ttk.TOP, fill=ttk.X, pady=6)
+
+        self.btn_start = ttk.Button(
+            controls, text="▶ Start listening", bootstyle="success", command=self.start
+        )
+        self.btn_stop = ttk.Button(
+            controls,
+            text="⏹ Stop",
+            bootstyle="danger",
+            command=self.stop,
+            state=ttk.DISABLED,
+        )
+        self.btn_clear = ttk.Button(
+            controls, text="🗑 Clean", bootstyle="secondary", command=self.clear_plot
+        )
+        self.btn_save = ttk.Button(
+            controls, text="💾 Save", bootstyle="secondary", command=self.save_data
+        )
+        self.btn_load = ttk.Button(
+            controls, text="📂 Load", bootstyle="secondary", command=self.load_data
+        )
+        self.btn_custom_plot = ttk.Button(
+            controls,
+            text="📊 Custom Plot",
+            bootstyle="secondary",
+            command=self.custom_plot_axes,
+        )
+        self.lbl_status = ttk.Label(self, text="State: stopped.", anchor="w")
+
+        self.btn_start.pack(side=ttk.LEFT, padx=4)
+        self.btn_stop.pack(side=ttk.LEFT, padx=4)
+        self.btn_clear.pack(side=ttk.LEFT, padx=4)
+        self.btn_save.pack(side=ttk.LEFT, padx=4)
+        self.btn_load.pack(side=ttk.LEFT, padx=4)
+        self.btn_custom_plot.pack(side=ttk.LEFT, padx=4)
+        self.lbl_status.pack(side=ttk.LEFT, padx=4)
+
+        self.canvas_frame = ttk.Frame(self, height=380)
+        self.canvas_frame.pack(side=ttk.TOP, fill=ttk.X, padx=1)
         self.canvas_frame.pack_propagate(False)
 
         self.canvas = FigureCanvasTkAgg(self.fig, self.canvas_frame)
@@ -108,35 +150,6 @@ class EventPlotter(ttk.Frame):
         self.y_by_m = {}
         self.lines_by_m = {}
         self._style_cycle = self._build_style_cycle()
-
-        # --- Controles ---
-        controls = ttk.Frame(self)
-        controls.pack(side=ttk.TOP, fill=ttk.X, pady=6)
-
-        self.btn_start = ttk.Button(controls, text="▶ Start listening", bootstyle="success", command=self.start)
-        self.btn_stop = ttk.Button(
-            controls,
-            text="⏹ Stop",
-            bootstyle="danger",
-            command=self.stop,
-            state=ttk.DISABLED,
-        )
-        self.btn_clear = ttk.Button(controls, text="🗑 Clean", bootstyle="secondary", command=self.clear_plot)
-        self.btn_save = ttk.Button(controls, text="💾 Save", bootstyle="secondary", command=self.save_data)
-        self.btn_custom_plot = ttk.Button(
-            controls,
-            text="📊 Custom Plot",
-            bootstyle="secondary",
-            command=self.custom_plot_axes,
-        )
-        self.lbl_status = ttk.Label(self, text="State: stopped.", anchor="w")
-
-        self.btn_start.pack(side=ttk.LEFT, padx=4)
-        self.btn_stop.pack(side=ttk.LEFT, padx=4)
-        self.btn_clear.pack(side=ttk.LEFT, padx=4)
-        self.btn_save.pack(side=ttk.LEFT, padx=4)
-        self.btn_custom_plot.pack(side=ttk.LEFT, padx=4)
-        self.lbl_status.pack(side=ttk.LEFT, padx=4)
 
         # self.pack(fill=ttk.BOTH, expand=True)
 
@@ -197,7 +210,9 @@ class EventPlotter(ttk.Frame):
         self.reader_th.start()
 
         # Lanza hilo consumidor (parsing y lógica)
-        self.processor_th = threading.Thread(target=self._tcp_processor, daemon=True, name="TCPProcessor")
+        self.processor_th = threading.Thread(
+            target=self._tcp_processor, daemon=True, name="TCPProcessor"
+        )
         self.processor_th.start()
         if self.callback_motor is not None:
             self.thread_motor = self.callback_motor()
@@ -247,6 +262,7 @@ class EventPlotter(ttk.Frame):
         self.x_by_m.clear()
         self.y_by_m.clear()
         self.lines_by_m.clear()
+        self.loaded_lines.clear()
 
         self.ax.clear()
         self.ax.set_title("V vs A (online)")
@@ -274,11 +290,68 @@ class EventPlotter(ttk.Frame):
             with open(f"{path}/IV_data_{time.strftime('%Y%m%d_%H%M')}.csv", "w") as f:
                 f.write(f"sample,{self.x_key}, {self.y_key}, cycle\n")
                 for index, event in enumerate(self.total_data):
-                    f.write(f"{index}, {event.get(self.x_key)}, {event.get(self.y_key)}, {event.get('cycle')}\n")
+                    f.write(
+                        f"{index}, {event.get(self.x_key)}, {event.get(self.y_key)}, {event.get('cycle')}\n"
+                    )
             self._set_status(f"Data saved to file: IV_data_{time.strftime('%Y%m%d_%H%M')}.csv")
         except Exception as e:
             self._set_status(f"Error saving data: {e}")
             print(f"Error saving data: {e}")
+
+    def load_data(self):
+        """Carga un CSV previamente guardado por save_data y lo grafica como
+        líneas adicionales (una por ciclo) sobre el mismo eje, sin tocar las
+        mediciones live almacenadas en self.lines_by_m."""
+        path = askopenfilename(
+            title="Select CSV to load",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+        )
+        if not path:
+            self._set_status("No file selected.")
+            return
+        cycles_x = {}
+        cycles_y = {}
+        try:
+            with open(path, newline="") as f:
+                reader = csv.reader(f, skipinitialspace=True)
+                next(reader, None)  # descarta header
+                for row in reader:
+                    if len(row) < 4:
+                        continue
+                    try:
+                        x = float(row[1])
+                        y = float(row[2])
+                        cycle = int(float(row[3]))
+                    except (ValueError, TypeError):
+                        continue
+                    cycles_x.setdefault(cycle, []).append(x)
+                    cycles_y.setdefault(cycle, []).append(y)
+        except Exception as e:
+            self._set_status(f"Error loading data: {e}")
+            print(f"Error loading data: {e}")
+            return
+        if not cycles_x:
+            self._set_status("No data parsed from file.")
+            return
+        label_base = os.path.splitext(os.path.basename(path))[0]
+        for cycle in sorted(cycles_x.keys()):
+            (line,) = self.ax.plot(
+                cycles_x[cycle],
+                cycles_y[cycle],
+                linestyle="--",
+                linewidth=1.5,
+                alpha=0.7,
+                marker="x",
+                markersize=3,
+                label=f"{label_base}-c{cycle}",
+            )
+            self.loaded_lines.append(line)
+        self.ax.relim()
+        self.ax.autoscale_view()
+        self._update_legends()
+        self._set_status(
+            f"Loaded {len(cycles_x)} cycle(s) from {os.path.basename(path)}"
+        )
 
     def update_val_experiment(self, x_key, y_key, payload, ip_sender, callback_spin_motor):
         if self.flag_recording:
@@ -445,18 +518,28 @@ class EventPlotter(ttk.Frame):
             handles = [line for line in self.lines_by_m.values()]
             labels = self.legends_list
             if len(labels) < len(handles):
-                labels = labels + [f"{self.prefix_legend}{m}" for m in range(len(labels) + 1, len(handles) + 1)]
+                labels = labels + [
+                    f"{self.prefix_legend}{m}" for m in range(len(labels) + 1, len(handles) + 1)
+                ]
             elif len(labels) > len(handles):
                 labels = labels[: len(handles)]
         else:
             handles = [line for line in self.lines_by_m.values()]
             labels = [f"{self.prefix_legend}{m}" for m in self.lines_by_m.keys()]
+        # Agrega líneas cargadas desde CSV (usa su propio label)
+        for line in self.loaded_lines:
+            handles.append(line)
+            labels.append(line.get_label())
         self.ax.legend(handles, labels, loc="best", frameon=True)
         self.canvas.draw_idle()
 
     def _build_style_cycle(self):
         """Genera un ciclo de estilos color/linestyle para distintas mediciones."""
-        colors = plt.rcParams["axes.prop_cycle"].by_key().get("color", ["b", "g", "r", "c", "m", "y", "k"])
+        colors = (
+            plt.rcParams["axes.prop_cycle"]
+            .by_key()
+            .get("color", ["b", "g", "r", "c", "m", "y", "k"])
+        )
         linestyles = ["-", "--", "-.", ":"]
         styles = []
         for ls in linestyles:
@@ -473,7 +556,9 @@ class EventPlotter(ttk.Frame):
 
         idx = (m - 1) % len(self._style_cycle)
         c, ls = self._style_cycle[idx]
-        (line,) = self.ax.plot([], [], linestyle=ls, linewidth=4.5, color=c, marker="o", markersize=3, label=f"M{m}")
+        (line,) = self.ax.plot(
+            [], [], linestyle=ls, linewidth=4.5, color=c, marker="o", markersize=3, label=f"M{m}"
+        )
 
         # Si el color es muy claro, mejora visibilidad del marcador:
         line.set_markeredgecolor("0.3")
@@ -520,9 +605,15 @@ class LegendManagerWindow(ttk.Toplevel):
 
         self.entry_new = ttk.Entry(controls)
         self.entry_new.pack(side=ttk.LEFT, padx=4)
-        self.btn_add = ttk.Button(controls, text="➕ Add", bootstyle="success", command=self.add_legend)
-        self.btn_remove = ttk.Button(controls, text="🗑 Delete", bootstyle="danger", command=self.remove_selected)
-        self.btn_edit = ttk.Button(controls, text="✏️ Editar", bootstyle="primary", command=self.on_edit_line)
+        self.btn_add = ttk.Button(
+            controls, text="➕ Add", bootstyle="success", command=self.add_legend
+        )
+        self.btn_remove = ttk.Button(
+            controls, text="🗑 Delete", bootstyle="danger", command=self.remove_selected
+        )
+        self.btn_edit = ttk.Button(
+            controls, text="✏️ Editar", bootstyle="primary", command=self.on_edit_line
+        )
         self.btn_add.pack(side=ttk.LEFT, padx=4)
         self.btn_remove.pack(side=ttk.LEFT, padx=4)
         self.btn_edit.pack(side=ttk.LEFT, padx=4)
@@ -534,7 +625,9 @@ class LegendManagerWindow(ttk.Toplevel):
         self.entry_prefix.pack(fill=ttk.X, padx=10, pady=6)
 
         # --- Botón cerrar ---
-        self.btn_close = ttk.Button(self, text="Close", bootstyle="secondary", command=self.on_close)
+        self.btn_close = ttk.Button(
+            self, text="Close", bootstyle="secondary", command=self.on_close
+        )
         self.btn_close.pack(pady=6)
 
         # Cargar leyendas actuales
@@ -623,7 +716,9 @@ class LegendManagerWindow(ttk.Toplevel):
 def demo():
     app = ttk.Window(themename="darkly")  # o "flatly", "cosmo", etc.
     app.title("UDP IV Plotter (ttkbootstrap)")
-    plotter = EventPlotter(app, "cv", udp_port=5005, buffer_size=4096, max_points=5000, update_interval_ms=80)
+    plotter = EventPlotter(
+        app, "cv", udp_port=5005, buffer_size=4096, max_points=5000, update_interval_ms=80
+    )
 
     # Cierre limpio
     def on_close():
@@ -640,7 +735,9 @@ if __name__ == "__main__":
     #    demo()
     app = ttk.Window(themename="litera")
     app.title("UDP IV Plotter (ttkbootstrap)")
-    plotter = EventPlotter(app, "cv", udp_port=5005, buffer_size=4096, max_points=5000, update_interval_ms=80)
+    plotter = EventPlotter(
+        app, "cv", udp_port=5005, buffer_size=4096, max_points=5000, update_interval_ms=80
+    )
     plotter.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
 
     def on_close():

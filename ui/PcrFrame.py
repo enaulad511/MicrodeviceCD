@@ -41,6 +41,7 @@ def create_widgets_pcr(parent):
 
     # Frame: Configuración PCR
     frame1 = ttk.LabelFrame(parent, text="PCR Configuration")
+    frame1.configure(style="Custom.TLabelframe")
     frame1.grid(row=0, column=0, padx=(5, 25), pady=(5, 5), sticky="nswe")
     # frame1.configure(style="Custom.TLabelframe")
 
@@ -167,7 +168,7 @@ class PCRFrame(ttk.Frame):
             entry.bind("<FocusIn>", self._on_entry_focus)
         self.svar_status = ttk.StringVar(value="Ready")
         self.frame_buttons = ttk.Frame(content_frame)
-        self.frame_buttons.grid(row=1, column=0, sticky="nswe")
+        self.frame_buttons.grid(row=1, column=0, sticky="nswe", padx=(5, 25))
         self.frame_buttons.columnconfigure(0, weight=1)
         create_buttons(self.frame_buttons, callbacks, self.svar_status)
         # Frame para mostrar el gráfico
@@ -380,7 +381,11 @@ class PCRFrame(ttk.Frame):
         self.canvas.get_tk_widget().pack(fill="both", expand=True)
         self.canvas.draw()
 
-    def update_graph_temperature(self, window_size=5000):
+    def update_graph_temperature(self, window_size=None):
+        if window_size is None:
+            settings = read_settings_from_file()
+            windows_pcr = settings.get("windows_pcr", 2500)
+            window_size = windows_pcr
         if self.canvas is None:
             return
 
