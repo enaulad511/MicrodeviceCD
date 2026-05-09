@@ -124,6 +124,7 @@ class EventPlotter(ttk.Frame):
             command=self.custom_plot_axes,
         )
         self.lbl_status = ttk.Label(self, text="State: stopped.", anchor="w")
+        self.lbl_status.pack(side=ttk.TOP, padx=4)
 
         self.btn_start.pack(side=ttk.LEFT, padx=4)
         self.btn_stop.pack(side=ttk.LEFT, padx=4)
@@ -131,7 +132,6 @@ class EventPlotter(ttk.Frame):
         self.btn_save.pack(side=ttk.LEFT, padx=4)
         self.btn_load.pack(side=ttk.LEFT, padx=4)
         self.btn_custom_plot.pack(side=ttk.LEFT, padx=4)
-        self.lbl_status.pack(side=ttk.LEFT, padx=4)
 
         self.canvas_frame = ttk.Frame(self, height=380)
         self.canvas_frame.pack(side=ttk.TOP, fill=ttk.X, padx=1)

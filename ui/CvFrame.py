@@ -293,13 +293,16 @@ def create_buttons_cv(parent, callbacks):
 
 
 class CVFrame(ttk.Frame):
-    def __init__(self, parent, ip_sender="localhost", callback_get_ip_sender=None):
+    def __init__(
+        self, parent, ip_sender="localhost", callback_get_ip_sender=None, frame_with_scroll=None
+    ):
         ttk.Frame.__init__(self, parent)
         self.parent = parent
         self.columnconfigure(0, weight=1)
         self.rowconfigure((0, 1), weight=1)
         self.payload = {}
         self.stop_event = None
+        self.frame_w_scroll = frame_with_scroll
         # ----------------variables--------------
         self.t_equilibration = float(DEFAUL_VALUES_CV[0])
         self.E_begin = float(DEFAUL_VALUES_CV[1])
@@ -364,6 +367,9 @@ class CVFrame(ttk.Frame):
         self.frame_plotter.grid_forget()
 
     def show_inputs_frame(self, hide=True):
+        # set scroll at top
+        if self.frame_w_scroll:
+            self.frame_w_scroll.yview_moveto(0)
         self.frame_entries.grid(row=0, column=0, sticky="nsew")
         if hide:
             self.frame_plotter.grid_forget()
@@ -458,8 +464,9 @@ class CVFrame(ttk.Frame):
             )
             self.frame_plotter.grid(row=1, column=0, padx=(0, 25), pady=2, sticky="nsew")
             print("script sent")
-            # set scrollbar to 
-            
+            # set scrollbar to
+            if self.frame_w_scroll:
+                self.frame_w_scroll.yview_moveto(0)
         except ValueError:
             self.show_inputs_frame()
             print("Error: Check input values.")

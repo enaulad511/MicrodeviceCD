@@ -108,9 +108,9 @@ def create_widgets_swv(parent, callbacks, n_cols=2):
 
     # Checkbox para medir i_forward/i_reverse
     measure_var = ttk.BooleanVar(value=False)
-    ttk.Checkbutton(
-        frame_entries, text="Measure i forward/reverse", variable=measure_var
-    ).grid(row=len(LABELS), column=0, columnspan=2, pady=5)
+    ttk.Checkbutton(frame_entries, text="Measure i forward/reverse", variable=measure_var).grid(
+        row=len(LABELS), column=0, columnspan=2, pady=5
+    )
     # ===== CURRENT RANGE SELECTOR =====
     frame_selectors = ttk.LabelFrame(frame, text="Current Range")
     frame_selectors.grid(row=2, column=0, padx=(5, 20), pady=10, sticky="nswe")
@@ -128,6 +128,7 @@ def create_widgets_swv(parent, callbacks, n_cols=2):
     frame_selectors.columnconfigure(tuple(range(len(CURRENT_RANGES))), weight=1)
 
     return entries, measure_var, current_range_var, entries_pre
+
 
 def create_buttons_sqwv(parent, callbacks):
     # ===== CONTROL BUTTONS =====
@@ -153,19 +154,22 @@ def create_buttons_sqwv(parent, callbacks):
         style="danger.TButton",
         command=callbacks["callback_show_inputs"],
     ).grid(row=0, column=2, pady=10, sticky="n")
-    
+
 
 class SWVFrame(ttk.Frame):
-    def __init__(self, parent, ip_sender="localhost", callback_get_ip_sender=None):
+    def __init__(
+        self, parent, ip_sender="localhost", callback_get_ip_sender=None, frame_with_scroll=None
+    ):
         ttk.Frame.__init__(self, parent)
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=1)
         self.callback_ip = callback_get_ip_sender
+        self.frame_w_scroll = frame_with_scroll
 
         content_frame = ttk.Frame(self)
         content_frame.grid(row=0, column=0, sticky="nsew")
         content_frame.columnconfigure(0, weight=1)
-        
+
         self.frame_entries = ttk.Frame(content_frame)
         self.frame_entries.grid(row=0, column=0, sticky="nsew")
         self.frame_entries.columnconfigure(0, weight=1)
@@ -174,8 +178,8 @@ class SWVFrame(ttk.Frame):
             "callback_send": self.send_script,
             "callback_show_inputs": self.show_inputs_frame,
         }
-        self.entries, self.measure_var, self.current_range, self.entries_pre = (
-            create_widgets_swv(self.frame_entries, callbacks)
+        self.entries, self.measure_var, self.current_range, self.entries_pre = create_widgets_swv(
+            self.frame_entries, callbacks
         )
         self.keyboard = NumericKeyboard(self)
         self.keyboard.place_forget()
@@ -185,7 +189,7 @@ class SWVFrame(ttk.Frame):
         self.frame_buttons.grid(row=1, column=0, sticky="nsew")
         self.frame_buttons.columnconfigure(0, weight=1)
         create_buttons_sqwv(self.frame_buttons, callbacks)
-        
+
         self.profile_frame = ttk.LabelFrame(content_frame, text="SWV Profile Preview")
         self.profile_frame.grid(row=2, column=0, padx=(5, 15), pady=10, sticky="nswe")
         self.profile_frame.configure(style="Custom.TLabelframe")
@@ -252,9 +256,7 @@ class SWVFrame(ttk.Frame):
             # Equilibration
             times += [current_time, current_time + t_equilibration]
             potentials += [e_begin, e_begin]
-            segments.append(
-                (current_time, current_time + t_equilibration, "Equilibration")
-            )
+            segments.append((current_time, current_time + t_equilibration, "Equilibration"))
             current_time += t_equilibration
 
             # Generate SWV pulses
@@ -289,8 +291,7 @@ class SWVFrame(ttk.Frame):
                     start_time, end_time, label = s
                     mid_time = (start_time + end_time) / 2
                     mid_potential = (
-                        potentials[times.index(start_time)]
-                        + potentials[times.index(end_time)]
+                        potentials[times.index(start_time)] + potentials[times.index(end_time)]
                     ) / 2
                     color = (
                         "purple"
@@ -325,9 +326,7 @@ class SWVFrame(ttk.Frame):
             script = self.generate_methodscript()
             self.script_box.delete("1.0", "end")
             self.script_box.insert("end", script)
-            self.profile_frame.grid(
-                row=2, column=0, padx=(5, 15), pady=10, sticky="nswe"
-            )
+            self.profile_frame.grid(row=2, column=0, padx=(5, 15), pady=10, sticky="nswe")
             self.script_box.grid(row=3, column=0, padx=(5, 15), pady=10, sticky="nswe")
             self.frame_plotter.grid_forget()
         except ValueError:

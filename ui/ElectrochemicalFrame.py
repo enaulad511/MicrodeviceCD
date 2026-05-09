@@ -21,15 +21,20 @@ class ElectrochemicalFrame(ttk.Frame):
         self.rowconfigure(0, weight=1)
 
         # Main content frame with scroll
-        content_frame = ScrolledFrame(self, autohide=True)
-        content_frame.grid(row=0, column=0, sticky="nsew")
-        content_frame.columnconfigure((0, 1), weight=1)
-        content_frame.rowconfigure(1, weight=1)
+        self.content_frame = ScrolledFrame(self, autohide=False)
+        self.content_frame.grid(row=0, column=0, sticky="nsew")
+        self.content_frame.columnconfigure((0, 1), weight=1)
+        self.content_frame.rowconfigure(1, weight=1)
+
+        # set scroll at top
+        
 
         # Combobox for test selection
-        ttk.Label(content_frame, text="Select Electrochemical Test:", style="Custom.TLabel").grid(row=0, column=0, padx=10, pady=10, sticky="e")
+        ttk.Label(self.content_frame, text="Select Electrochemical Test:", style="Custom.TLabel").grid(
+            row=0, column=0, padx=10, pady=10, sticky="e"
+        )
         self.test_selector = ttk.Combobox(
-            content_frame,
+            self.content_frame,
             values=[
                 "Cyclic Voltammetry",
                 "Square Wave Voltammetry",
@@ -43,7 +48,7 @@ class ElectrochemicalFrame(ttk.Frame):
         self.test_selector.bind("<<ComboboxSelected>>", self.on_test_selected)
 
         # Frame to hold the selected test UI
-        self.test_frame_container = ttk.Frame(content_frame)
+        self.test_frame_container = ttk.Frame(self.content_frame)
         self.test_frame_container.grid(row=1, column=0, columnspan=2, sticky="nsew")
         self.test_frame_container.columnconfigure(0, weight=1)
         self.test_frame_container.rowconfigure(0, weight=1)
@@ -64,15 +69,19 @@ class ElectrochemicalFrame(ttk.Frame):
                     self.test_frame_container,
                     ip_sender=ip_sender,
                     callback_get_ip_sender=self.callback_ip,
+                    frame_with_scroll=self.content_frame,
                 )
             case "Square Wave Voltammetry":
                 self.current_test_frame = SWVFrame(
                     self.test_frame_container,
                     ip_sender=ip_sender,
                     callback_get_ip_sender=self.callback_ip,
+                    frame_with_scroll=self.content_frame,
                 )
             case _:
-                placeholder = ttk.Label(self.test_frame_container, text=f"{selected_test} UI coming soon...")
+                placeholder = ttk.Label(
+                    self.test_frame_container, text=f"{selected_test} UI coming soon..."
+                )
                 # placeholder.grid(row=0, column=0, sticky="nsew")
                 self.current_test_frame = placeholder
         self.current_test_frame.grid(row=0, column=0, sticky="nsew", pady=5)
