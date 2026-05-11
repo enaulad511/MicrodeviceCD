@@ -12,7 +12,7 @@ __date__ = "$ 19/11/2025 at 11:27 $"
 
 
 def create_widgets_configuration(parent):
-    entries = {}
+    entries: dict = {}
     entry_widgets = []
     settings = read_settings_from_file()
     index = 0
@@ -24,10 +24,8 @@ def create_widgets_configuration(parent):
             subframe.grid(row=index, column=0, padx=10, pady=10, sticky="nswe", columnspan=2)
             subframe.columnconfigure((0, 1), weight=1)
 
-            index += 1
-            subindex = 0
             entries[k] = {}
-            for k1, v1 in v.items():
+            for subindex, (k1, v1) in enumerate(v.items()):
                 ttk.Label(subframe, text=f"{k1}:", style="Custom.TLabel").grid(
                     row=subindex, column=0, padx=5, pady=5, sticky="nswe"
                 )
@@ -36,9 +34,8 @@ def create_widgets_configuration(parent):
                 entry.grid(row=subindex, column=1, padx=5, pady=5, sticky="nswe")
                 entries[k][k1] = svar
                 entry_widgets.append(entry)
-                subindex += 1
-        else:
             index += 1
+        else:
             ttk.Label(parent, text=f"{k}:", style="Custom.TLabel").grid(
                 row=index, column=0, padx=5, pady=5, sticky="nswe"
             )
@@ -47,6 +44,7 @@ def create_widgets_configuration(parent):
             entry.grid(row=index, column=1, padx=5, pady=5, sticky="nswe")
             entries[k] = svar
             entry_widgets.append(entry)
+            index += 1
     return entries, entry_widgets
 
 
@@ -65,10 +63,8 @@ class ConfigFrame(ttk.Toplevel):
         content_frame.columnconfigure((0, 1), weight=1)
 
         self.entries, entry_widgets = create_widgets_configuration(content_frame)
-        self.keyboard = NumericKeyboard(self)
-        self.keyboard.place_forget()
-        for entry in entry_widgets:
-            entry.bind("<FocusIn>", self._on_entry_focus)
+        self.keyboard = NumericKeyboard(self, scroll_host=content_frame)
+        self.keyboard.attach(entry_widgets)
         ttk.Button(
             self,
             text="Save Settings",
@@ -76,22 +72,6 @@ class ConfigFrame(ttk.Toplevel):
             command=self.save_settings,
         ).grid(row=1, column=0, columnspan=2, pady=10, padx=5, sticky="n")
         self.protocol("WM_DELETE_WINDOW", self.on_close)
-
-    def _on_entry_focus(self, event):
-        entry = event.widget
-        self.keyboard.set_target(entry)
-        kb_w, kb_h = 360, 250
-        self.update_idletasks()
-        x = entry.winfo_rootx() - self.winfo_rootx()
-        y = entry.winfo_rooty() - self.winfo_rooty() + entry.winfo_height()
-        max_x = self.winfo_width() - kb_w
-        if max_x > 0:
-            x = max(0, min(x, max_x))
-        max_y = self.winfo_height() - kb_h
-        if max_y > 0 and y > max_y:
-            y = entry.winfo_rooty() - self.winfo_rooty() - kb_h
-        self.keyboard.place(x=x, y=y, width=kb_w, height=kb_h)
-        self.keyboard.lift()
 
     def save_settings(self):
         new_settings = {}

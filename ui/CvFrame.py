@@ -334,10 +334,8 @@ class CVFrame(ttk.Frame):
         self.entries, self.current_range, self.entries_motor, motor_entry_widgets = (
             create_widgets_cv(self.frame_entries)
         )
-        self.keyboard = NumericKeyboard(self)
-        self.keyboard.place_forget()
-        for entry in list(self.entries) + motor_entry_widgets:
-            entry.bind("<FocusIn>", self._on_entry_focus)
+        self.keyboard = NumericKeyboard(self, scroll_host=self.frame_w_scroll)
+        self.keyboard.attach(list(self.entries) + motor_entry_widgets)
 
         self.frame_buttons = ttk.Frame(content_frame)
         self.frame_buttons.grid(row=1, column=0, sticky="nsew", padx=(5, 25))
@@ -373,22 +371,6 @@ class CVFrame(ttk.Frame):
         self.frame_entries.grid(row=0, column=0, sticky="nsew")
         if hide:
             self.frame_plotter.grid_forget()
-
-    def _on_entry_focus(self, event):
-        entry = event.widget
-        self.keyboard.set_target(entry)
-        kb_w, kb_h = 360, 250
-        self.update_idletasks()
-        x = entry.winfo_rootx() - self.winfo_rootx()
-        y = entry.winfo_rooty() - self.winfo_rooty() + entry.winfo_height()
-        max_x = self.winfo_width() - kb_w
-        if max_x > 0:
-            x = max(0, min(x, max_x))
-        max_y = self.winfo_height() - kb_h
-        if max_y > 0 and y > max_y:
-            y = entry.winfo_rooty() - self.winfo_rooty() - kb_h
-        self.keyboard.place(x=x, y=y, width=kb_w, height=kb_h)
-        self.keyboard.lift()
 
     def create_payload_cv(self):
         try:

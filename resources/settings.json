@@ -38,5 +38,8 @@
         "acceleration_spin": 300.0,
         "ts_pcr": 0.1
     },
-    "ads_fsr": 0.256
+    "ads_fsr": 1.0,
+    "photoreceptor": {
+        "use_diff": 1.0
+    }
 }

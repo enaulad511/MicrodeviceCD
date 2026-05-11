@@ -294,6 +294,13 @@ class MainGUI(ttk.Window):
             self.client_tester.stop_testing()
             self.client_tester = None
 
+    def on_test_timeout(self):
+        print("[MainGUI] Disc connection test timed out (no broadcast received).")
+        self.txt_connected.set("Disc Disconnected")
+        if self.client_tester is not None:
+            self.client_tester.stop_testing()
+            self.client_tester = None
+
     def try_connect_disc(self):
         if self.client_tester is not None:
             print("Stop client tester")
@@ -308,6 +315,8 @@ class MainGUI(ttk.Window):
             recv_timeout_sec=1.0,  # lets loop check stop flag periodically
             on_message=lambda t, a, t_d: self.on_message_tester(t, a, t_d),
             parse_float=True,  # Arduino sends a numeric string
+            auto_stop_after_sec=5.0,  # solo para test de conexión: se cierra si no llega broadcast
+            on_timeout=self.on_test_timeout,
         )
         self.client_tester.start()
 

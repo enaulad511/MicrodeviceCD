@@ -147,10 +147,10 @@ class PCRFrame(ttk.Frame):
         self.thread_experiment = None
         self.client_temperature = None
         self.temp_update_counter = 0
-        content_frame = ScrolledFrame(self, autohide=True)
-        content_frame.grid(row=0, column=0, sticky="nsew")
-        content_frame.columnconfigure(0, weight=1)
-        self.frame_entries = ttk.Frame(content_frame)
+        self.content_frame = ScrolledFrame(self, autohide=True)
+        self.content_frame.grid(row=0, column=0, sticky="nsew")
+        self.content_frame.columnconfigure(0, weight=1)
+        self.frame_entries = ttk.Frame(self.content_frame)
         self.frame_entries.grid(row=0, column=0, sticky="nswe")
         self.frame_entries.columnconfigure(0, weight=1)
         self.prefix_row = "temps_pcr"
@@ -162,17 +162,15 @@ class PCRFrame(ttk.Frame):
             "callback_save_data": self.save_data_temps_file,
         }
         self.entries = create_widgets_pcr(self.frame_entries)
-        self.keyboard = NumericKeyboard(self)
-        self.keyboard.place_forget()
-        for entry in self.entries:
-            entry.bind("<FocusIn>", self._on_entry_focus)
+        self.keyboard = NumericKeyboard(self, scroll_host=self.content_frame, width=260, height=150)
+        self.keyboard.attach(self.entries)
         self.svar_status = ttk.StringVar(value="Ready")
-        self.frame_buttons = ttk.Frame(content_frame)
+        self.frame_buttons = ttk.Frame(self.content_frame)
         self.frame_buttons.grid(row=1, column=0, sticky="nswe", padx=(5, 25))
         self.frame_buttons.columnconfigure(0, weight=1)
         create_buttons(self.frame_buttons, callbacks, self.svar_status)
         # Frame para mostrar el gráfico
-        self.profile_frame = ttk.LabelFrame(content_frame, text="Profile Preview")
+        self.profile_frame = ttk.LabelFrame(self.content_frame, text="Profile Preview")
         self.profile_frame.grid(row=3, column=0, padx=(2, 20), pady=10, sticky="nswe")
         self.profile_frame.configure(style="Custom.TLabelframe")
 
@@ -180,22 +178,6 @@ class PCRFrame(ttk.Frame):
         self.callback_generate_profile()  # Generar el gráfico inicial
         self.data_temperature = []
         self.data_photodetector = []
-
-    def _on_entry_focus(self, event):
-        entry = event.widget
-        self.keyboard.set_target(entry)
-        kb_w, kb_h = 360, 250
-        self.update_idletasks()
-        x = entry.winfo_rootx() - self.winfo_rootx()
-        y = entry.winfo_rooty() - self.winfo_rooty() + entry.winfo_height()
-        max_x = self.winfo_width() - kb_w
-        if max_x > 0:
-            x = max(0, min(x, max_x))
-        max_y = self.winfo_height() - kb_h
-        if max_y > 0 and y > max_y:
-            y = entry.winfo_rooty() - self.winfo_rooty() - kb_h
-        self.keyboard.place(x=x, y=y, width=kb_w, height=kb_h)
-        self.keyboard.lift()
 
     def callback_generate_profile(self):
         try:

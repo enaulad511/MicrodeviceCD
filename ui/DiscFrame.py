@@ -421,27 +421,9 @@ class ControlDiscFrame(ttk.Frame):
             "callback_zero": self.callback_zero,
         }
         self.entries, entry_widgets = create_widgets_disco_input(content_frame, callbacks)
-        self.keyboard = NumericKeyboard(self)
-        self.keyboard.place_forget()
-        for entry in entry_widgets:
-            entry.bind("<FocusIn>", self._on_entry_focus)
+        self.keyboard = NumericKeyboard(self, scroll_host=content_frame)
+        self.keyboard.attach(entry_widgets)
         self.stop_event = None
-
-    def _on_entry_focus(self, event):
-        entry = event.widget
-        self.keyboard.set_target(entry)
-        kb_w, kb_h = 360, 250
-        self.update_idletasks()
-        x = entry.winfo_rootx() - self.winfo_rootx()
-        y = entry.winfo_rooty() - self.winfo_rooty() + entry.winfo_height()
-        max_x = self.winfo_width() - kb_w
-        if max_x > 0:
-            x = max(0, min(x, max_x))
-        max_y = self.winfo_height() - kb_h
-        if max_y > 0 and y > max_y:
-            y = entry.winfo_rooty() - self.winfo_rooty() - kb_h
-        self.keyboard.place(x=x, y=y, width=kb_w, height=kb_h)
-        self.keyboard.lift()
 
     def callback_spin(self):
         global thread_motor, drv

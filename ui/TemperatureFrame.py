@@ -30,7 +30,9 @@ class TemperatureFrame(ttk.Frame):
         self.temps = []  # Temperaturas
         self.timestamps = []  # Tiempos relativos (s)
         self.client = None
-        self.temps_filter = [20, 20, 20, 20]  # temps for filtering
+        self.temps_filter = [20.0, 20.0, 20.0, 20.0]  # temps for filtering
+        self.latest_temp = 20.0
+        self.latest_temp_ts = 0.0
         # Función para leer temperatura (°C). Si no se pasa, usa simulación.
         self.sensor_reader = (
             self._simulated_reader if sensor_reader == "default" else self._thermocouple_reader
@@ -129,7 +131,7 @@ class TemperatureFrame(ttk.Frame):
             allow_broadcast=True,  # Important for broadcast payloads
             local_ip="",  # "" listens on all interfaces (wlan0, eth0, etc.)
             recv_timeout_sec=0.1,  # lets loop check stop flag periodically
-            on_message=None,
+            on_message=lambda t, a, t_d: self._on_udp_message(t, a, t_d),
             parse_float=True,  # Arduino sends a numeric string
         )
         try:
@@ -252,6 +254,14 @@ class TemperatureFrame(ttk.Frame):
         drift = 0.5 * (time.time() % 60) / 60.0  # variación lenta (0 a 0.5 °C)
         return base + ruido + drift
 
+    def _on_udp_message(self, text, address, temps_list):
+        """Callback invocado por UdpClient en su hilo cuando llega un broadcast UDP válido."""
+        try:
+            self.latest_temp = float(temps_list[2])
+            self.latest_temp_ts = temps_list[3]
+        except Exception as e:
+            print(f"Error parsing UDP temp: {e}")
+
     def _thermocouple_reader(self) -> float:
         """
         Lector de temperatura del termopar (Thermocouple) en °C.
@@ -260,14 +270,10 @@ class TemperatureFrame(ttk.Frame):
         if self.client is None:
             print("Client is None")
             return 20.0
-        lf = self.client.latest_float()
+        lf = self.latest_temp
         self.temps_filter.pop(0)
         self.temps_filter.append(lf)
-        lf = sum(self.temps_filter) / len(self.temps_filter)
-        if lf is None:
-            print("Latest float is None")
-            return 20.0
-        return lf
+        return sum(self.temps_filter) / len(self.temps_filter)
 
     @staticmethod
     def cpu_temp_reader():

@@ -41,6 +41,8 @@ class UdpClient:
         stop_event=None,
         debug=False,
         prefixCol="",
+        auto_stop_after_sec: Optional[float] = None,
+        on_timeout: Optional[Callable[[], None]] = None,
     ):
         """
         :param port: UDP port to bind.
@@ -77,6 +79,10 @@ class UdpClient:
         self.latest_temp = None
         self.latest_lock = threading.Lock()
         self.count_timeout = 0
+
+        self.auto_stop_after_sec = auto_stop_after_sec
+        self.on_timeout = on_timeout
+        self._msg_received = False
 
         self.debug = debug
 
@@ -170,8 +176,20 @@ class UdpClient:
 
     def _run_loop(self):
         assert self._sock is not None, "Socket must be created before running loop."
+        start_time = time.time()
 
         while not self._stop_evt.is_set():
+            if (
+                self.auto_stop_after_sec is not None
+                and (time.time() - start_time) >= self.auto_stop_after_sec
+            ):
+                if not self._msg_received and self.on_timeout:
+                    try:
+                        self.on_timeout()
+                    except Exception as e:
+                        print(f"[UdpClient] on_timeout error: {e}")
+                self._stop_evt.set()
+                break
             try:
                 data, addr = self._sock.recvfrom(self.buffer_size)
                 text = data.decode(errors="replace")
@@ -187,6 +205,7 @@ class UdpClient:
                 self.status_disc = True
                 self.count_timeout = 0
                 self._latest_addr = addr[0]
+                self._msg_received = True
                 # print(data, addr)
                 with self.latest_lock:
                     self.latest_temp = TempSample(value=temp, ts=now)
