@@ -677,7 +677,7 @@ class PCRFrame(ttk.Frame):
             True,
             sistemaMotor,
             None,
-            stop_func=lambda: self.stop_event_motor.is_set()  # pyrefly: ignore
+            stop_func=lambda: self.stop_udp_listenner.is_set()  # pyrefly: ignore
             or self.temp <= low_temp
             or self.temp < low_temp + 9.5,
             stop_event=self.stop_event_motor,
