@@ -125,8 +125,11 @@ class NumericKeyboard(ttk.Frame):
         return 0, self.host.winfo_height()
 
     def _hide_on_scroll(self, _event=None):
-        if self.winfo_ismapped():
-            self.place_forget()
+        try:
+            if self.winfo_ismapped():
+                self.place_forget()
+        except Exception as e:
+            print(e)
 
     def on_press(self, char):
         if not self.target_entry:
