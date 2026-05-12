@@ -142,6 +142,9 @@ class PCRFrame(ttk.Frame):
         self.time_end_cycle = time.time()
         self.total_cycles = 0
         self.teorical_time_pcr = 0
+        self.last_cycle_duration = 0.0
+        self.avg_cycle_duration = 0.0
+        self.ext_time_final = 0.0
         self.stop_event_motor = None
         self.stop_udp_listenner = None
         self.thread_experiment = None
@@ -314,14 +317,14 @@ class PCRFrame(ttk.Frame):
             total_msg = self.svar_status.get().split("\n")
             elapsed_pcr_time = time.time() - self.start_pcr_time
             mins_elapsed = int(elapsed_pcr_time / 60)
-            msg_elapsed_time = f"Time passed: {mins_elapsed} m {elapsed_pcr_time % 60:.1f} s -- cycles: {self.cycles_complete}"
-            if self.cycles_complete > 0:
-                time_cycle = self.time_end_cycle - self.start_cycle_time
-                total_estimated_time = time_cycle * (self.total_cycles - self.cycles_complete)
-                msg_estimated_time = f" -- Estimated finish: {int(total_estimated_time / 60)}mins {total_estimated_time % 60:.1f}s"
-                msg_elapsed_time += msg_estimated_time
-            else:
-                msg_estimated_time = f"-- Estimated finish: {int(self.teorical_time_pcr / 60)}mins {self.teorical_time_pcr % 60:.1f}s"
+            msg_elapsed_time = (
+                f"Time passed: {mins_elapsed} m {elapsed_pcr_time % 60:.1f} s "
+                f"-- cycles: {self.cycles_complete}/{self.total_cycles}"
+            )
+            remaining = self._estimate_remaining_time(elapsed_pcr_time)
+            msg_elapsed_time += (
+                f" -- Estimated finish: {int(remaining / 60)}m {remaining % 60:.1f}s"
+            )
             total_msg[0] = f"Temperature: {lf:.2f} °C\tState: {self.fase}"
             if len(total_msg) < 2:
                 total_msg.append(msg_elapsed_time)
@@ -335,6 +338,27 @@ class PCRFrame(ttk.Frame):
         if self.temp_update_counter >= 10:
             self.temp_update_counter = 0
             self.after(1, lambda: self.update_graph_temperature())
+
+    def _estimate_remaining_time(self, elapsed_pcr_time):
+        # Antes de completar el primer ciclo no hay medición fiable: estima por
+        # tiempo teórico restante. Tras un ciclo, proyecta los ciclos pendientes
+        # con la duración promedio medida y descuenta lo ya transcurrido del
+        # ciclo actual. Suma la extensión final si aún quedan ciclos.
+        if self.cycles_complete == 0 or self.avg_cycle_duration <= 0:
+            return max(0.0, self.teorical_time_pcr - elapsed_pcr_time)
+
+        cycles_left = max(0, self.total_cycles - self.cycles_complete)
+        if cycles_left > 0:
+            elapsed_current = max(0.0, time.time() - self.start_cycle_time)
+            remaining = (
+                self.avg_cycle_duration * cycles_left
+                - elapsed_current
+                + self.ext_time_final
+            )
+        else:
+            # Ya pasaron todos los ciclos: solo queda la extensión final.
+            remaining = self.teorical_time_pcr - elapsed_pcr_time
+        return max(0.0, remaining)
 
     def init_temperature_graph(self):
         if self.canvas is not None:
@@ -627,7 +651,6 @@ class PCRFrame(ttk.Frame):
     ):
         global sistemaMotor
         self.start_cycle_time = time.time()
-        self.cycles_complete = idx
 
         # Reach High temp (PI, tolerancia 0.5)
         self.fase = "Reach High temp"
@@ -703,6 +726,13 @@ class PCRFrame(ttk.Frame):
         self.data_photodetector.append(v_fluo)
         self.after(1, lambda: self.update_graph_photodetector())
         self.time_end_cycle = time.time()
+        # Estadísticas para la estimación del tiempo restante
+        self.last_cycle_duration = self.time_end_cycle - self.start_cycle_time
+        self.cycles_complete = idx + 1
+        self.avg_cycle_duration = (
+            self.avg_cycle_duration * (self.cycles_complete - 1)
+            + self.last_cycle_duration
+        ) / self.cycles_complete
 
     def experiment_pcr(
         self,
@@ -727,6 +757,9 @@ class PCRFrame(ttk.Frame):
         )
         self.total_cycles = cycles
         self.cycles_complete = 0
+        self.last_cycle_duration = 0.0
+        self.avg_cycle_duration = 0.0
+        self.ext_time_final = ext_time_final
         self.teorical_time_pcr = (
             (time_high + time_low + ext_time) * cycles + denat_time + ext_time_final
         )
