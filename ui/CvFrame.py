@@ -208,6 +208,7 @@ def create_widgets_cv(parent, columns=2):
     frame_selectors = ttk.LabelFrame(inputs_frame, text="Current Range")
     frame_selectors.grid(row=1, column=0, padx=(5, 20), pady=10, sticky="nswe")
     frame_selectors.configure(style="Custom.TLabelframe")
+    frame_selectors.columnconfigure(tuple(range(len(CURRENT_RANGES))), weight=1)
 
     # NEW: variable compartida para los radio buttons
     current_range_var = ttk.StringVar(value="4.7e-8")  # valor por defecto

@@ -96,10 +96,12 @@ class EventPlotter(ttk.Frame):
 
         # --- Controles (packed antes que el canvas para que aparezcan arriba) ---
         controls = ttk.Frame(self)
-        controls.pack(side=ttk.TOP, fill=ttk.X, pady=6)
+        controls.pack(side=ttk.TOP, fill=ttk.X, pady=(6, 2))
+        controls2 = ttk.Frame(self)
+        controls2.pack(side=ttk.TOP, fill=ttk.X, pady=(0, 6))
 
         self.btn_start = ttk.Button(
-            controls, text="▶ Start listening", bootstyle="success", command=self.start
+            controls, text="▶ Start", bootstyle="success", command=self.start
         )
         self.btn_stop = ttk.Button(
             controls,
@@ -115,16 +117,16 @@ class EventPlotter(ttk.Frame):
             controls, text="💾 Save", bootstyle="secondary", command=self.save_data
         )
         self.btn_load = ttk.Button(
-            controls, text="📂 Load", bootstyle="secondary", command=self.load_data
+            controls2, text="📂 Load", bootstyle="secondary", command=self.load_data
         )
         self.btn_custom_plot = ttk.Button(
-            controls,
+            controls2,
             text="📊 Custom Plot",
             bootstyle="secondary",
             command=self.custom_plot_axes,
         )
         self.btn_analyze = ttk.Button(
-            controls,
+            controls2,
             text="🔬 Analyze",
             bootstyle="info",
             command=self.open_analysis_window,

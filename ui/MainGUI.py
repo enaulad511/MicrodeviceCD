@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+from templates.constants import font_options
 from templates.constants import font_footer
 from templates.utils import read_settings_from_file
 from templates.constants import secrets
@@ -38,30 +39,24 @@ from ui.PhotoreceptorFrame import PhotoreceptorFrame
 
 def configure_styles():
     style = ttk.Style()
-    style.configure("Custom.TButton", font=font_buttons)  # pyrefly: ignore
-    style.configure("Custom.TLabel", font=font_labels)  # pyrefly: ignore
-    style.configure("Custom.TEntry", font=font_entry)  # pyrefly: ignore
-    style.configure(  # pyrefly: ignore
-        "Custom.TLabelframe.Label", font=font_labels_frame
-    )
-    style.configure("Custom.TNotebook.Tab", font=font_tabs)  # pyrefly: ignore
-    style.configure("Custom.TCombobox.Text", background="green", font=font_entry)  # pyrefly: ignore
-    style.configure("info.TButton", font=font_buttons)  # pyrefly: ignore
-    style.configure("success.TButton", font=font_buttons)  # pyrefly: ignore
-    style.configure("danger.TButton", font=font_buttons)  # pyrefly: ignore
-    style.configure("success.TButton", font=font_buttons)  # pyrefly: ignore
-    style.configure("primary.TButton", font=font_buttons)  # pyrefly: ignore
-    style.configure("secondary.TButton", font=font_buttons)  # pyrefly: ignore
-    style.configure("CustomPrimary.TButton", font=font_buttons_small)  # pyrefly: ignore
-    style.configure(  # pyrefly: ignore
-        "Custom.Treeview", font=("Arial", 18), rowheight=30
-    )  # pyrefly: ignore
-    style.configure(  # pyrefly: ignore
-        "Custom.Treeview.Heading", font=("Arial", 18, "bold")
-    )  # pyrefly: ignore
-    style.configure("Vertical.TScrollbar", arrowsize=20)  # pyrefly: ignore
-    style.configure("Custom.TCheckbutton", font=font_text)  # pyrefly: ignore
-    style.configure("Custom.TRadiobutton", font=font_text)  # pyrefly: ignore
+    style.configure("Custom.TButton", font=font_buttons)
+    style.configure("Custom.TLabel", font=font_labels)
+    style.configure("Custom.TEntry", font=font_entry)
+    style.configure("Custom.TLabelframe.Label", font=font_labels_frame)
+    style.configure("Custom.TNotebook.Tab", font=font_tabs)
+    style.configure("Custom.TCombobox.Text", background="green", font=font_entry)
+    style.configure("info.TButton", font=font_buttons)
+    style.configure("success.TButton", font=font_buttons)
+    style.configure("danger.TButton", font=font_buttons)
+    style.configure("success.TButton", font=font_buttons)
+    style.configure("primary.TButton", font=font_buttons)
+    style.configure("secondary.TButton", font=font_buttons)
+    style.configure("CustomPrimary.TButton", font=font_buttons_small)
+    style.configure("Custom.Treeview", font=("Arial", 18), rowheight=30)
+    style.configure("Custom.Treeview.Heading", font=("Arial", 18, "bold"))
+    style.configure("Vertical.TScrollbar", arrowsize=20)
+    style.configure("Custom.TCheckbutton", font=font_text)
+    style.configure("Custom.TRadiobutton", font=font_options)
     return style
 
 
