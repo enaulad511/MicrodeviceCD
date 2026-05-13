@@ -438,12 +438,18 @@ class CVFrame(ttk.Frame):
             enable_motor = self.entries_motor[0].get()
             if enable_motor:
                 sent_callback = self.start_spin_motor_angle
+            angle = self.entries_motor[1].get()
+            speed = self.entries_motor[2].get()
+            filename_meta = {"ang": angle, "spd": speed}
+            if not enable_motor:
+                filename_meta["motor"] = "off"
             self.udp_plotter.update_val_experiment(
                 x_key="E_V",
                 y_key="I_A",
                 payload=self.payload,
                 ip_sender=ip_sender,
                 callback_spin_motor=sent_callback,
+                filename_meta=filename_meta,
             )
             self.frame_plotter.grid(row=1, column=0, padx=(0, 25), pady=2, sticky="nsew")
             print("script sent")

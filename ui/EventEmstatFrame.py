@@ -76,6 +76,7 @@ class EventPlotter(ttk.Frame):
         self.storage_dict = {}  # registro parcial de informacion
         self.total_data = []  # registro total de informacion
         self.loaded_lines = []  # Line2D agregadas desde archivos CSV cargados
+        self.filename_meta = {}  # metadatos (motor, etc.) para incluir en el nombre del CSV
         self.stop_event = threading.Event()
         self.reader_th = None
         self.processor_th = None
@@ -296,17 +297,29 @@ class EventPlotter(ttk.Frame):
         if not path:
             self._set_status("No directory selected.")
             return
+        suffix = self._build_filename_suffix()
+        filename = f"IV_data_{time.strftime('%Y%m%d_%H%M')}{suffix}.csv"
         try:
-            with open(f"{path}/IV_data_{time.strftime('%Y%m%d_%H%M')}.csv", "w") as f:
+            with open(f"{path}/{filename}", "w") as f:
                 f.write(f"sample,{self.x_key}, {self.y_key}, cycle\n")
                 for index, event in enumerate(self.total_data):
                     f.write(
                         f"{index}, {event.get(self.x_key)}, {event.get(self.y_key)}, {event.get('cycle')}\n"
                     )
-            self._set_status(f"Data saved to file: IV_data_{time.strftime('%Y%m%d_%H%M')}.csv")
+            self._set_status(f"Data saved to file: {filename}")
         except Exception as e:
             self._set_status(f"Error saving data: {e}")
-            print(f"Error saving data: {e}")
+
+    def _build_filename_suffix(self):
+        """Construye un sufijo '_k1v1_k2v2…' a partir de self.filename_meta."""
+        if not self.filename_meta:
+            return ""
+        parts = []
+        for k, v in self.filename_meta.items():
+            sv = "".join(c if c.isalnum() or c in "-." else "_" for c in str(v))
+            sk = "".join(c if c.isalnum() else "_" for c in str(k))
+            parts.append(f"{sk}{sv}")
+        return "_" + "_".join(parts) if parts else ""
 
     def load_data(self):
         """Carga un CSV previamente guardado por save_data y lo grafica como
@@ -363,7 +376,9 @@ class EventPlotter(ttk.Frame):
             f"Loaded {len(cycles_x)} cycle(s) from {os.path.basename(path)}"
         )
 
-    def update_val_experiment(self, x_key, y_key, payload, ip_sender, callback_spin_motor):
+    def update_val_experiment(
+        self, x_key, y_key, payload, ip_sender, callback_spin_motor, filename_meta=None
+    ):
         if self.flag_recording:
             print("not posible to update payload while running experiment")
             return
@@ -372,6 +387,8 @@ class EventPlotter(ttk.Frame):
         self.payload_exp = payload
         self.ip_sender = ip_sender
         self.callback_motor = callback_spin_motor
+        if filename_meta is not None:
+            self.filename_meta = dict(filename_meta)
 
     def custom_plot_axes(self):
         if self.config_legend is not None:
