@@ -123,6 +123,13 @@ class EventPlotter(ttk.Frame):
             bootstyle="secondary",
             command=self.custom_plot_axes,
         )
+        self.btn_analyze = ttk.Button(
+            controls,
+            text="🔬 Analyze",
+            bootstyle="info",
+            command=self.open_analysis_window,
+        )
+        self.analysis_window = None
         self.lbl_status = ttk.Label(self, text="State: stopped.", anchor="w")
         self.lbl_status.pack(side=ttk.TOP, padx=4)
 
@@ -132,6 +139,7 @@ class EventPlotter(ttk.Frame):
         self.btn_save.pack(side=ttk.LEFT, padx=4)
         self.btn_load.pack(side=ttk.LEFT, padx=4)
         self.btn_custom_plot.pack(side=ttk.LEFT, padx=4)
+        self.btn_analyze.pack(side=ttk.LEFT, padx=4)
 
         self.canvas_frame = ttk.Frame(self, height=380)
         self.canvas_frame.pack(side=ttk.TOP, fill=ttk.X, padx=1)
@@ -370,6 +378,20 @@ class EventPlotter(ttk.Frame):
         else:
             self.config_legend = LegendManagerWindow(self, plotter=self)
 
+    def open_analysis_window(self):
+        if self.analysis_window is not None:
+            try:
+                if self.analysis_window.winfo_exists():
+                    self.analysis_window.lift()
+                    return
+            except Exception:
+                pass
+        from ui.AnalysisWindow import AnalysisWindow
+        self.analysis_window = AnalysisWindow(self, plotter=self)
+
+    def _on_analysis_window_closed(self):
+        self.analysis_window = None
+
     def on_close_config_legend(self, legend_list, prefix_legend="M-"):
         # self.config_legend.destroy()
         self.config_legend = None
@@ -526,8 +548,10 @@ class EventPlotter(ttk.Frame):
         else:
             handles = [line for line in self.lines_by_m.values()]
             labels = [f"{self.prefix_legend}{m}" for m in self.lines_by_m.keys()]
-        # Agrega líneas cargadas desde CSV (usa su propio label)
+        # Agrega líneas cargadas desde CSV (usa su propio label, omite ocultas)
         for line in self.loaded_lines:
+            if not line.get_visible():
+                continue
             handles.append(line)
             labels.append(line.get_label())
         self.ax.legend(handles, labels, loc="best", frameon=True)
@@ -590,6 +614,8 @@ class LegendManagerWindow(ttk.Toplevel):
         self.parent = master
         self.idx_sel = None
         self.lines_list = None
+        # paralelo al listbox: ("live", idx_en_lines_list) o ("loaded", Line2D)
+        self.entry_refs = []
 
         # --- Lista de mediciones ---
         frame_legends = ttk.LabelFrame(self, text="Legends")
@@ -614,9 +640,13 @@ class LegendManagerWindow(ttk.Toplevel):
         self.btn_edit = ttk.Button(
             controls, text="✏️ Editar", bootstyle="primary", command=self.on_edit_line
         )
+        self.btn_toggle = ttk.Button(
+            controls, text="👁 Show/Hide", bootstyle="info", command=self.toggle_visibility
+        )
         self.btn_add.pack(side=ttk.LEFT, padx=4)
         self.btn_remove.pack(side=ttk.LEFT, padx=4)
         self.btn_edit.pack(side=ttk.LEFT, padx=4)
+        self.btn_toggle.pack(side=ttk.LEFT, padx=4)
         # --- Prefix handlers
         prefix_frame = ttk.LabelFrame(self, text="Prefix")
         prefix_frame.pack(fill=ttk.X, padx=10, pady=6)
@@ -635,69 +665,111 @@ class LegendManagerWindow(ttk.Toplevel):
         self.protocol("WM_DELETE_WINDOW", self.on_close)
 
     def refresh_list(self):
-        """Recarga la lista con las mediciones actuales del plotter."""
+        """Recarga la lista con mediciones live y líneas cargadas desde CSV."""
+        self.listbox.delete(0, ttk.END)
+        self.entry_refs = []
+        # Buffer diferido para legends live (commit al cerrar)
         if self.lines_list is None:
-            self.listbox.delete(0, ttk.END)
-            for m in self.plotter.lines_by_m.keys():
-                self.listbox.insert(ttk.END, f"M{m}")
-                self.lines_list = self.listbox.get(0, ttk.END)
-        else:
-            self.listbox.delete(0, ttk.END)
-            for item in self.lines_list:
-                self.listbox.insert(ttk.END, item)
+            self.lines_list = [f"M{m}" for m in self.plotter.lines_by_m.keys()]
+        for i, name in enumerate(self.lines_list):
+            self.listbox.insert(ttk.END, f"[live] {name}")
+            self.entry_refs.append(("live", i))
+        # Líneas cargadas desde CSV: editar/eliminar/ocultar inmediato
+        for line in self.plotter.loaded_lines:
+            mark = "👁" if line.get_visible() else "🚫"
+            self.listbox.insert(ttk.END, f"[csv {mark}] {line.get_label()}")
+            self.entry_refs.append(("loaded", line))
 
     def add_legend(self):
-        """Agrega una nueva medición vacía (línea sin datos)."""
+        """Agrega una nueva entrada de legend live (sin datos asociados)."""
         name = self.entry_new.get().strip()
         print(f"Adding legend: {name}")
-        if self.lines_list is None:
-            self.lines_list = []
         if not name:
             return
-        if name in self.plotter.lines_by_m:
+        if self.lines_list is None:
+            self.lines_list = []
+        if name in self.lines_list:
             return
         self.lines_list.append(name)
         self.entry_new.delete(0, ttk.END)
         self.refresh_list()
 
     def remove_selected(self):
-        """Elimina la medición seleccionada (línea y datos)."""
+        """Elimina la entrada seleccionada — live del buffer, loaded del eje."""
         sel = self.listbox.curselection()
-        if not sel:
+        if not sel or not self.entry_refs:
             return
         idx = sel[0]
-        if self.lines_list is None:
-            print("No lines_list")
-            return
-        new_list = [x for i, x in enumerate(self.lines_list) if i != idx]
-        self.lines_list = new_list
+        kind, ref = self.entry_refs[idx]
+        if kind == "live":
+            if not isinstance(self.lines_list, list):
+                return
+            if 0 <= ref < len(self.lines_list):
+                self.lines_list.pop(ref)
+        else:
+            try:
+                ref.remove()
+            except (NotImplementedError, ValueError):
+                pass
+            if ref in self.plotter.loaded_lines:
+                self.plotter.loaded_lines.remove(ref)
+            self.plotter._update_legends()
         self.refresh_list()
 
     def on_double_clic_line(self, event):
-        """Permite editar la medición seleccionada (no implementado)."""
+        """Carga el nombre actual de la entrada seleccionada en el entry."""
         sel = self.listbox.curselection()
         print(f"Double click: {sel}: {event}")
-        if not sel:
+        if not sel or not self.entry_refs:
             return
-        # extraer linea
         self.idx_sel = sel[0]
-        text = self.listbox.get(self.idx_sel)
+        kind, ref = self.entry_refs[self.idx_sel]
+        if kind == "live":
+            text = self.lines_list[ref] if self.lines_list and ref < len(self.lines_list) else ""
+        else:
+            text = ref.get_label()
         self.entry_new.delete(0, ttk.END)
         self.entry_new.insert(0, text)
 
     def on_edit_line(self):
-        """Guarda el cambio en la medición seleccionada (no implementado)."""
-        if self.idx_sel is None:
+        """Aplica el nuevo nombre — live al buffer, loaded directo al Line2D."""
+        if self.idx_sel is None or not self.entry_refs:
             return
         new_name = self.entry_new.get().strip()
         if not new_name:
             return
-        if not isinstance(self.lines_list, list):
-            return
-        self.lines_list[self.idx_sel] = new_name
+        kind, ref = self.entry_refs[self.idx_sel]
+        if kind == "live":
+            if not isinstance(self.lines_list, list):
+                return
+            if 0 <= ref < len(self.lines_list):
+                self.lines_list[ref] = new_name
+        else:
+            ref.set_label(new_name)
+            self.plotter._update_legends()
         self.idx_sel = None
-        self.entry_new.delete(0, END)
+        self.entry_new.delete(0, ttk.END)
         self.refresh_list()
+
+    def toggle_visibility(self):
+        """Oculta/muestra la línea seleccionada (live o loaded)."""
+        sel = self.listbox.curselection()
+        if not sel or not self.entry_refs:
+            return
+        idx = sel[0]
+        kind, ref = self.entry_refs[idx]
+        if kind == "live":
+            keys = list(self.plotter.lines_by_m.keys())
+            if not (0 <= ref < len(keys)):
+                return
+            line = self.plotter.lines_by_m[keys[ref]]
+        else:
+            line = ref
+        line.set_visible(not line.get_visible())
+        self.plotter._update_legends()
+        self.refresh_list()
+        if idx < self.listbox.size():
+            self.listbox.selection_set(idx)
 
     def on_close(self):
         """Limpia la referencia al plotter."""

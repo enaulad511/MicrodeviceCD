@@ -3,3 +3,4 @@ matplotlib
 ttkbootstrap=1.16.0
 pigpio~=1.78
 dotenv
+numpy

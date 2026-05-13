@@ -351,9 +351,7 @@ class PCRFrame(ttk.Frame):
         if cycles_left > 0:
             elapsed_current = max(0.0, time.time() - self.start_cycle_time)
             remaining = (
-                self.avg_cycle_duration * cycles_left
-                - elapsed_current
-                + self.ext_time_final
+                self.avg_cycle_duration * cycles_left - elapsed_current + self.ext_time_final
             )
         else:
             # Ya pasaron todos los ciclos: solo queda la extensión final.
@@ -730,8 +728,7 @@ class PCRFrame(ttk.Frame):
         self.last_cycle_duration = self.time_end_cycle - self.start_cycle_time
         self.cycles_complete = idx + 1
         self.avg_cycle_duration = (
-            self.avg_cycle_duration * (self.cycles_complete - 1)
-            + self.last_cycle_duration
+            self.avg_cycle_duration * (self.cycles_complete - 1) + self.last_cycle_duration
         ) / self.cycles_complete
 
     def experiment_pcr(
@@ -761,7 +758,7 @@ class PCRFrame(ttk.Frame):
         self.avg_cycle_duration = 0.0
         self.ext_time_final = ext_time_final
         self.teorical_time_pcr = (
-            (time_high + time_low + ext_time) * cycles + denat_time + ext_time_final
+            (time_high + time_low + ext_time) * 1.2 * cycles + denat_time + ext_time_final
         )
 
         settings = read_settings_from_file()
