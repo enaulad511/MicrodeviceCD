@@ -20,14 +20,14 @@ from ui.KeyboardFrame import NumericKeyboard
 DEFAUL_VALUES_CV = [
     "0",
     "0.0",
-    "-1",
-    "1",
-    "0.1",
+    "-0.4",
+    "0.7",
+    "0.01",
     "0.04",
-    "3",
-    "585954e-6",
-    "-1",
-    "1",
+    "4",
+    "2937500e-9",
+    "-0.4",
+    "0.7",
     "47e-9",
     "47e-9",
     "47e-9",
@@ -549,21 +549,26 @@ class CVFrame(ttk.Frame):
             thread_motor.start()
             print("Modo oscilador iniciado")
             print(thread_motor)
+            self.thread_motor = thread_motor
             return thread_motor
 
     def on_end_experiment(self, thread_motor=None):
+        # Señala al motor que termine
         if self.stop_event is not None:
             self.stop_event.set()
-            self.stop_event = None
-        self.show_inputs_frame(hide=False)
+        # Join del hilo del motor para liberar UART/GPIO antes del siguiente run
+        th = thread_motor if thread_motor is not None else self.thread_motor
+        if th is not None:
+            try:
+                if th.is_alive():
+                    th.join(timeout=3.0)
+                if th.is_alive():
+                    print("Warning: motor thread did not finish within 3s.")
+            except Exception as e:
+                print(f"Error joining motor thread: {e}")
         self.thread_motor = None
-        if self.thread_motor is None:
-            print("No motor thread to stop.")
-            return
-        else:
-            self.thread_motor.join()
-            self.thread_motor = None
-
+        self.stop_event = None
+        self.show_inputs_frame(hide=False)
         print("Experimento finalizado. Motor detenido.")
 
 

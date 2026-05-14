@@ -261,11 +261,13 @@ class EventPlotter(ttk.Frame):
         except Exception:
             pass
         self.running = False
+        self.flag_recording = False
         self.btn_start.configure(state=ttk.NORMAL)
         self.btn_stop.configure(state=ttk.DISABLED)
         self._cancel_update()
         self._set_status("Estado: detenido")
         self.on_end_experiment(self.thread_motor)
+        self.thread_motor = None
 
     def clear_plot(self):
         """Limpia datos y resetea el gráfico."""
