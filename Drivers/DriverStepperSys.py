@@ -25,69 +25,81 @@ def spinMotorAngleDriver(angle, rpm, max_rpm, n_times=None, flag_continue=False,
     """
     import time as _t
 
+    _own_drv = drv is None
     if drv is None:
         drv = DriverStepperSys(en_pin=12, enable_active_high=False, uart_port=serial_port_encoder)
         drv.enable_driver(True)
-        
-    if stop_event is None:
-        print("[spinMotorAngle] stop_event no proporcionado, se requiere para control de parada.")
-        return
-    try:
-        angle = float(angle)
-        rpm = float(rpm)
-        max_rpm = float(max_rpm)
-    except Exception as e:
-        raise ValueError(f"Parámetros inválidos: {e}")
-
-    if angle <= 0:
-        drv.stop()
-        print("[spinMotorAngle] angle <= 0; STOP.")
-        return
-
-    rpm_eff = max(min(abs(rpm), abs(max_rpm)), 0.0)
-    speed_hz = rpm_eff * (STEPS_PER_REV / 60.0)
-    if speed_hz <= 0.0:
-        drv.stop()
-        print("[spinMotorAngle] Velocidad resultante = 0 Hz; STOP.")
-        return
-
-    drv.run_sweep(angle, speed_hz)
-
-    vel_deg_s = speed_hz * (360.0 / STEPS_PER_REV)
-    if vel_deg_s <= 0:
-        drv.stop()
-        return
-
-    T_cycle = (4.0 * abs(angle)) / vel_deg_s
-    T_cycle *= 1.03  # 3% de margen
 
     try:
-        if n_times is not None:
-            n_times = int(n_times)
-            if n_times <= 0:
-                print("[spinMotorAngle] n_times<=0; STOP.")
+        if stop_event is None:
+            print("[spinMotorAngle] stop_event no proporcionado, se requiere para control de parada.")
+            return
+        try:
+            angle = float(angle)
+            rpm = float(rpm)
+            max_rpm = float(max_rpm)
+        except Exception as e:
+            raise ValueError(f"Parámetros inválidos: {e}")
+
+        if angle <= 0:
+            drv.stop()
+            print("[spinMotorAngle] angle <= 0; STOP.")
+            return
+
+        rpm_eff = max(min(abs(rpm), abs(max_rpm)), 0.0)
+        speed_hz = rpm_eff * (STEPS_PER_REV / 60.0)
+        if speed_hz <= 0.0:
+            drv.stop()
+            print("[spinMotorAngle] Velocidad resultante = 0 Hz; STOP.")
+            return
+
+        drv.run_sweep(angle, speed_hz)
+
+        vel_deg_s = speed_hz * (360.0 / STEPS_PER_REV)
+        if vel_deg_s <= 0:
+            drv.stop()
+            return
+
+        T_cycle = (4.0 * abs(angle)) / vel_deg_s
+        T_cycle *= 1.03  # 3% de margen
+
+        try:
+            if n_times is not None:
+                n_times = int(n_times)
+                if n_times <= 0:
+                    print("[spinMotorAngle] n_times<=0; STOP.")
+                else:
+                    total_time = n_times * T_cycle
+                    print(f"[spinMotorAngle] SWEEP {n_times} ciclos: ±{angle}°, Hz={speed_hz:.1f}, T_ciclo≈{T_cycle:.3f}s, T_total≈{total_time:.3f}s")
+                    elapsed = 0.0
+                    step = 0.01
+                    while elapsed < total_time:
+                        if stop_event.is_set():
+                            print("[spinMotorAngle] stop_event detectado; abortando.")
+                            break
+                        _t.sleep(step)
+                        elapsed += step
             else:
-                total_time = n_times * T_cycle
-                print(f"[spinMotorAngle] SWEEP {n_times} ciclos: ±{angle}°, Hz={speed_hz:.1f}, T_ciclo≈{T_cycle:.3f}s, T_total≈{total_time:.3f}s")
-                elapsed = 0.0
-                step = 0.01
-                while elapsed < total_time:
-                    if stop_event.is_set():
-                        print("[spinMotorAngle] stop_event detectado; abortando.")
-                        break
-                    _t.sleep(step)
-                    elapsed += step
-        else:
-            if flag_continue:
-                print(f"[spinMotorAngle] SWEEP continuo: ±{angle}° @ {rpm_eff} rpm (Hz={speed_hz:.1f})")
-                while not stop_event.is_set():
-                    _t.sleep(0.02)
-            else:
-                print(f"[spinMotorAngle] SWEEP 1 ciclo: ±{angle}°, T≈{T_cycle:.3f}s")
-                _t.sleep(T_cycle)
+                if flag_continue:
+                    print(f"[spinMotorAngle] SWEEP continuo: ±{angle}° @ {rpm_eff} rpm (Hz={speed_hz:.1f})")
+                    while not stop_event.is_set():
+                        _t.sleep(0.02)
+                else:
+                    print(f"[spinMotorAngle] SWEEP 1 ciclo: ±{angle}°, T≈{T_cycle:.3f}s")
+                    _t.sleep(T_cycle)
+        finally:
+            try:
+                drv.stop()
+                print("Motor detenido")
+            except Exception:
+                pass
     finally:
-        drv.stop()
-        print("Motor detenido")
+        if _own_drv:
+            try:
+                drv.close()
+                print("Driver del motor cerrado (UART/GPIO liberados)")
+            except Exception as e:
+                print(f"Error closing motor driver: {e}")
 
 
 class DriverStepperSys:

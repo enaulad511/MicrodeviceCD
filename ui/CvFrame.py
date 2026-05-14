@@ -242,7 +242,7 @@ def create_widgets_cv(parent, columns=2):
     ttk.Label(frame_motor_settings, text="Angle (°, max 30):", style="Custom.TLabel").grid(
         row=1, column=0, padx=5, pady=5, sticky="w"
     )
-    svar_angle = ttk.StringVar(value="30")
+    svar_angle = ttk.StringVar(value="10")
     angle_entry = ttk.Entry(frame_motor_settings, font=font_entry, textvariable=svar_angle, width=5)
     angle_entry.grid(row=1, column=1, padx=5, pady=5, sticky="w")
     entries_motor.append(svar_angle)
@@ -250,7 +250,7 @@ def create_widgets_cv(parent, columns=2):
     ttk.Label(frame_motor_settings, text="Speed (%):", style="Custom.TLabel").grid(
         row=2, column=0, padx=5, pady=5, sticky="w"
     )
-    svar_speed = ttk.StringVar(value="10")
+    svar_speed = ttk.StringVar(value="7")
     speed_entry = ttk.Entry(frame_motor_settings, font=font_entry, textvariable=svar_speed, width=5)
     speed_entry.grid(row=2, column=1, padx=5, pady=5, sticky="w")
     entries_motor.append(svar_speed)
