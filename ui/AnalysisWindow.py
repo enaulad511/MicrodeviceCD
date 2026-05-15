@@ -112,6 +112,24 @@ def _local_extrema(xs, ys, window=5):
     return maxima, minima
 
 
+def _at_x_extrema(xs, ys, x_max_target, x_min_target):
+    """Muestrea y en el punto más cercano a un X dado por el usuario.
+
+    Cada target puede ser None para omitir ese extremo.
+    """
+    maxs, mins = [], []
+    if len(xs) == 0:
+        return maxs, mins
+    xs = np.asarray(xs, dtype=float)
+    if x_max_target is not None:
+        i = int(np.argmin(np.abs(xs - x_max_target)))
+        maxs.append((float(xs[i]), float(ys[i])))
+    if x_min_target is not None:
+        i = int(np.argmin(np.abs(xs - x_min_target)))
+        mins.append((float(xs[i]), float(ys[i])))
+    return maxs, mins
+
+
 # ---------------------------------------------------------------------------
 # Ventana
 # ---------------------------------------------------------------------------
@@ -129,6 +147,9 @@ class AnalysisWindow(ttk.Toplevel):
         self.experiments = []  # list[Experiment]
         # mapeo de iid de Treeview → ("exp", exp) o ("cycle", exp, cycle)
         self._tree_ref = {}
+        # estado para picking de X desde la gráfica overlay
+        self._pick_cid: int | None = None
+        self._pick_kind: str | None = None  # 'max' | 'min' | None
 
         self._build_ui()
         if plotter is not None:
@@ -174,6 +195,9 @@ class AnalysisWindow(ttk.Toplevel):
         ttk.Radiobutton(
             toolbar2, text="Local", variable=self.peak_mode, value="local"
         ).pack(side=ttk.LEFT)
+        ttk.Radiobutton(
+            toolbar2, text="At X", variable=self.peak_mode, value="at_x"
+        ).pack(side=ttk.LEFT)
 
         ttk.Label(toolbar2, text="Peak window:").pack(side=ttk.LEFT, padx=(12, 4))
         self.peak_window_var = ttk.IntVar(value=5)
@@ -199,9 +223,76 @@ class AnalysisWindow(ttk.Toplevel):
             toolbar2, from_=1, to=500, increment=1, width=5, textvariable=self.filter_window_var
         ).pack(side=ttk.LEFT)
 
-        # --- Split (tree | plots) ---
-        main = ttk.PanedWindow(self, orient=ttk.HORIZONTAL)
-        main.pack(fill=ttk.BOTH, expand=True, padx=6, pady=(0, 6))
+        # --- Toolbar fila 3: entradas para modo "At X" ---
+        toolbar3 = ttk.Frame(self)
+        toolbar3.pack(side=ttk.TOP, fill=ttk.X, padx=6, pady=(0, 6))
+
+        ttk.Label(toolbar3, text="At X →").pack(side=ttk.LEFT, padx=(0, 4))
+        ttk.Label(toolbar3, text="X@max:").pack(side=ttk.LEFT, padx=(0, 4))
+        self.x_at_max_var = ttk.StringVar(value="")
+        ttk.Entry(toolbar3, textvariable=self.x_at_max_var, width=12).pack(side=ttk.LEFT)
+        ttk.Button(
+            toolbar3,
+            text="Pick X@max",
+            bootstyle="secondary-outline",
+            command=lambda: self._toggle_pick_mode("max"),
+        ).pack(side=ttk.LEFT, padx=(4, 8))
+
+        ttk.Label(toolbar3, text="X@min:").pack(side=ttk.LEFT, padx=(0, 4))
+        self.x_at_min_var = ttk.StringVar(value="")
+        ttk.Entry(toolbar3, textvariable=self.x_at_min_var, width=12).pack(side=ttk.LEFT)
+        ttk.Button(
+            toolbar3,
+            text="Pick X@min",
+            bootstyle="secondary-outline",
+            command=lambda: self._toggle_pick_mode("min"),
+        ).pack(side=ttk.LEFT, padx=(4, 8))
+
+        ttk.Button(
+            toolbar3, text="Clear X", bootstyle="warning-outline", command=self._clear_at_x
+        ).pack(side=ttk.LEFT, padx=(0, 4))
+
+        # Status bar anclado al fondo antes de que el área de scroll ocupe el centro
+        self.lbl_status = ttk.Label(self, text="Ready.", anchor="w")
+        self.lbl_status.pack(side=ttk.BOTTOM, fill=ttk.X, padx=6, pady=(0, 4))
+
+        # --- Frame padre con scroll vertical que envuelve árbol + gráficas + resultados ---
+        _wrap = ttk.Frame(self)
+        _wrap.pack(fill=ttk.BOTH, expand=True, padx=6, pady=(0, 4))
+
+        _vsb_main = ttk.Scrollbar(_wrap, orient="vertical")
+        _vsb_main.pack(side=ttk.RIGHT, fill=ttk.Y)
+
+        self._main_sc = ttk.Canvas(_wrap, bd=0, highlightthickness=0,
+                                    yscrollcommand=_vsb_main.set)
+        self._main_sc.pack(side=ttk.LEFT, fill=ttk.BOTH, expand=True)
+        _vsb_main.configure(command=self._main_sc.yview)
+
+        # Frame interior donde vive todo el contenido
+        inner = ttk.Frame(self._main_sc)
+        _win_id = self._main_sc.create_window((0, 0), window=inner, anchor="nw")
+
+        # Sincronizar scrollregion y ancho del inner con el canvas
+        def _update_sr(_event=None):
+            self._main_sc.configure(scrollregion=self._main_sc.bbox("all"))
+
+        def _sync_width(event):
+            self._main_sc.itemconfig(_win_id, width=event.width)
+
+        inner.bind("<Configure>", _update_sr)
+        self._main_sc.bind("<Configure>", _sync_width)
+
+        # Rueda del ratón — no interfiere con Treeviews ni matplotlib porque
+        # bind() en esos widgets tiene prioridad sobre bind() aquí
+        def _on_wheel(event):
+            self._main_sc.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+        self._main_sc.bind("<MouseWheel>", _on_wheel)
+        inner.bind("<MouseWheel>", _on_wheel)
+
+        # --- Split horizontal árbol | gráficas (dentro del frame interior) ---
+        main = ttk.PanedWindow(inner, orient=ttk.HORIZONTAL)
+        main.pack(fill=ttk.X, padx=0, pady=(0, 6))
 
         # Left: árbol de experimentos / ciclos
         left = ttk.LabelFrame(main, text="Experiments → Cycles")
@@ -223,6 +314,7 @@ class AnalysisWindow(ttk.Toplevel):
         # Right: figura con 3 ejes
         right = ttk.Frame(main)
         main.add(right, weight=4)
+        right.bind("<MouseWheel>", _on_wheel)
         plt.style.use("seaborn-v0_8-darkgrid")
         self.fig = Figure(figsize=(8, 6), dpi=100, layout="constrained")
         gs = self.fig.add_gridspec(2, 2)
@@ -240,12 +332,12 @@ class AnalysisWindow(ttk.Toplevel):
         self.toolbar_mpl = NavigationToolbar2Tk(self.canvas, right, pack_toolbar=False)
         self.toolbar_mpl.pack(fill=ttk.X)
 
-        # --- Tabla de resultados (jerárquica) ---
-        bottom = ttk.LabelFrame(self, text="Results (visible only)")
-        bottom.pack(fill=ttk.X, padx=6, pady=(0, 6))
+        # --- Tabla de resultados (debajo del split, dentro del frame interior) ---
+        bottom = ttk.LabelFrame(inner, text="Results (visible only)")
+        bottom.pack(fill=ttk.X, pady=(0, 6))
         cols_r = ("idx", "type", "n", "x", "y", "std")
         self.tree_res = ttk.Treeview(
-            bottom, columns=cols_r, show="tree headings", height=8
+            bottom, columns=cols_r, show="tree headings", height=6
         )
         widths = {"idx": 50, "type": 80, "n": 50, "x": 130, "y": 130, "std": 130}
         self.tree_res.heading("#0", text="Experiment / Cycle")
@@ -254,12 +346,11 @@ class AnalysisWindow(ttk.Toplevel):
             self.tree_res.heading(c, text=c)
             self.tree_res.column(c, width=widths[c], anchor="w")
         vsb_r = ttk.Scrollbar(bottom, orient="vertical", command=self.tree_res.yview)
-        self.tree_res.configure(yscrollcommand=vsb_r.set)
-        self.tree_res.pack(side=ttk.LEFT, fill=ttk.X, expand=True)
-        vsb_r.pack(side=ttk.LEFT, fill=ttk.Y)
-
-        self.lbl_status = ttk.Label(self, text="Ready.", anchor="w")
-        self.lbl_status.pack(side=ttk.BOTTOM, fill=ttk.X, padx=6, pady=(0, 4))
+        hsb_r = ttk.Scrollbar(bottom, orient="horizontal", command=self.tree_res.xview)
+        self.tree_res.configure(yscrollcommand=vsb_r.set, xscrollcommand=hsb_r.set)
+        vsb_r.pack(side=ttk.RIGHT, fill=ttk.Y)
+        hsb_r.pack(side=ttk.BOTTOM, fill=ttk.X)
+        self.tree_res.pack(fill=ttk.BOTH, expand=True)
 
     # ---------------------------------------------------------------------
     # Estado y refresco
@@ -329,6 +420,68 @@ class AnalysisWindow(ttk.Toplevel):
 
     def _set_status(self, msg):
         self.lbl_status.configure(text=msg)
+
+    @staticmethod
+    def _parse_float(s):
+        s = (s or "").strip()
+        if not s:
+            return None
+        try:
+            return float(s)
+        except ValueError:
+            return None
+
+    def _toggle_pick_mode(self, kind):
+        """Activa la captura de un siguiente clic en la gráfica overlay para
+        rellenar X@max o X@min. Un segundo click sobre el mismo botón cancela."""
+        # cancelar si ya estaba activo
+        cid = self._pick_cid
+        if cid is not None:
+            try:
+                self.canvas.mpl_disconnect(cid)
+            except Exception:
+                pass
+            prev = self._pick_kind
+            self._pick_cid = None
+            self._pick_kind = None
+            if prev == kind:
+                self._set_status("Pick mode cancelled.")
+                return
+        self._pick_kind = kind
+        self._pick_cid = self.canvas.mpl_connect("button_press_event", self._on_pick)
+        # cambia a modo at_x para que el usuario vea el efecto al recomputar
+        self.peak_mode.set("at_x")
+        self._set_status(f"Click on overlay to set X@{kind} (toolbar pan/zoom must be off).")
+
+    def _on_pick(self, event):
+        # ignorar si está activo pan/zoom del toolbar matplotlib
+        try:
+            if getattr(self.toolbar_mpl, "mode", "") not in ("", None):
+                return
+        except Exception:
+            pass
+        if event.inaxes is not self.ax_overlay or event.xdata is None:
+            return
+        x = float(event.xdata)
+        if self._pick_kind == "max":
+            self.x_at_max_var.set(f"{x:.6g}")
+        elif self._pick_kind == "min":
+            self.x_at_min_var.set(f"{x:.6g}")
+        cid = self._pick_cid
+        if cid is not None:
+            try:
+                self.canvas.mpl_disconnect(cid)
+            except Exception:
+                pass
+        kind = self._pick_kind
+        self._pick_cid = None
+        self._pick_kind = None
+        self._set_status(f"X@{kind} = {x:.6g}. Press Compute to apply.")
+
+    def _clear_at_x(self):
+        self.x_at_max_var.set("")
+        self.x_at_min_var.set("")
+        self._set_status("Cleared X@max / X@min.")
 
     # ---------------------------------------------------------------------
     # Acciones
@@ -423,10 +576,19 @@ class AnalysisWindow(ttk.Toplevel):
         pwin = max(1, self.peak_window_var.get() or 1)
         fkind = self.filter_var.get()
         fwin = max(1, self.filter_window_var.get() or 1)
+        x_max_target = self._parse_float(self.x_at_max_var.get()) if mode == "at_x" else None
+        x_min_target = self._parse_float(self.x_at_min_var.get()) if mode == "at_x" else None
 
         # Reset overlay (re-aplica filtro visual también)
         self._refresh_overlay()
         self.tree_res.delete(*self.tree_res.get_children())
+
+        # Líneas verticales guía en overlay para modo "At X"
+        if mode == "at_x":
+            if x_max_target is not None:
+                self.ax_overlay.axvline(x_max_target, color="tab:red", linestyle="--", linewidth=1, alpha=0.6)
+            if x_min_target is not None:
+                self.ax_overlay.axvline(x_min_target, color="tab:blue", linestyle="--", linewidth=1, alpha=0.6)
 
         # Picos para markers globales en overlay
         all_max_xy = []
@@ -459,8 +621,10 @@ class AnalysisWindow(ttk.Toplevel):
                 c.ys_filtered = ys_f
                 if mode == "global":
                     maxs, mins = _global_extrema(c.xs, ys_f)
-                else:
+                elif mode == "local":
                     maxs, mins = _local_extrema(c.xs, ys_f, window=pwin)
+                else:  # at_x
+                    maxs, mins = _at_x_extrema(c.xs, ys_f, x_max_target, x_min_target)
                 c.max_points = maxs
                 c.min_points = mins
                 for (x, y) in maxs:
