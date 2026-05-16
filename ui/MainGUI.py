@@ -105,6 +105,7 @@ class MainGUI(ttk.Window):
 
             self.ads = Ads1115Reader(address=0x48, fsr=ads_fsr, sps=64, single_shot=False)
             # self.ads.check_diff_health(p=0, n=1, samples=30)
+        self.analysis_window = None
         # --------------------Start Animation -------------------
         # self.show_gif_toplevel()
         self.after(0, self.maximize_window)
@@ -184,7 +185,7 @@ class MainGUI(ttk.Window):
         ).grid(row=0, column=0, sticky="ns", padx=15, pady=1)
         ttk.Button(
             self.frame_footer,
-            text="Test Connection Disc",
+            text="🔄️Test Connection Disc",
             style="CustomPrimary.TButton",
             command=self.on_button_test_disc,
         ).grid(row=0, column=1, sticky="e", padx=15, pady=1)
@@ -194,10 +195,26 @@ class MainGUI(ttk.Window):
             style="CustomPrimary.TButton",
             command=self.open_configurations,
         ).grid(row=0, column=2, sticky="e", padx=15, pady=1)
-
+        ttk.Button(
+            self.frame_footer,
+            text="🔬 Analyze",
+            style="CustomPrimary.TButton",
+            command=self.open_analysis_window,
+        ).grid(row=0, column=3, sticky="e", padx=15, pady=1)
         # ----------------------after init ----------------------
         self.after(2000, self.on_button_test_disc)
 
+    def open_analysis_window(self):
+        if self.analysis_window is not None:
+            try:
+                if self.analysis_window.winfo_exists():
+                    self.analysis_window.lift()
+                    return
+            except Exception:
+                pass
+        from ui.AnalysisWindow import AnalysisWindow
+        self.analysis_window = AnalysisWindow(self, plotter=self)
+    
     def callback_ip(self):
         return self.ip_sender
 

@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+from templates.constants import font_tabs
 import csv
 import os
 import re
@@ -10,6 +11,7 @@ import matplotlib
 matplotlib.use("TkAgg")
 import matplotlib.pyplot as plt
 import numpy as np
+import tkinter as tk
 import ttkbootstrap as ttk
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 from matplotlib.figure import Figure
@@ -152,6 +154,8 @@ class AnalysisWindow(ttk.Toplevel):
         self._pick_kind: str | None = None  # 'max' | 'min' | None
 
         self._build_ui()
+        self.bind("<Control-i>", lambda _e: self.import_analysis())
+        self.bind("<Control-l>", lambda _e: self.load_csv())
         if plotter is not None:
             self._snapshot_from_plotter(plotter)
             self._refresh_tree()
@@ -163,25 +167,42 @@ class AnalysisWindow(ttk.Toplevel):
     # UI
     # ---------------------------------------------------------------------
     def _build_ui(self):
+        # --- Menu bar ---
+        menubar = tk.Menu(self)
+        file_menu = tk.Menu(menubar, tearoff=0)
+        file_menu.add_command(label="Load CSV", command=self.load_csv, accelerator="Ctrl+L")
+        file_menu.add_separator()
+        file_menu.add_command(
+            label="Import analysis (_curves.csv)",
+            command=self.import_analysis,
+            accelerator="Ctrl+I",
+        )
+        file_menu.add_command(label="Export results", command=self.export_results)
+        menubar.add_cascade(label="File", menu=file_menu, font=font_tabs)
+        self.configure(menu=menubar)
+        menubar.configure(font=font_tabs)
+
         # --- Toolbar fila 1: acciones ---
         toolbar = ttk.Frame(self)
         toolbar.pack(side=ttk.TOP, fill=ttk.X, padx=6, pady=(6, 2))
 
-        ttk.Button(
-            toolbar, text="📂 Load CSV", bootstyle="secondary", command=self.load_csv
-        ).pack(side=ttk.LEFT, padx=3)
-        ttk.Button(
-            toolbar, text="🗑 Remove", bootstyle="danger", command=self.remove_selected
-        ).pack(side=ttk.LEFT, padx=3)
+        ttk.Button(toolbar, text="🗑 Remove", bootstyle="danger", command=self.remove_selected).pack(
+            side=ttk.LEFT, padx=3
+        )
         ttk.Button(
             toolbar, text="👁 Show/Hide", bootstyle="info", command=self.toggle_visibility
         ).pack(side=ttk.LEFT, padx=3)
         ttk.Button(
             toolbar, text="📊 Compute", bootstyle="success", command=self.compute_extrema
         ).pack(side=ttk.LEFT, padx=3)
+        self._legend_visible = True
+        self.btn_legend = ttk.Button(
+            toolbar, text="Legend ON", bootstyle="secondary", command=self.toggle_legend
+        )
+        self.btn_legend.pack(side=ttk.RIGHT, padx=3)
         ttk.Button(
-            toolbar, text="💾 Export", bootstyle="primary", command=self.export_results
-        ).pack(side=ttk.LEFT, padx=3)
+            toolbar, text="Clear all", bootstyle="danger-outline", command=self.clear_all
+        ).pack(side=ttk.RIGHT, padx=3)
 
         # --- Toolbar fila 2: selectores de picos + filtro ---
         toolbar2 = ttk.Frame(self)
@@ -189,15 +210,15 @@ class AnalysisWindow(ttk.Toplevel):
 
         ttk.Label(toolbar2, text="Peaks:").pack(side=ttk.LEFT, padx=(0, 4))
         self.peak_mode = ttk.StringVar(value="global")
-        ttk.Radiobutton(
-            toolbar2, text="Global", variable=self.peak_mode, value="global"
-        ).pack(side=ttk.LEFT)
-        ttk.Radiobutton(
-            toolbar2, text="Local", variable=self.peak_mode, value="local"
-        ).pack(side=ttk.LEFT)
-        ttk.Radiobutton(
-            toolbar2, text="At X", variable=self.peak_mode, value="at_x"
-        ).pack(side=ttk.LEFT)
+        ttk.Radiobutton(toolbar2, text="Global", variable=self.peak_mode, value="global").pack(
+            side=ttk.LEFT
+        )
+        ttk.Radiobutton(toolbar2, text="Local", variable=self.peak_mode, value="local").pack(
+            side=ttk.LEFT
+        )
+        ttk.Radiobutton(toolbar2, text="At X", variable=self.peak_mode, value="at_x").pack(
+            side=ttk.LEFT
+        )
 
         ttk.Label(toolbar2, text="Peak window:").pack(side=ttk.LEFT, padx=(12, 4))
         self.peak_window_var = ttk.IntVar(value=5)
@@ -263,8 +284,7 @@ class AnalysisWindow(ttk.Toplevel):
         _vsb_main = ttk.Scrollbar(_wrap, orient="vertical")
         _vsb_main.pack(side=ttk.RIGHT, fill=ttk.Y)
 
-        self._main_sc = ttk.Canvas(_wrap, bd=0, highlightthickness=0,
-                                    yscrollcommand=_vsb_main.set)
+        self._main_sc = ttk.Canvas(_wrap, bd=0, highlightthickness=0, yscrollcommand=_vsb_main.set)
         self._main_sc.pack(side=ttk.LEFT, fill=ttk.BOTH, expand=True)
         _vsb_main.configure(command=self._main_sc.yview)
 
@@ -322,8 +342,8 @@ class AnalysisWindow(ttk.Toplevel):
         self.ax_min = self.fig.add_subplot(gs[1, 0])
         self.ax_max = self.fig.add_subplot(gs[1, 1])
         self.ax_overlay.set_title("Curves overlay")
-        self.ax_min.set_title("Min trend (mean ± std per experiment)")
-        self.ax_max.set_title("Max trend (mean ± std per experiment)")
+        self.ax_min.set_title("Min trend (mean ± std)")
+        self.ax_max.set_title("Max trend (mean ± std)")
         self.ax_min.set_xlabel("Experiment index")
         self.ax_max.set_xlabel("Experiment index")
 
@@ -334,11 +354,9 @@ class AnalysisWindow(ttk.Toplevel):
 
         # --- Tabla de resultados (debajo del split, dentro del frame interior) ---
         bottom = ttk.LabelFrame(inner, text="Results (visible only)")
-        bottom.pack(fill=ttk.X, pady=(0, 6))
+        bottom.pack(fill=ttk.BOTH, pady=(0, 6))
         cols_r = ("idx", "type", "n", "x", "y", "std")
-        self.tree_res = ttk.Treeview(
-            bottom, columns=cols_r, show="tree headings", height=6
-        )
+        self.tree_res = ttk.Treeview(bottom, columns=cols_r, show="tree headings", height=16)
         widths = {"idx": 50, "type": 80, "n": 50, "x": 130, "y": 130, "std": 130}
         self.tree_res.heading("#0", text="Experiment / Cycle")
         self.tree_res.column("#0", width=300, anchor="w")
@@ -388,9 +406,7 @@ class AnalysisWindow(ttk.Toplevel):
             self._tree_ref[exp_iid] = ("exp", exp)
             for cycle in exp.cycles:
                 mark = "👁" if cycle.visible else "🚫"
-                ciid = self.tree_curves.insert(
-                    exp_iid, ttk.END, text=cycle.name, values=(mark,)
-                )
+                ciid = self.tree_curves.insert(exp_iid, ttk.END, text=cycle.name, values=(mark,))
                 self._tree_ref[ciid] = ("cycle", exp, cycle)
 
     def _refresh_overlay(self):
@@ -398,7 +414,9 @@ class AnalysisWindow(ttk.Toplevel):
         kind = self.filter_var.get()
         fw = max(1, self.filter_window_var.get() or 1)
         self.ax_overlay.clear()
-        self.ax_overlay.set_title("Curves overlay" + (f" (filtered: {kind})" if kind != "none" else ""))
+        self.ax_overlay.set_title(
+            "Curves overlay" + (f" (filtered: {kind})" if kind != "none" else "")
+        )
         any_visible = False
         for exp in self.experiments:
             for c in exp.cycles:
@@ -415,7 +433,8 @@ class AnalysisWindow(ttk.Toplevel):
                 )
                 any_visible = True
         if any_visible:
-            self.ax_overlay.legend(loc="best", fontsize=7, ncol=2)
+            leg = self.ax_overlay.legend(loc="best", fontsize=7, ncol=2)
+            leg.set_visible(self._legend_visible)
         self.canvas.draw_idle()
 
     def _set_status(self, msg):
@@ -524,9 +543,7 @@ class AnalysisWindow(ttk.Toplevel):
         self.experiments.append(exp)
         self._refresh_tree()
         self._refresh_overlay()
-        self._set_status(
-            f"Loaded experiment '{exp_name}' with {len(exp.cycles)} cycle(s)."
-        )
+        self._set_status(f"Loaded experiment '{exp_name}' with {len(exp.cycles)} cycle(s).")
 
     def _selected_refs(self):
         return [self._tree_ref[i] for i in self.tree_curves.selection() if i in self._tree_ref]
@@ -552,7 +569,9 @@ class AnalysisWindow(ttk.Toplevel):
         self.experiments = [e for e in self.experiments if id(e) not in exps_to_drop and e.cycles]
         self._refresh_tree()
         self._refresh_overlay()
-        self._set_status(f"Removed {len(exps_to_drop)} experiment(s), {len(cycles_to_drop)} cycle(s).")
+        self._set_status(
+            f"Removed {len(exps_to_drop)} experiment(s), {len(cycles_to_drop)} cycle(s)."
+        )
 
     def toggle_visibility(self):
         refs = self._selected_refs()
@@ -586,9 +605,13 @@ class AnalysisWindow(ttk.Toplevel):
         # Líneas verticales guía en overlay para modo "At X"
         if mode == "at_x":
             if x_max_target is not None:
-                self.ax_overlay.axvline(x_max_target, color="tab:red", linestyle="--", linewidth=1, alpha=0.6)
+                self.ax_overlay.axvline(
+                    x_max_target, color="tab:red", linestyle="--", linewidth=1, alpha=0.6
+                )
             if x_min_target is not None:
-                self.ax_overlay.axvline(x_min_target, color="tab:blue", linestyle="--", linewidth=1, alpha=0.6)
+                self.ax_overlay.axvline(
+                    x_min_target, color="tab:blue", linestyle="--", linewidth=1, alpha=0.6
+                )
 
         # Picos para markers globales en overlay
         all_max_xy = []
@@ -627,7 +650,7 @@ class AnalysisWindow(ttk.Toplevel):
                     maxs, mins = _at_x_extrema(c.xs, ys_f, x_max_target, x_min_target)
                 c.max_points = maxs
                 c.min_points = mins
-                for (x, y) in maxs:
+                for x, y in maxs:
                     all_max_xy.append((x, y))
                     cycle_max_ys.append(y)
                     self.tree_res.insert(
@@ -636,7 +659,7 @@ class AnalysisWindow(ttk.Toplevel):
                         text=c.name,
                         values=(exp_idx, "max", "", f"{x:.6g}", f"{y:.6g}", ""),
                     )
-                for (x, y) in mins:
+                for x, y in mins:
                     all_min_xy.append((x, y))
                     cycle_min_ys.append(y)
                     self.tree_res.insert(
@@ -656,7 +679,14 @@ class AnalysisWindow(ttk.Toplevel):
                     exp_iid,
                     ttk.END,
                     text="⟨max⟩",
-                    values=(exp_idx, "mean_max", len(cycle_max_ys), "", f"{mean_mx:.6g}", f"{std_mx:.6g}"),
+                    values=(
+                        exp_idx,
+                        "mean_max",
+                        len(cycle_max_ys),
+                        "",
+                        f"{mean_mx:.6g}",
+                        f"{std_mx:.6g}",
+                    ),
                 )
             if cycle_min_ys:
                 mean_mn = float(np.mean(cycle_min_ys))
@@ -673,7 +703,14 @@ class AnalysisWindow(ttk.Toplevel):
                     exp_iid,
                     ttk.END,
                     text="⟨min⟩",
-                    values=(exp_idx, "mean_min", len(cycle_min_ys), "", f"{mean_mn:.6g}", f"{std_mn:.6g}"),
+                    values=(
+                        exp_idx,
+                        "mean_min",
+                        len(cycle_min_ys),
+                        "",
+                        f"{mean_mn:.6g}",
+                        f"{std_mn:.6g}",
+                    ),
                 )
             else:
                 # mantiene paralelismo si max existía pero min no
@@ -693,10 +730,10 @@ class AnalysisWindow(ttk.Toplevel):
         # Trends con errorbar
         self.ax_min.clear()
         self.ax_max.clear()
-        self.ax_min.set_title(f"Min trend ({mode}) — mean ± std")
-        self.ax_max.set_title(f"Max trend ({mode}) — mean ± std")
-        self.ax_min.set_xlabel("Experiment index")
-        self.ax_max.set_xlabel("Experiment index")
+        self.ax_min.set_title(f"Min trend ({mode}) \n— mean ± std")
+        self.ax_max.set_title(f"Max trend ({mode}) \n— mean ± std")
+        self.ax_min.set_xlabel("Experiment")
+        self.ax_max.set_xlabel("Experiment")
         if trend_idx:
             self.ax_max.errorbar(
                 trend_idx,
@@ -749,7 +786,7 @@ class AnalysisWindow(ttk.Toplevel):
         if not path:
             return
         try:
-            with open(path, "w", newline="") as f:
+            with open(path, "w", newline="", encoding="utf-8") as f:
                 w = csv.writer(f)
                 w.writerow(["experiment", "cycle", "exp_idx", "type", "n", "x", "y", "std"])
                 w.writerows(rows)
@@ -764,10 +801,19 @@ class AnalysisWindow(ttk.Toplevel):
         fwin = max(1, self.filter_window_var.get() or 1)
         n_pts = 0
         try:
-            with open(curves_path, "w", newline="") as f:
+            with open(curves_path, "w", newline="", encoding="utf-8") as f:
                 w = csv.writer(f)
                 w.writerow(
-                    ["experiment", "cycle", "point_idx", "x", "y_raw", "y_filtered", "filter", "filter_window"]
+                    [
+                        "experiment",
+                        "cycle",
+                        "point_idx",
+                        "x",
+                        "y_raw",
+                        "y_filtered",
+                        "filter",
+                        "filter_window",
+                    ]
                 )
                 exp_idx = 0
                 for exp in self.experiments:
@@ -794,14 +840,101 @@ class AnalysisWindow(ttk.Toplevel):
                             )
                             n_pts += 1
         except Exception as e:
-            self._set_status(
-                f"Results exported, but error writing curves file: {e}"
-            )
+            self._set_status(f"Results exported, but error writing curves file: {e}")
             return
         self._set_status(
             f"Exported {len(rows)} result row(s) → {os.path.basename(path)}; "
             f"{n_pts} curve point(s) → {os.path.basename(curves_path)}."
         )
+
+    def toggle_legend(self):
+        self._legend_visible = not self._legend_visible
+        for ax in (self.ax_overlay, self.ax_min, self.ax_max):
+            leg = ax.get_legend()
+            if leg is not None:
+                leg.set_visible(self._legend_visible)
+        self.btn_legend.configure(
+            text="Legend ON" if self._legend_visible else "Legend OFF",
+            bootstyle="secondary" if self._legend_visible else "secondary-outline",
+        )
+        self.canvas.draw_idle()
+
+    def clear_all(self):
+        """Resetea el estado completo de la ventana."""
+        self.experiments.clear()
+        self._tree_ref.clear()
+        self.tree_curves.delete(*self.tree_curves.get_children())
+        self.tree_res.delete(*self.tree_res.get_children())
+        for ax in (self.ax_overlay, self.ax_min, self.ax_max):
+            ax.clear()
+        self.ax_overlay.set_title("Curves overlay")
+        self.ax_min.set_title("Min trend (mean ± std)")
+        self.ax_max.set_title("Max trend (mean ± std)")
+        self.ax_min.set_xlabel("Experiment index")
+        self.ax_max.set_xlabel("Experiment index")
+        self.canvas.draw_idle()
+        self._set_status("Cleared.")
+
+    def import_analysis(self):
+        """Importa un archivo _curves.csv generado por export_results."""
+        path = askopenfilename(
+            title="Select curves CSV (analysis export)",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+        )
+        if not path:
+            return
+        try:
+            with open(path, newline="", encoding="utf-8") as f:
+                reader = csv.reader(f, skipinitialspace=True)
+                header = [h.strip() for h in (next(reader, None) or [])]
+                if "y_raw" not in header:
+                    self._set_status(
+                        "Not a curves file. Export produces two files — select the one ending in _curves.csv."
+                    )
+                    return
+                col = {name: i for i, name in enumerate(header)}
+                # group rows by experiment → cycle (preserves insertion order)
+                groups: dict[str, dict[str, tuple[list, list]]] = {}
+                for row in reader:
+                    if len(row) <= max(col["x"], col["y_raw"]):
+                        continue
+                    try:
+                        exp_name = row[col["experiment"]].strip()
+                        cycle_name = row[col["cycle"]].strip()
+                        x = float(row[col["x"]])
+                        y = float(row[col["y_raw"]])
+                    except (ValueError, IndexError):
+                        continue
+                    groups.setdefault(exp_name, {}).setdefault(cycle_name, ([], []))
+                    groups[exp_name][cycle_name][0].append(x)
+                    groups[exp_name][cycle_name][1].append(y)
+        except Exception as e:
+            self._set_status(f"Import error: {e}")
+            return
+
+        if not groups:
+            self._set_status("No data parsed from file.")
+            return
+
+        existing_names = {e.name for e in self.experiments}
+        added = 0
+        for exp_name, cycles in groups.items():
+            # avoid duplicate names
+            name = exp_name
+            suffix = 1
+            while name in existing_names:
+                name = f"{exp_name}_{suffix}"
+                suffix += 1
+            existing_names.add(name)
+            exp = Experiment(name=name)
+            for cycle_name, (xs, ys) in cycles.items():
+                exp.cycles.append(CycleCurve(name=cycle_name, xs=xs, ys=ys))
+            self.experiments.append(exp)
+            added += 1
+
+        self._refresh_tree()
+        self._refresh_overlay()
+        self._set_status(f"Imported {added} experiment(s) from {os.path.basename(path)}.")
 
     # ---------------------------------------------------------------------
     def on_close(self):

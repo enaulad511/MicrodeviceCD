@@ -272,10 +272,13 @@ class EventPlotter(ttk.Frame):
     def clear_plot(self):
         """Limpia datos y resetea el gráfico."""
         self.storage_dict.clear()
+        self.total_data.clear()
         self.x_by_m.clear()
         self.y_by_m.clear()
         self.lines_by_m.clear()
         self.loaded_lines.clear()
+        with self.q_points.mutex:
+            self.q_points.queue.clear()
 
         self.ax.clear()
         self.ax.set_title("V vs A (online)")
