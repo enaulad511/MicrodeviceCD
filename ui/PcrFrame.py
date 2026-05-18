@@ -36,6 +36,31 @@ def check_temp_higher(temp, target_temp):
     return temp >= target_temp
 
 
+def _fuzzy_gains(error: float, base_kp: float, base_ki: float) -> tuple:
+    """Escala KP/KI dinámicamente según la magnitud del error (fuzzy gain scheduling).
+
+    Tres zonas con interpolación lineal para transiciones suaves:
+      |e| >= 15°C  → agresivo (kp×2.0, ki×0.2): rampas largas sin windup
+      5 <= |e| < 15 → intermedio: transición suave
+      |e| < 5°C    → preciso  (kp×0.5, ki×1.3): regulación cerca del setpoint
+
+    Los factores de escala operan sobre las ganancias base leídas de settings.json,
+    por lo que el punto de operación nominal sigue siendo configurable allí.
+    """
+    abs_error = abs(error)
+    if abs_error >= 15.0:
+        kp_s, ki_s = 2.0, 0.2
+    elif abs_error >= 5.0:
+        t = (abs_error - 5.0) / 10.0          # 0..1 de 5°C a 15°C
+        kp_s = 1.0 + t * 1.0                  # 1.0 → 2.0
+        ki_s = 1.0 - t * 0.8                  # 0.2 → 1.0
+    else:
+        t = abs_error / 5.0                    # 0..1 de 0°C a 5°C
+        kp_s = 0.5 + t * 0.5                  # 0.5 → 1.0
+        ki_s = 1.3 - t * 0.3                  # 1.0 → 1.3
+    return base_kp * kp_s, base_ki * ki_s
+
+
 def create_widgets_pcr(parent):
     entries = []
 
@@ -537,12 +562,13 @@ class PCRFrame(ttk.Frame):
             temp = self.temp
             # Banda muerta mínima para evitar chatter
             error = temp_setpoint - temp
+            kp_dyn, ki_dyn = _fuzzy_gains(error, KP_HOLD, KI)
             integral += error * WINDOW
             integral = max(-I_MAX, min(I_MAX, integral))
             if abs(error) < TEMP_BAND:
                 power = 0.0
             else:
-                power = KP_HOLD * error + KI * integral
+                power = kp_dyn * error + ki_dyn * integral
             # Saturar potencia
             power = max(0.0, min(1.0, power))
             on_time = power * WINDOW
@@ -597,12 +623,13 @@ class PCRFrame(ttk.Frame):
                 self.pin_heating.write(False)  # pyrefly: ignore
                 continue
             error = setpoint - self.temp
+            kp_dyn, ki_dyn = _fuzzy_gains(error, KP, KI)
             integral += error * WINDOW
             integral = max(-I_MAX, min(I_MAX, integral))
             if abs(error) < TEMP_BAND:
                 power = 0.0
             else:
-                power = KP * error + KI * integral
+                power = kp_dyn * error + ki_dyn * integral
             power = max(0.0, min(1.0, power))
             on_time = power * WINDOW
             if on_time > 0:
