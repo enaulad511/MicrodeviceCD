@@ -648,6 +648,7 @@ class PCRFrame(ttk.Frame):
         ads,
     ):
         global sistemaMotor
+        self.fase = "Initial"
         self.start_cycle_time = time.time()
 
         # Reach High temp (PI, tolerancia 0.5)
