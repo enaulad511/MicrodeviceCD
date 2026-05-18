@@ -209,15 +209,17 @@ class UdpClient:
                 # print(data, addr)
                 with self.latest_lock:
                     self.latest_temp = TempSample(value=temp, ts=now)
-                    if self.on_message:
-                        try:
-                            self.on_message(
-                                text,
-                                (addr[0],),
-                                [0, 0, self.latest_temp.value, self.latest_temp.ts],
-                            )
-                        except Exception as e:
-                            print(f"[UdpClient] on_message error: {e}")
+                    temp_value = self.latest_temp.value
+                    temp_ts = self.latest_temp.ts
+                if self.on_message:
+                    try:
+                        self.on_message(
+                            text,
+                            (addr[0],),
+                            [0, 0, temp_value, temp_ts],
+                        )
+                    except Exception as e:
+                        print(f"[UdpClient] on_message error: {e}")
 
             except BlockingIOError:
                 time.sleep(0.0005)

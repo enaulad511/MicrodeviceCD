@@ -150,6 +150,8 @@ class PCRFrame(ttk.Frame):
         self.thread_experiment = None
         self.client_temperature = None
         self.temp_update_counter = 0
+        self._ui_poll_graph_counter = 0
+        self._ui_poll_active = False
         self.content_frame = ScrolledFrame(self, autohide=True)
         self.content_frame.grid(row=0, column=0, sticky="nsew")
         self.content_frame.columnconfigure(0, weight=1)
@@ -301,43 +303,46 @@ class PCRFrame(ttk.Frame):
             print("Error: Verifique los valores ingresados.")
 
     def update_displayed_temperature(self, text, address, temps_list):
+        # Solo actualiza datos Python puros — sin operaciones Tkinter.
+        # Tkinter no es thread-safe; toda actualización de UI ocurre en _ui_poll_loop.
         try:
             lf = float(temps_list[2])
             self.temp_ts = temps_list[3]
         except Exception:
             lf = self.temp
             self.temp_ts = 0.8
-        # Filtro rápido y estable
         alpha = 0.3
         self.temp = alpha * lf + (1 - alpha) * self.temp
         self.data_temperature.append(self.temp)
 
-        # Actualizar UI solo cuando toca
-        if time.time() - self.last_display > self.ts_display:
-            total_msg = self.svar_status.get().split("\n")
-            elapsed_pcr_time = time.time() - self.start_pcr_time
-            mins_elapsed = int(elapsed_pcr_time / 60)
-            msg_elapsed_time = (
-                f"Time passed: {mins_elapsed} m {elapsed_pcr_time % 60:.1f} s "
-                f"-- cycles: {self.cycles_complete}/{self.total_cycles}"
-            )
-            remaining = self._estimate_remaining_time(elapsed_pcr_time)
-            msg_elapsed_time += (
-                f" -- Estimated finish: {int(remaining / 60)}m {remaining % 60:.1f}s"
-            )
-            total_msg[0] = f"Temperature: {lf:.2f} °C\tState: {self.fase}"
-            if len(total_msg) < 2:
-                total_msg.append(msg_elapsed_time)
-            else:
-                total_msg[1] = msg_elapsed_time
-            self.svar_status.set("\n".join(total_msg))
-            self.last_display = time.time()
+    def _ui_poll_loop(self):
+        """Actualiza la UI desde el hilo principal (scheduled via after). Un solo hilo."""
+        if not self._ui_poll_active:
+            return
+        total_msg = self.svar_status.get().split("\n")
+        elapsed_pcr_time = time.time() - self.start_pcr_time
+        mins_elapsed = int(elapsed_pcr_time / 60)
+        msg_elapsed_time = (
+            f"Time passed: {mins_elapsed} m {elapsed_pcr_time % 60:.1f} s "
+            f"-- cycles: {self.cycles_complete}/{self.total_cycles}"
+        )
+        remaining = self._estimate_remaining_time(elapsed_pcr_time)
+        msg_elapsed_time += (
+            f" -- Estimated finish: {int(remaining / 60)}m {remaining % 60:.1f}s"
+        )
+        total_msg[0] = f"Temperature: {self.temp:.2f} °C\tState: {self.fase}"
+        if len(total_msg) < 2:
+            total_msg.append(msg_elapsed_time)
+        else:
+            total_msg[1] = msg_elapsed_time
+        self.svar_status.set("\n".join(total_msg))
 
-        # Actualizar gráfica cada N muestras
-        self.temp_update_counter += 1
-        if self.temp_update_counter >= 10:
-            self.temp_update_counter = 0
-            self.after(1, lambda: self.update_graph_temperature())
+        self._ui_poll_graph_counter += 1
+        if self._ui_poll_graph_counter >= 5:
+            self._ui_poll_graph_counter = 0
+            self.update_graph_temperature()
+
+        self.after(500, self._ui_poll_loop)
 
     def _estimate_remaining_time(self, elapsed_pcr_time):
         # Antes de completar el primer ciclo no hay medición fiable: estima por
@@ -482,6 +487,9 @@ class PCRFrame(ttk.Frame):
         )
         print(msg)
         self.init_temperature_graph()
+        self._ui_poll_graph_counter = 0
+        self._ui_poll_active = True
+        self.after(500, self._ui_poll_loop)
         self.thread_experiment = threading.Thread(  # pyrefly: ignore
             target=self.experiment_pcr,
             args=(
@@ -648,7 +656,7 @@ class PCRFrame(ttk.Frame):
         ads,
     ):
         global sistemaMotor
-        self.fase = "Initial"
+        
         self.start_cycle_time = time.time()
 
         # Reach High temp (PI, tolerancia 0.5)
@@ -789,7 +797,7 @@ class PCRFrame(ttk.Frame):
         )
         self.prefix_row = prefix_col
         self.client_temperature.start()
-
+        self.fase = "Initial"
         from Drivers.DriverStepperSys import DriverStepperSys
 
         self.start_pcr_time = time.time()
@@ -935,6 +943,7 @@ class PCRFrame(ttk.Frame):
             except Exception as e:
                 print(f"error closing pin_pcr: {e}")
             self.pin_pcr = None
+        self._ui_poll_active = False
         self.running_experiment = False
 
     def callback_stop_experiment(self):
