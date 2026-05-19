@@ -10,6 +10,7 @@ import time
 from ttkbootstrap.scrolled import ScrolledFrame
 
 from templates.constants import font_entry
+from ui.KeyboardFrame import NumericKeyboard
 
 __author__ = "Edisson A. Naula"
 __date__ = "$ 08/10/2025  at 01:07 p.m. $"
@@ -88,6 +89,9 @@ class PhotoreceptorFrame(ttk.Frame):
             highlightbackground="lightblue", highlightthickness=2
         )  # Solo para pruebas
         graphic_frame.pack_propagate(False)
+
+        self.keyboard = NumericKeyboard(self, scroll_host=content_frame)
+        self.keyboard.attach([self.interval_entry])
 
     def iniciar_lectura(self):
         print("Iniciar lectura del fotoreceptor")

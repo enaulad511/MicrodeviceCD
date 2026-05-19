@@ -6,6 +6,7 @@ from tkinter import Entry
 import ttkbootstrap as ttk
 from ttkbootstrap.scrolled import ScrolledFrame
 from templates.constants import font_entry
+from ui.KeyboardFrame import NumericKeyboard
 
 __author__ = "Edisson A. Naula"
 __date__ = "$ 08/10/2025  at 09:32 a.m. $"
@@ -93,7 +94,8 @@ def create_widgets_input(parent, callbacks: dict):
         style="info.TButton",
         command=callbacks.get("callback_pattern", ()),
     ).grid(row=3, column=0, columnspan=2, pady=5, padx=5, sticky="nswe")
-    return entries
+    entry_widgets = [duration_entry, up_duration, frequency_entry]
+    return entries, entry_widgets
 
 
 class ControleLEDFrame(ttk.Frame):
@@ -127,7 +129,9 @@ class ControleLEDFrame(ttk.Frame):
             "callback_on_time": self.callback_on_time,
             "callback_pattern": self.callback_pattern,
         }
-        self.entries = create_widgets_input(content_frame, callbacks)
+        self.entries, entry_widgets = create_widgets_input(content_frame, callbacks)
+        self.keyboard = NumericKeyboard(self, scroll_host=content_frame)
+        self.keyboard.attach(entry_widgets)
 
         # Limpieza al destruir
         self.bind("<Destroy>", self._on_destroy)

@@ -12,6 +12,7 @@ import random
 
 from ttkbootstrap.scrolled import ScrolledFrame
 from templates.constants import font_entry
+from ui.KeyboardFrame import NumericKeyboard
 
 
 class TemperatureFrame(ttk.Frame):
@@ -117,6 +118,9 @@ class TemperatureFrame(ttk.Frame):
         canvas_widget.configure(
             highlightbackground="lightblue", highlightthickness=2
         )  # Solo pruebas
+
+        self.keyboard = NumericKeyboard(self, scroll_host=content_frame)
+        self.keyboard.attach([self.interval_entry])
 
     # ----------------- Control -----------------
 

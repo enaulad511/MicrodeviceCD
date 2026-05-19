@@ -7,6 +7,7 @@ import ttkbootstrap as ttk
 from ttkbootstrap.scrolled import ScrolledFrame
 
 from templates.constants import font_entry
+from ui.KeyboardFrame import NumericKeyboard
 
 
 def create_widgets_fluorescente_input(parent, callbacks: dict):
@@ -51,7 +52,8 @@ def create_widgets_fluorescente_input(parent, callbacks: dict):
         command=callbacks.get("callback_on_time", ()),
     ).grid(row=1, column=0, columnspan=2, pady=5, padx=5, sticky="nswe")
 
-    return entries
+    entry_widgets = [duration_entry]
+    return entries, entry_widgets
 
 
 class ControlFluorescenteFrame(ttk.Frame):
@@ -85,8 +87,10 @@ class ControlFluorescenteFrame(ttk.Frame):
             "callback_off": self.callback_off,
             "callback_on_time": self.callback_on_time,
         }
-        self.entries = create_widgets_fluorescente_input(content_frame, callbacks)
-        
+        self.entries, entry_widgets = create_widgets_fluorescente_input(content_frame, callbacks)
+        self.keyboard = NumericKeyboard(self, scroll_host=content_frame)
+        self.keyboard.attach(entry_widgets)
+
         # Limpieza al destruir el frame
         self.bind("<Destroy>", self._on_destroy)
 
