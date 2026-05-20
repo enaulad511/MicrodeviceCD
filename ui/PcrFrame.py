@@ -51,13 +51,13 @@ def _fuzzy_gains(error: float, base_kp: float, base_ki: float) -> tuple:
     if abs_error >= 7.0:
         kp_s, ki_s = 2.0, 0.2
     elif abs_error >= 3.0:
-        t = (abs_error - 5.0) / 10.0          # 0..1 de 3°C a 7°C
-        kp_s = 1.0 + t * 1.0                  # 1.0 → 2.0
-        ki_s = 1.0 - t * 0.8                  # 0.2 → 1.0
+        t = (abs_error - 5.0) / 10.0  # 0..1 de 3°C a 7°C
+        kp_s = 1.0 + t * 1.0  # 1.0 → 2.0
+        ki_s = 1.0 - t * 0.8  # 0.2 → 1.0
     else:
-        t = abs_error / 5.0                    # 0..1 de 0°C a 3°C
-        kp_s = 0.5 + t * 0.5                  # 0.5 → 1.0
-        ki_s = 1.3 - t * 0.3                  # 1.0 → 1.3
+        t = abs_error / 5.0  # 0..1 de 0°C a 3°C
+        kp_s = 0.5 + t * 0.5  # 0.5 → 1.0
+        ki_s = 1.3 - t * 0.3  # 1.0 → 1.3
     return base_kp * kp_s, base_ki * ki_s
 
 
@@ -112,14 +112,14 @@ def create_buttons(master, callbacks, svar_status):
     # Botón para generar perfil
     ttk.Button(
         frame_buttons,
-        text="Generate Profile",
+        text="📈",
         style="info.TButton",
         command=callbacks.get("callback_generate_profile", ()),
     ).grid(row=0, column=0, padx=10, sticky="nswe")
     # Boton para empezar experimento
     ttk.Button(
         frame_buttons,
-        text="Start Experiment",
+        text="▶️Start",
         style="success.TButton",
         command=callbacks.get("callback_start_experiment", ()),
     ).grid(row=0, column=1, padx=10, sticky="nswe")
@@ -127,14 +127,14 @@ def create_buttons(master, callbacks, svar_status):
     # save data button
     ttk.Button(
         frame_buttons,
-        text="Stop Experiment",
+        text="⏹️Stop",
         style="danger.TButton",
         command=callbacks.get("callback_stop_experiment", ()),
     ).grid(row=0, column=2, padx=10, sticky="nswe")
 
     ttk.Button(
         frame_buttons,
-        text="Save Data",
+        text="💾Save Data",
         style="info.TButton",
         command=callbacks.get("callback_save_data", ()),
     ).grid(row=0, column=3, padx=10, sticky="nswe")
@@ -217,109 +217,108 @@ class PCRFrame(ttk.Frame):
             time_low = float(self.entries[3].get())
             cycles = int(self.entries[4].get())
             rpm = float(self.entries[5].get())
+            denat_time = float(self.entries[6].get())
+            denat_temp = float(self.entries[7].get())
+            ext_time = float(self.entries[8].get())
+            ext_temp = float(self.entries[9].get())
+            ext_time_final = float(self.entries[10].get())
+            initial_spin_time = float(self.entries[11].get())
 
-            # Generar datos con pendientes proporcionales a RPM
-            current_time = 0.0
-            transition_const = 10000  # Ajusta la escala de transición
+            room_temp = 20.0
+            transition_const = 10000
             transition_time_down = transition_const / max(rpm, 1)
             transition_time_up = 15
 
-            # Segmentos para dibujar con colores y etiquetas
+            # (start, end, from_temp, to_temp, label, color)
             phase_segments = []
+            current_time = 0.0
 
-            for _ in range(cycles):
-                # Transición Low -> High
-                start = current_time
-                end = current_time + transition_time_up
-                phase_segments.append((start, end, None, "Heating"))
-                current_time = end
+            # Initial spin: temperatura ambiente
+            phase_segments.append((current_time, current_time + initial_spin_time,
+                                    room_temp, room_temp, "Initial Spin", "gray"))
+            current_time += initial_spin_time
 
-                # High Temp fase
-                start = current_time
-                end = current_time + time_high
-                phase_segments.append((start, end, high_temp, "High"))
-                current_time = end
+            # Rampa hacia denaturation
+            phase_segments.append((current_time, current_time + transition_time_up,
+                                    room_temp, denat_temp, "Ramp Denat", "darkorange"))
+            current_time += transition_time_up
 
-                # Transición High -> Low
-                start = current_time
-                end = current_time + transition_time_down
-                phase_segments.append((start, end, None, "Cooling"))
-                current_time = end
+            # Hold Denaturation
+            phase_segments.append((current_time, current_time + denat_time,
+                                    denat_temp, denat_temp, "Denaturation", "purple"))
+            current_time += denat_time
 
-                # Low Temp fase
-                start = current_time
-                end = current_time + time_low
-                phase_segments.append((start, end, low_temp, "Low"))
-                current_time = end
+            n_display = min(5, cycles)
+            prev_temp = denat_temp
+            for _ in range(n_display):
+                # Rampa hacia High
+                phase_segments.append((current_time, current_time + transition_time_up,
+                                        prev_temp, high_temp, "Heating", "orange"))
+                current_time += transition_time_up
+
+                # Hold High
+                phase_segments.append((current_time, current_time + time_high,
+                                        high_temp, high_temp, "High", "red"))
+                current_time += time_high
+
+                # Cooling hacia Low
+                phase_segments.append((current_time, current_time + transition_time_down,
+                                        high_temp, low_temp, "Cooling", "green"))
+                current_time += transition_time_down
+
+                # Hold Low
+                phase_segments.append((current_time, current_time + time_low,
+                                        low_temp, low_temp, "Low", "blue"))
+                current_time += time_low
+
+                # Rampa hacia Extension
+                phase_segments.append((current_time, current_time + transition_time_up,
+                                        low_temp, ext_temp, "Ramp Ext", "goldenrod"))
+                current_time += transition_time_up
+
+                # Hold Extension
+                phase_segments.append((current_time, current_time + ext_time,
+                                        ext_temp, ext_temp, "Extension", "darkcyan"))
+                current_time += ext_time
+                prev_temp = ext_temp
+
+            # Extensión final
+            phase_segments.append((current_time, current_time + ext_time_final,
+                                    ext_temp, ext_temp, "Final Ext.", "magenta"))
+            current_time += ext_time_final
 
             # Crear figura
             fig, ax = plt.subplots(figsize=(7, 4))
+            plt.close("all")
+            fig, ax = plt.subplots(figsize=(7, 4))
 
-            # Dibujar fases con colores y etiquetas
+            labeled = set()
             for seg in phase_segments:
-                start, end, temp, label = seg
-                if label == "High":
-                    ax.hlines(high_temp, start, end, colors="red", linewidth=2)
-                    ax.text(
-                        (start + end) / 2,
-                        high_temp + 1,
-                        "High",
-                        ha="center",
-                        color="red",
-                    )
-                elif label == "Low":
-                    ax.hlines(low_temp, start, end, colors="blue", linewidth=2)
-                    ax.text(
-                        (start + end) / 2,
-                        low_temp + 1,
-                        "Low",
-                        ha="center",
-                        color="blue",
-                    )
-                else:  # Transiciones
-                    if label == "Cooling":
-                        ax.plot(
-                            [start, end],
-                            [high_temp, low_temp],
-                            color="green",
-                            linestyle="--",
-                        )
-                        ax.text(
-                            (start + end) / 2,
-                            (high_temp + low_temp) / 2,
-                            "Cooling",
-                            ha="center",
-                            color="green",
-                        )
-                    else:
-                        ax.plot(
-                            [start, end],
-                            [low_temp, high_temp],
-                            color="orange",
-                            linestyle="--",
-                        )
-                        ax.text(
-                            (start + end) / 2,
-                            (high_temp + low_temp) / 2,
-                            "Heating",
-                            ha="center",
-                            color="orange",
-                        )
+                start, end, t_from, t_to, label, color = seg
+                first_occurrence = label not in labeled
+                kwargs: dict = {"linewidth": 2.5} if t_from == t_to else {"linestyle": "--", "linewidth": 1.5}
+                if first_occurrence:
+                    kwargs["label"] = label
+                    labeled.add(label)
+                if t_from == t_to:
+                    ax.hlines(t_from, start, end, colors=color, **kwargs)
+                else:
+                    ax.plot([start, end], [t_from, t_to], color=color, **kwargs)
 
-            # Líneas horizontales de referencia
-            ax.axhline(high_temp, color="red", linestyle=":", linewidth=1)
-            ax.axhline(low_temp, color="blue", linestyle=":", linewidth=1)
+            ax.axhline(high_temp, color="red", linestyle=":", linewidth=0.8, alpha=0.5)
+            ax.axhline(low_temp, color="blue", linestyle=":", linewidth=0.8, alpha=0.5)
+            ax.axhline(denat_temp, color="purple", linestyle=":", linewidth=0.8, alpha=0.5)
+            ax.axhline(ext_temp, color="darkcyan", linestyle=":", linewidth=0.8, alpha=0.5)
 
+            ax.legend(loc="upper right", fontsize=7, ncol=2)
             ax.set_xlabel("Tiempo (s)")
             ax.set_ylabel("Temperatura (°C)")
-            ax.set_title("Perfil PCR")
+            ax.set_title(f"Perfil PCR ({cycles} ciclos)")
             ax.grid(True)
 
-            # Limpiar canvas previo
             if self.canvas:
                 self.canvas.get_tk_widget().destroy()
 
-            # Incrustar nuevo gráfico
             self.canvas = FigureCanvasTkAgg(fig, master=self.profile_frame)
             self.canvas.draw()
             self.canvas.get_tk_widget().pack(fill="both", expand=True)
@@ -352,9 +351,7 @@ class PCRFrame(ttk.Frame):
             f"-- cycles: {self.cycles_complete}/{self.total_cycles}"
         )
         remaining = self._estimate_remaining_time(elapsed_pcr_time)
-        msg_elapsed_time += (
-            f" -- Estimated finish: {int(remaining / 60)}m {remaining % 60:.1f}s"
-        )
+        msg_elapsed_time += f" -- Estimated finish: {int(remaining / 60)}m {remaining % 60:.1f}s"
         total_msg[0] = f"Temperature: {self.temp:.2f} °C\tState: {self.fase}"
         if len(total_msg) < 2:
             total_msg.append(msg_elapsed_time)
@@ -683,7 +680,7 @@ class PCRFrame(ttk.Frame):
         ads,
     ):
         global sistemaMotor
-        
+
         self.start_cycle_time = time.time()
 
         # Reach High temp (PI, tolerancia 0.5)

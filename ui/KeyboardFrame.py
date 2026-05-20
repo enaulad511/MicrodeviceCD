@@ -60,15 +60,15 @@ class NumericKeyboard(ttk.Frame):
                 vscroll.bind("<B1-Motion>", self._hide_on_scroll, add="+")
 
     def attach(self, entries):
-        """Bindea <FocusIn> en cada entry para que muestre el teclado."""
+        """Bindea <Button-1> en cada entry para que muestre el teclado solo al hacer click/tap."""
         for entry in entries:
-            entry.bind("<FocusIn>", self._on_entry_focus)
+            entry.bind("<Button-1>", self._on_entry_click)
 
     def set_target(self, entry):
         """Establece el Entry activo."""
         self.target_entry = entry
 
-    def _on_entry_focus(self, event):
+    def _on_entry_click(self, event):
         entry = event.widget
         self.set_target(entry)
         self.show_for(entry)
