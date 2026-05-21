@@ -209,7 +209,8 @@ class DriverStepperSys:
             s += "\n"
         data = s.encode("utf-8", errors="ignore")
         with self._wlock:
-            self.ser.write(data)
+            if self.ser is not None:
+                self.ser.write(data)
 
     def _handle_line(self, line: str):
         if not line:
@@ -247,6 +248,9 @@ class DriverStepperSys:
     def _reader_loop(self):
         while self._running:
             try:
+                if self.ser is None:
+                    time.sleep(0.1)
+                    break
                 self.ser.reset_input_buffer()  # Asegura que se envíen los comandos sin demora
                 raw = self.ser.readline()  # lee hasta '\n' o timeout
                 if not raw:
@@ -325,6 +329,8 @@ class DriverStepperSys:
 
     def run_rpm(self, rpm: float) -> bool:
         """Velocidad continua en RPM (signo = dirección)."""
+        if self.ser is None:
+            return False
         self.ser.reset_output_buffer()
         self._cmd_mode(1, rpm, 0)
         return True

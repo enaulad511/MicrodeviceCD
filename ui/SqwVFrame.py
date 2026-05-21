@@ -138,13 +138,13 @@ def create_buttons_sqwv(parent, callbacks):
     frame_buttons.configure(style="Custom.TLabelframe")
     ttk.Button(
         frame_buttons,
-        text="Generate Profile & Script",
+        text="📈 & 🗒️",
         style="info.TButton",
         command=callbacks["callback_generate_profile"],
     ).grid(row=0, column=0, pady=10, sticky="n")
     ttk.Button(
         frame_buttons,
-        text="Send Script",
+        text="⏫Send Script",
         style="info.TButton",
         command=callbacks["callback_send"],
     ).grid(row=0, column=1, pady=10, sticky="n")
@@ -376,6 +376,7 @@ class SWVFrame(ttk.Frame):
             y_key="I_A",
             payload=self.payload,
             ip_sender=ip_sender,
+            callback_spin_motor=None
         )
         self.frame_plotter.grid(row=4, column=0, padx=10, pady=10, sticky="nsew")
         self.profile_frame.grid_forget()

@@ -174,7 +174,7 @@ class Ads1115Reader:
             acc += chan.value
             if delay_s > 0:
                 time.sleep(delay_s)
-        return int(round(acc / averages))
+        return round(acc / averages)
 
     def read_voltage(self, ch: Channel = 0, averages: int = 1, delay_s: Optional[float] = None) -> float:
         """
@@ -235,7 +235,7 @@ class Ads1115Reader:
             acc += ch.value
             if delay_s > 0:
                 time.sleep(delay_s)
-        return int(round(acc / averages))
+        return round(acc / averages)
 
     def read_voltage_diff(self, p: Channel = 0, n: Channel = 1, averages: int = 1,
                           delay_s: Optional[float] = None) -> float:

@@ -1,8 +1,5 @@
 # -*- coding: utf-8 -*-
 
-from templates.utils import show_numeric_keyboard
-from templates.utils import hide_keyboard
-from templates.utils import show_keyboard
 from datetime import datetime
 from templates.utils import read_settings_from_file
 from templates.constants import chip_rasp

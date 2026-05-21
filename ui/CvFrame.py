@@ -267,21 +267,21 @@ def create_buttons_cv(parent, callbacks):
 
     ttk.Button(
         frame_controls,
-        text="Generate CV Profile",
+        text="📈",
         style="info.TButton",
         command=callbacks.get("callback_generate_profile", ()),
     ).grid(row=0, column=0, pady=5, sticky="n")
 
     ttk.Button(
         frame_controls,
-        text="Show MethodScript",
+        text="🗒️MethodScript",
         style="info.TButton",
         command=callbacks.get("callback_show_script", ()),
     ).grid(row=0, column=1, pady=5, sticky="n")
 
     ttk.Button(
         frame_controls,
-        text="Send Script",
+        text="⏫Send Script",
         style="info.TButton",
         command=callbacks.get("callback_send_script", ()),
     ).grid(row=0, column=2, pady=5, sticky="n")
