@@ -477,8 +477,27 @@ class PCRFrame(ttk.Frame):
             for phot in self.data_photodetector:
                 writer.writerow([phot])
 
+    def _ensure_ads(self) -> bool:
+        if self.ads is not None:
+            return True
+        from templates.constants import secrets
+        if secrets.get("environment", "") == "dev":
+            return False
+        try:
+            settings = read_settings_from_file()
+            ads_fsr = float(settings.get("ads_fsr", 1.024))
+            from Drivers.ReaderADS import Ads1115Reader
+            self.ads = Ads1115Reader(address=0x48, fsr=ads_fsr, sps=64, single_shot=False)
+            return True
+        except Exception as e:
+            print(f"ADS init failed: {e}")
+            return False
+
     def callback_start_experiment(self):
         if self.running_experiment:
+            return
+        if not self._ensure_ads():
+            self.svar_status.set("Error: ADS1115 not available")
             return
         self.running_experiment = True
         # hide entries frame
@@ -677,7 +696,8 @@ class PCRFrame(ttk.Frame):
         ads,
     ):
         global sistemaMotor
-
+        if self.stop_udp_listenner is None:
+            self.stop_udp_listenner = threading.Event()
         self.start_cycle_time = time.time()
 
         # Reach High temp (PI, tolerancia 0.5)
@@ -715,6 +735,7 @@ class PCRFrame(ttk.Frame):
             or self.temp < low_temp + 9.5,
             stop_event=self.stop_event_motor,
         )
+        
         print(self.temp, "low temp....dis")
         while (
             self.temp > low_temp + 0.5 and not self.stop_udp_listenner.is_set()

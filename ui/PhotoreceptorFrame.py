@@ -93,10 +93,30 @@ class PhotoreceptorFrame(ttk.Frame):
         self.keyboard = NumericKeyboard(self, scroll_host=content_frame)
         self.keyboard.attach([self.interval_entry])
 
+    def _ensure_ads(self) -> bool:
+        if self.ads is not None:
+            return True
+        from templates.constants import secrets
+        if secrets.get("environment", "") == "dev":
+            return False
+        try:
+            from templates.utils import read_settings_from_file
+            settings = read_settings_from_file()
+            ads_fsr = float(settings.get("ads_fsr", 1.024))
+            from Drivers.ReaderADS import Ads1115Reader
+            self.ads = Ads1115Reader(address=0x48, fsr=ads_fsr, sps=64, single_shot=False)
+            return True
+        except Exception as e:
+            print(f"ADS init failed: {e}")
+            return False
+
     def iniciar_lectura(self):
         print("Iniciar lectura del fotoreceptor")
         if self.running:
             print("Ya se está leyendo")
+            return
+        if not self._ensure_ads():
+            print("ADS1115 not available")
             return
         try:
             intervalo = int(self.interval_entry.get())

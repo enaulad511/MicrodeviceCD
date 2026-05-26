@@ -1,6 +1,8 @@
 pillow
 matplotlib
-ttkbootstrap=1.16.0
+ttkbootstrap==1.16.0
 pigpio~=1.78
 dotenv
 numpy
+adafruit-circuitpython-ads1x15
+lgpio

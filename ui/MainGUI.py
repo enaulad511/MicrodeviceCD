@@ -1,8 +1,6 @@
 # -*- coding: utf-8 -*-
 from templates.constants import font_options
 from templates.constants import font_footer
-from templates.utils import read_settings_from_file
-from templates.constants import secrets
 from templates.constants import font_text
 from ui.TemperatureFrame import TemperatureFrame
 from templates.constants import font_buttons_small
@@ -97,14 +95,7 @@ class MainGUI(ttk.Window):
         self.protocol("WM_DELETE_WINDOW", self.on_close_window)
         self.option_add("*TCombobox*Listbox.font", font_text)
         self.option_add("*Combobox*Listbox.font", font_text)
-        settings = read_settings_from_file()
-        ads_fsr = float(settings.get("ads_fsr", 1.024))
         self.ads = None
-        if secrets.get("environment", "") != "dev":
-            from Drivers.ReaderADS import Ads1115Reader
-
-            self.ads = Ads1115Reader(address=0x48, fsr=ads_fsr, sps=64, single_shot=False)
-            # self.ads.check_diff_health(p=0, n=1, samples=30)
         self.analysis_window = None
         # --------------------Start Animation -------------------
         # self.show_gif_toplevel()
