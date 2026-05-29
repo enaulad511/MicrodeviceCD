@@ -28,6 +28,16 @@ thread_motor = None
 ads = None
 thread_lock = threading.Lock()
 
+# Duración de la lectura de fluorescencia (fuente única de verdad).
+# Usadas como defaults de _read_fluorescence, en los sleeps previos a cada
+# lectura y en la estimación de tiempo restante del experimento.
+FLUOR_PRE_SLEEP_S = 0.5   # espera tras el hold de extensión, antes de muestrear
+FLUOR_BASELINE_S = 0.5    # ventana de línea base (luz OFF)
+FLUOR_LIGHT_S = 2.0       # ventana de excitación (luz ON)
+FLUOR_POST_S = 0.5        # ventana de decaimiento (luz OFF)
+# Tiempo total que consume una lectura completa (sleep previo + 3 ventanas).
+FLUOR_READ_TOTAL_S = FLUOR_PRE_SLEEP_S + FLUOR_BASELINE_S + FLUOR_LIGHT_S + FLUOR_POST_S
+
 
 def check_temp_higher(temp, target_temp):
     return temp >= target_temp
@@ -205,6 +215,7 @@ class PCRFrame(ttk.Frame):
         self.callback_generate_profile()  # Generar el gráfico inicial
         self.data_temperature = []
         self.data_photodetector = []
+        self.data_photodetector_series = []
 
     def callback_generate_profile(self):
         try:
@@ -375,7 +386,10 @@ class PCRFrame(ttk.Frame):
         if cycles_left > 0:
             elapsed_current = max(0.0, time.time() - self.start_cycle_time)
             remaining = (
-                self.avg_cycle_duration * cycles_left - elapsed_current + self.ext_time_final
+                self.avg_cycle_duration * cycles_left
+                - elapsed_current
+                + self.ext_time_final
+                + FLUOR_READ_TOTAL_S  # lectura de fluorescencia final pendiente
             )
         else:
             # Ya pasaron todos los ciclos: solo queda la extensión final.
@@ -387,6 +401,7 @@ class PCRFrame(ttk.Frame):
             self.canvas.get_tk_widget().destroy()
         self.data_temperature = []  # Datos acumulados
         self.data_photodetector = []
+        self.data_photodetector_series = []
 
         # Dos subplots apilados: arriba temperatura (denso), abajo fotodetector (1/ciclo)
         self.fig, (self.ax, self.ax_photo) = plt.subplots(
@@ -476,6 +491,14 @@ class PCRFrame(ttk.Frame):
             writer.writerow(["photodetector"])
             for phot in self.data_photodetector:
                 writer.writerow([phot])
+        # Serie temporal cruda en formato largo (una fila por muestra)
+        filename_raw = f"photodetector_raw_{timestamp.strftime('%Y%m%d_%H%M%S')}.csv"
+        with open(filename_raw, "w", newline="") as file:
+            writer = csv.writer(file)
+            writer.writerow(["cycle", "t_rel_s", "light_on", "voltage"])
+            for cycle, samples in enumerate(self.data_photodetector_series, start=1):
+                for t_rel, light_on, voltage in samples:
+                    writer.writerow([cycle, f"{t_rel:.3f}", light_on, f"{voltage:.6f}"])
 
     def _ensure_ads(self) -> bool:
         if self.ads is not None:
@@ -667,18 +690,75 @@ class PCRFrame(ttk.Frame):
         )
         self.pin_heating.write(False)  # pyrefly: ignore
 
-    def _read_fluorescence(self, ads, stabilize_s=1.0, post_read_s=1.0, averages=8):
-        # Enciende LED PCR, espera estabilización, lee, apaga. Soporta lectura diferencial.
+    def _read_fluorescence(
+        self,
+        ads,
+        baseline_s=FLUOR_BASELINE_S,
+        light_s=FLUOR_LIGHT_S,
+        post_s=FLUOR_POST_S,
+        sample_dt=0.1,
+        averages=4,
+    ):
+        # Muestreo continuo del fotodetector mientras se modula la luz (pin_pcr):
+        #   baseline_s  -> luz OFF (línea base oscura)
+        #   light_s     -> luz ON  (excitación)
+        #   post_s      -> luz OFF (decaimiento)
+        # Acumula la serie temporal cruda y agrega el escalar
+        #   delta = media(ventana con luz) - media(ventana baseline)
+        # a data_photodetector (plot por-ciclo). Soporta lectura diferencial.
         settings = read_settings_from_file()
-        self.pin_pcr.write(True)  # pyrefly: ignore
-        time.sleep(stabilize_s)
-        if settings.get("photoreceptor", {}).get("use_diff", False):
-            v = ads.read_voltage_diff(0, 1, averages=averages)
-        else:
-            v = ads.read_voltage(0, averages=averages)
-        time.sleep(post_read_s)
-        self.pin_pcr.write(False)  # pyrefly: ignore
-        return v
+        use_diff = settings.get("photoreceptor", {}).get("use_diff", False)
+
+        # (t_rel, light_on, voltage) por muestra
+        samples = []
+
+        def read_one():
+            if use_diff:
+                return ads.read_voltage_diff(0, 1, averages=averages)
+            return ads.read_voltage(0, averages=averages)
+
+        def sample_window(duration, light_on, t0):
+            # Muestrea durante `duration` segundos a ~sample_dt, paceando por
+            # tiempo transcurrido. Devuelve True si se abortó (stop).
+            t_end = time.time() + duration
+            while time.time() < t_end:
+                if (
+                    self.stop_udp_listenner is not None
+                    and self.stop_udp_listenner.is_set()
+                ):
+                    return True
+                t_iter = time.time()
+                v = read_one()
+                samples.append((t_iter - t0, light_on, v))
+                elapsed = time.time() - t_iter
+                if elapsed < sample_dt:
+                    time.sleep(sample_dt - elapsed)
+            return False
+
+        t0 = time.time()
+        try:
+            self.pin_pcr.write(False)  # pyrefly: ignore
+            aborted = sample_window(baseline_s, 0, t0)
+            if not aborted:
+                self.pin_pcr.write(True)  # pyrefly: ignore
+                aborted = sample_window(light_s, 1, t0)
+            if not aborted:
+                self.pin_pcr.write(False)  # pyrefly: ignore
+                sample_window(post_s, 0, t0)
+        finally:
+            self.pin_pcr.write(False)  # pyrefly: ignore
+
+        baseline_vals = [v for (_, light_on, v) in samples if light_on == 0 and _ < baseline_s]
+        light_vals = [v for (_, light_on, v) in samples if light_on == 1]
+        mean_baseline = sum(baseline_vals) / len(baseline_vals) if baseline_vals else 0.0
+        mean_light = sum(light_vals) / len(light_vals) if light_vals else 0.0
+        delta = mean_light - mean_baseline
+
+        # Acumulación (fuente única de verdad)
+        self.data_photodetector.append(delta)
+        self.data_photodetector_series.append(samples)
+        self.after(1, lambda: self.update_graph_photodetector())
+        return delta
 
     def _run_cycle(
         self,
@@ -767,13 +847,11 @@ class PCRFrame(ttk.Frame):
         print(f"Hold ext complete, end of cycle {idx}")
 
         # Lectura de fluorescencia
-        time.sleep(0.5)
+        time.sleep(FLUOR_PRE_SLEEP_S)
         self.fase = "Reading Fluorescence"
         print("Reading fluorescence...")
-        v_fluo = self._read_fluorescence(ads, stabilize_s=1.0, post_read_s=1.0, averages=8)
-        print(f"fluorescence voltage: {v_fluo}")
-        self.data_photodetector.append(v_fluo)
-        self.after(1, lambda: self.update_graph_photodetector())
+        v_fluo = self._read_fluorescence(ads)
+        print(f"fluorescence delta voltage: {v_fluo}")
         self.time_end_cycle = time.time()
         # Estadísticas para la estimación del tiempo restante
         self.last_cycle_duration = self.time_end_cycle - self.start_cycle_time
@@ -809,7 +887,11 @@ class PCRFrame(ttk.Frame):
         self.avg_cycle_duration = 0.0
         self.ext_time_final = ext_time_final
         self.teorical_time_pcr = (
-            (time_high + time_low + ext_time) * 1.2 * cycles + denat_time + ext_time_final
+            (time_high + time_low + ext_time) * 1.2 * cycles
+            + denat_time
+            + ext_time_final
+            + FLUOR_READ_TOTAL_S * cycles  # lectura de fluorescencia por ciclo
+            + FLUOR_READ_TOTAL_S  # lectura de fluorescencia final
         )
 
         settings = read_settings_from_file()
@@ -938,11 +1020,9 @@ class PCRFrame(ttk.Frame):
                 print("PCR cycles complete, reading fluorescence")
                 self.fase = "Extension"
                 self._hold_phase("h_ext", 68, ext_time_final, ts)
-                time.sleep(0.5)
-                v_fluo_final = self._read_fluorescence(
-                    ads, stabilize_s=0.5, post_read_s=0.5, averages=4
-                )
-                print(f"Final fluorescence voltage: {v_fluo_final}")
+                time.sleep(FLUOR_PRE_SLEEP_S)
+                v_fluo_final = self._read_fluorescence(ads)
+                print(f"Final fluorescence delta voltage: {v_fluo_final}")
                 self.fase = "Final"
 
             self.save_data_temps_file()
