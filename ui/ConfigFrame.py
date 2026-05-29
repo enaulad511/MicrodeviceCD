@@ -10,6 +10,8 @@ from ui.KeyboardFrame import NumericKeyboard
 __author__ = "Edisson Naula"
 __date__ = "$ 19/11/2025 at 11:27 $"
 
+_ADS_FSR_OPTIONS = [6.144, 4.096, 2.048, 1.024, 0.512, 0.256]
+
 
 def create_widgets_configuration(parent):
     entries: dict = {}
@@ -34,6 +36,21 @@ def create_widgets_configuration(parent):
                 entry.grid(row=subindex, column=1, padx=5, pady=5, sticky="nswe")
                 entries[k][k1] = svar
                 entry_widgets.append(entry)
+            index += 1
+        elif k == "ads_fsr":
+            ttk.Label(parent, text=f"{k}:", style="Custom.TLabel").grid(
+                row=index, column=0, padx=5, pady=5, sticky="nswe"
+            )
+            svar = ttk.StringVar(value=str(v))
+            combo = ttk.Combobox(
+                parent,
+                textvariable=svar,
+                values=[str(x) for x in _ADS_FSR_OPTIONS],
+                state="readonly",
+                font=font_entry,
+            )
+            combo.grid(row=index, column=1, padx=5, pady=5, sticky="nswe")
+            entries[k] = svar
             index += 1
         else:
             ttk.Label(parent, text=f"{k}:", style="Custom.TLabel").grid(
