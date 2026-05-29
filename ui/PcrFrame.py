@@ -57,7 +57,7 @@ def _fuzzy_gains(error: float, base_kp: float, base_ki: float) -> tuple:
     abs_error = abs(error)
     if abs_error >= 7.0:
         kp_s, ki_s = 2.0, 0.2
-    elif abs_error >= 3.0:
+    elif abs_error >= 2.0:
         t = (abs_error - 5.0) / 10.0  # 0..1 de 3°C a 7°C
         kp_s = 1.0 + t * 1.0  # 1.0 → 2.0
         ki_s = 1.0 - t * 0.8  # 0.2 → 1.0
