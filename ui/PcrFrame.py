@@ -498,7 +498,7 @@ class PCRFrame(ttk.Frame):
             writer.writerow(["cycle", "t_rel_s", "light_on", "voltage"])
             for cycle, samples in enumerate(self.data_photodetector_series, start=1):
                 for t_rel, light_on, voltage in samples:
-                    writer.writerow([cycle, f"{t_rel:.3f}", light_on, f"{voltage:.6f}"])
+                    writer.writerow([cycle, f"{t_rel:.3f}", light_on, f"{voltage}"])
 
     def _ensure_ads(self) -> bool:
         if self.ads is not None:
