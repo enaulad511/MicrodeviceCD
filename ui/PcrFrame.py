@@ -428,7 +428,7 @@ class PCRFrame(ttk.Frame):
         if window_size is None:
             settings = read_settings_from_file()
             windows_pcr = settings.get("windows_pcr", 2500)
-            window_size = windows_pcr
+            window_size = int(windows_pcr)
         if self.canvas is None:
             return
 
@@ -636,6 +636,9 @@ class PCRFrame(ttk.Frame):
             "TEMP_BAND": pid.get(f"tband_{phase}", 0.05),
             "WINDOW": pid.get(f"win_{phase}", ts * 0.9),
             "MAX_AGE": pid.get(f"m_age_{phase}", 0.09),
+            # Fracción del setpoint hasta la que se hace feed-forward a potencia
+            # plena antes de entregar el control al PI. 0.0 = sin pre-rampa.
+            "FF_FRAC": pid.get(f"ff_frac_{phase}", 0.0),
         }
 
     def _reach_temperature_pi(
@@ -649,6 +652,25 @@ class PCRFrame(ttk.Frame):
         TEMP_BAND = params["TEMP_BAND"]
         WINDOW = params["WINDOW"]
         MAX_AGE = params["MAX_AGE"]
+        FF_FRAC = params.get("FF_FRAC", 0.0)
+
+        # ----- Pre-rampa feed-forward (mismo principio que la desnaturalización):
+        # calienta a potencia plena hasta FF_FRAC*setpoint y luego entrega el
+        # control al PI para asentar sin sobreimpulso. Se omite cuando venimos
+        # ya calientes (break_if_below, p. ej. ciclo 0 tras el hold de denat).
+        # A diferencia de la rampa de denaturación, aquí el blast también
+        # descarta temperatura vieja: si la lectura UDP envejece, apaga el
+        # heater y re-arma en cada lectura fresca para evitar runaway térmico.
+        if FF_FRAC > 0.0 and not break_if_below:
+            ceiling = setpoint * FF_FRAC
+            while self.temp < ceiling and not stop_event.is_set():
+                age = time.time() - self.temp_ts
+                if age > MAX_AGE:
+                    # Temperatura vieja → no confiar; corta y reintenta.
+                    self.pin_heating.write(False)  # pyrefly: ignore
+                    continue
+                self.pin_heating.write(True)  # pyrefly: ignore
+
         integral = 0.0
         while tolerance < abs(setpoint - self.temp) and not stop_event.is_set():
             if break_if_below and self.temp < setpoint:
@@ -780,7 +802,9 @@ class PCRFrame(ttk.Frame):
             self.stop_udp_listenner = threading.Event()
         self.start_cycle_time = time.time()
 
-        # Reach High temp (PI, tolerancia 0.5)
+        # Reach High temp: feed-forward a potencia plena hasta ff_frac_high*setpoint
+        # y luego PI (tolerancia 0.5). En el ciclo 0 (break_if_below) se omite el
+        # blast porque venimos del hold de denaturación ya en temperatura.
         self.fase = "Reach High temp"
         self.pin_heating.write(True)  # pyrefly: ignore
         self._reach_temperature_pi(
@@ -836,7 +860,7 @@ class PCRFrame(ttk.Frame):
             self._load_phase_pid("ext", ts),
             self.stop_udp_listenner,
             break_if_below=(idx == 0),
-            tolerance=0.2,
+            tolerance=0.5,
         )
         print(f"Temperature reached: {self.temp} °C")
 
@@ -968,27 +992,18 @@ class PCRFrame(ttk.Frame):
             )
             self.pin_pcr.set_output(initial_high=False)
 
-            # ----- Denaturación: rampa P-only con feed-forward al 80 % del setpoint
+            # ----- Denaturación: mismo principio que "Reach High temp":
+            # feed-forward a potencia plena hasta ff_frac_denat*setpoint y luego PI
+            # (ganancias difusas + anti-windup + descarte de temperatura vieja).
             self.fase = "Denaturation"
             self.pin_heating.write(True)  # pyrefly: ignore
-            denat_p = self._load_phase_pid("denat", ts)
-            while self.temp < denat_temp and not self.stop_udp_listenner.is_set():
-                # heat straigh foward to the 80 % of setpoint
-                if self.temp <= denat_temp * 0.80:
-                    continue
-                age = time.time() - self.temp_ts
-                if age > denat_p["MAX_AGE"]:
-                    # Temperatura vieja → no confiar
-                    self.pin_heating.write(False)
-                    continue
-                error = denat_temp - self.temp
-                power = max(0.0, min(1.0, denat_p["KP"] * error))
-                on_time = power * denat_p["WINDOW"]
-                if on_time > 0:
-                    self.pin_heating.write(True)
-                    time.sleep(on_time)
-                self.pin_heating.write(False)
-                time.sleep(denat_p["WINDOW"] - on_time)
+            self._reach_temperature_pi(
+                denat_temp,
+                self._load_phase_pid("denat", ts),
+                self.stop_udp_listenner,
+                break_if_below=False,
+                tolerance=0.5,
+            )
 
             # ----- Denaturation Hold
             self.fase = "Denaturation Hold"
