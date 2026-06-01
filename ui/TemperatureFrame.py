@@ -233,7 +233,7 @@ class TemperatureFrame(ttk.Frame):
             return
 
         fecha = datetime.now().strftime("%Y%m%d_%H%M%S")
-        nombre = f"temperature_log_{fecha}.csv"
+        nombre = f"files/temperature_log_{fecha}.csv"
 
         unidad = self.unit_var.get()
         try:

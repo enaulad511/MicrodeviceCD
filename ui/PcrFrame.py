@@ -478,21 +478,21 @@ class PCRFrame(ttk.Frame):
         import csv
 
         timestamp = datetime.now()
-        filename = f"temperature_data_{timestamp.strftime('%Y%m%d_%H%M%S')}.csv"
+        filename = f"files/temperature_data_{timestamp.strftime('%Y%m%d_%H%M%S')}.csv"
         with open(filename, "w", newline="") as file:
             writer = csv.writer(file)
             writer.writerow([self.prefix_row])
             for temp in self.data_temperature:
                 writer.writerow([temp])
         print(f"Data saved to {filename}")
-        filename_photo = f"photodetector_data_{timestamp.strftime('%Y%m%d_%H%M%S')}.csv"
+        filename_photo = f"files/photodetector_data_{timestamp.strftime('%Y%m%d_%H%M%S')}.csv"
         with open(filename_photo, "w", newline="") as file:
             writer = csv.writer(file)
             writer.writerow(["photodetector"])
             for phot in self.data_photodetector:
                 writer.writerow([phot])
         # Serie temporal cruda en formato largo (una fila por muestra)
-        filename_raw = f"photodetector_raw_{timestamp.strftime('%Y%m%d_%H%M%S')}.csv"
+        filename_raw = f"files/photodetector_raw_{timestamp.strftime('%Y%m%d_%H%M%S')}.csv"
         with open(filename_raw, "w", newline="") as file:
             writer = csv.writer(file)
             writer.writerow(["cycle", "t_rel_s", "light_on", "voltage"])

@@ -240,7 +240,7 @@ class UdpClient:
                 print("str error: ", str(e))
                 time.sleep(0.0005)
 
-    def initial_file(self, filename="data_temps.csv", prefixcolum=""):
+    def initial_file(self, filename="files/data_temps.csv", prefixcolum=""):
         if secrets.get("environment", "") == "dev":
             return
         # save header in txt
@@ -257,7 +257,7 @@ class UdpClient:
         # save logs temps in txt
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         if filename is None:
-            filename = f"data_temps-{timestamp}.csv"
+            filename = f"files/data_temps-{timestamp}.csv"
         # line = f"{timestamp} -- {self.data_temps['max31855']}
 
         with open(filename, "a") as f:

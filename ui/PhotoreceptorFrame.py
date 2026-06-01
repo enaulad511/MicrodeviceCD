@@ -137,7 +137,7 @@ class PhotoreceptorFrame(ttk.Frame):
             print("No hay datos para guardar")
             return
         timestamp = time.strftime("%Y%m%d_%H%M%S")
-        filename = f"photoreceptor_data_{timestamp}.csv"
+        filename = f"files/photoreceptor_data_{timestamp}.csv"
         with open(filename, "w") as f:
             f.write("Time (s),Intensity\n")
             for t, d in zip(self.timestamps, self.data):
