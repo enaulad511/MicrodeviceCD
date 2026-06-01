@@ -141,7 +141,7 @@ class PhotoreceptorFrame(ttk.Frame):
         with open(filename, "w") as f:
             f.write("Time (s),Intensity\n")
             for t, d in zip(self.timestamps, self.data):
-                f.write(f"{t:.3f},{d:.3f}\n")
+                f.write(f"{t:.3f},{d}\n")
         print(f"Datos guardados en {filename}")
 
     def adquirir_dato(self):
