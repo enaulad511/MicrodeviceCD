@@ -55,7 +55,7 @@ def _fuzzy_gains(error: float, base_kp: float, base_ki: float) -> tuple:
     por lo que el punto de operación nominal sigue siendo configurable allí.
     """
     abs_error = abs(error)
-    if abs_error >= 7.0:
+    if abs_error >= 5.0:
         kp_s, ki_s = 2.0, 0.2
     elif abs_error >= 2.0:
         t = (abs_error - 5.0) / 10.0  # 0..1 de 3°C a 7°C
