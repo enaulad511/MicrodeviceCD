@@ -470,7 +470,7 @@ class PCRFrame(ttk.Frame):
         self.line_photo.set_ydata(y)
         self.ax_photo.set_xlim(0.5, max(n + 0.5, 1.5))
         ymin, ymax = min(y), max(y)
-        margin = max(0.01, (ymax - ymin) * 0.1)
+        margin = max(0.0001, (ymax - ymin) * 0.1)
         self.ax_photo.set_ylim(ymin - margin, ymax + margin)
         self.canvas.draw_idle()
 
