@@ -2,20 +2,20 @@
     "version": "0.1.0",
     "pidControllerRPM": {
         "KP_denat": 1.2,
-        "win_denat": 0.09,
-        "m_age_denat": 0.05,
+        "win_denat": 0.05,
+        "m_age_denat": 0.1,
         "KP_h_denat": 0.2,
         "win_h_denat": 0.09,
         "KI_denat": 0.6,
-        "imax_denat": 0.5,
-        "tband_denat": 0.05,
+        "imax_denat": 0.6,
+        "tband_denat": 0.01,
         "ff_frac_denat": 0.8,
         "imax_h_denat": 0.55,
         "tband_h_denat": 0.05,
         "KP_high": 0.9,
         "win_high": 0.09,
-        "m_age_high": 0.05,
-        "tband_high": 0.09,
+        "m_age_high": 0.09,
+        "tband_high": 0.02,
         "KI_high": 0.9,
         "ff_frac_high": 0.8,
         "imax_high": 0.5,
@@ -46,5 +46,5 @@
     "photoreceptor": {
         "use_diff": 1.0
     },
-    "windows_pcr": 1500
+    "windows_pcr": 1500.0
 }
