@@ -2,9 +2,10 @@
 # Drivers/DriverGPIO.py
 # -*- coding: utf-8 -*-
 
-import gpiod    # pyrefly: ignore
-from gpiod.line import Direction, Value, Bias, Drive # pyrefly: ignore
 from typing import Optional
+
+import gpiod  # pyrefly: ignore
+from gpiod.line import Bias, Direction, Drive, Value  # pyrefly: ignore
 
 
 class GPIOPin:

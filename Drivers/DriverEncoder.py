@@ -1,8 +1,8 @@
-import gpiod  # pyrefly: ignore
 from time import sleep
-from gpiod.line import Direction, Value  # pyrefly: ignore
-import serial
 
+import gpiod  # pyrefly: ignore
+import serial
+from gpiod.line import Direction, Value  # pyrefly: ignore
 
 __author__ = "Edisson A. Naula"
 __date__ = "$ 19/02/2026  at 11:11 a.m. $"

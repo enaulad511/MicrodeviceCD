@@ -1,24 +1,25 @@
 # -*- coding: utf-8 -*-
-from matplotlib.figure import Figure
-from Drivers.EmstatUtils import EmstatStreamParser
-from Drivers.EmstatUtils import LineBufferedSocketReader
 import csv
 import json
 import os
+import queue
 import socket
 import threading
-import queue
 import time
 from collections import deque
 
 import matplotlib
+from matplotlib.figure import Figure
+
+from Drivers.EmstatUtils import EmstatStreamParser, LineBufferedSocketReader
 
 matplotlib.use("TkAgg")  # backend para Tk
-import matplotlib.pyplot as plt
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
-from tkinter.filedialog import askdirectory, askopenfilename
-import ttkbootstrap as ttk
 import tkinter as tk
+from tkinter.filedialog import askdirectory, askopenfilename
+
+import matplotlib.pyplot as plt
+import ttkbootstrap as ttk
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 
 
 class EventPlotter(ttk.Frame):
@@ -78,6 +79,7 @@ class EventPlotter(ttk.Frame):
         self.loaded_lines = []  # Line2D agregadas desde archivos CSV cargados
         self.filename_meta = {}  # metadatos (motor, etc.) para incluir en el nombre del CSV
         self.stop_event = threading.Event()
+        self._send_lock = threading.Lock()  # serializa sock.sendall entre hilos
         self.reader_th = None
         self.processor_th = None
         self.sock = None
@@ -108,7 +110,7 @@ class EventPlotter(ttk.Frame):
             controls,
             text="⏹ Stop",
             bootstyle="danger",
-            command=self.stop,
+            command=lambda: self.stop(send_abort=True),
             state=ttk.DISABLED,
         )
         self.btn_clear = ttk.Button(
@@ -233,12 +235,28 @@ class EventPlotter(ttk.Frame):
         self._set_status(f"TCP connected to {self.ip_sender}:{self.tcp_port}")
         self._schedule_update()
 
-    def stop(self):
-        """Detiene hilo lector, cierra socket y cancela actualizaciones."""
+    def stop(self, send_abort=False):
+        """Detiene hilo lector, cierra socket y cancela actualizaciones.
+
+        send_abort=True (clic del usuario en ⏹ Stop) envia primero
+        ``{"cmd":"ABORT"}`` al Pico para cancelar en caliente el experimento del
+        EmStat (el Pico responde con ``Z\\n`` -> ``on_finished:`` -> celda apagada
+        y libera el canal MCP). En las salidas disparadas por el firmware
+        (emstat_end/error/aborted/maxtime/timeout) el experimento ya termino, asi
+        que send_abort=False y no se envia ABORT.
+        """
 
         if not self.running:
             return
         print("Stopping …")
+        # Aborto en caliente del experimento (solo si lo pide el usuario y sigue vivo)
+        if send_abort and self.sock is not None:
+            try:
+                with self._send_lock:
+                    self.sock.sendall(b'{"cmd":"ABORT"}\n')
+                print("ABORT enviado al Pico")
+            except Exception as e:
+                print(f"No se pudo enviar ABORT: {e}")
         self.total_data.append(self.storage_dict.copy())
         self.storage_dict.clear()
         self.stop_event.set()
@@ -432,7 +450,8 @@ class EventPlotter(ttk.Frame):
         if self.sock is None:
             print("First create a socket")
             return
-        self.sock.sendall((json.dumps(self.payload_exp) + "\n").encode())
+        with self._send_lock:
+            self.sock.sendall((json.dumps(self.payload_exp) + "\n").encode())
         self.flag_recording = True
         reader = LineBufferedSocketReader(self.sock)
         start_time = time.time()
@@ -440,7 +459,8 @@ class EventPlotter(ttk.Frame):
             # Keepalive SOLO para mantener control TCP
             if time.time() - start_time > 120:
                 try:
-                    self.sock.sendall(b'{"type":"keepalive"}\n')
+                    with self._send_lock:
+                        self.sock.sendall(b'{"type":"keepalive"}\n')
                     start_time = time.time()
                 except Exception:
                     pass  # si falla, TCP ya murió y no es crítico
@@ -508,9 +528,41 @@ class EventPlotter(ttk.Frame):
                 self._set_status("End of experiment.")
                 self.stop_event.set()
                 break
+            elif msg.get("type") in (
+                "emstat_error",
+                "emstat_aborted",
+                "emstat_maxtime",
+                "emstat_timeout",
+            ):
+                # Cierres terminales del firmware v1.6: el experimento ya termino
+                # en el Pico (canal MCP liberado, celda apagada). Mostramos el
+                # motivo y cerramos la corrida sin reenviar ABORT.
+                status = self._format_terminal_status(msg)
+                print(f"TERMINAL: {status}")
+                self._set_status(status)
+                self.stop_event.set()
+                break
         print("TCP processor stopped.")
         self.processor_th = None
-        self.stop()
+        self.stop(send_abort=False)
+
+    @staticmethod
+    def _format_terminal_status(msg):
+        """Construye un texto legible para los cierres terminales del firmware."""
+        mtype = msg.get("type")
+        if mtype == "emstat_error":
+            err = msg.get("error", "unknown")
+            ch = msg.get("ch")
+            return f"EmStat error: {err}" + (f" (ch={ch})" if ch is not None else "")
+        if mtype == "emstat_aborted":
+            clean = msg.get("clean")
+            return f"Experiment aborted (cell {'off' if clean else 'unknown'})."
+        if mtype == "emstat_maxtime":
+            return "Experiment stopped: max time exceeded."
+        if mtype == "emstat_timeout":
+            connected = msg.get("connected")
+            return f"EmStat timeout (reconnected={connected})."
+        return f"Experiment ended: {mtype}"
 
     # ---------------------------
     # Loop de actualización (UI)

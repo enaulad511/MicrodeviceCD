@@ -1,11 +1,12 @@
 # -*- coding: utf-8 -*-
-from templates.constants import serial_port_encoder
-import serial
 import threading
 import time
+
 import gpiod  # pyrefly: ignore
+import serial
 from gpiod.line import Direction, Value  # pyrefly: ignore
 
+from templates.constants import serial_port_encoder
 
 __author__ = "Edisson A. Naula"
 __date__ = "$ 19/02/2026  at 08:11 a.m. $"

@@ -2,8 +2,8 @@
 __author__ = "Edisson A. Naula"
 __date__ = "$ 10/10/2025  at 01:24 p.m. $"
 
-from PIL import Image, ImageTk
 import ttkbootstrap as ttk
+from PIL import Image, ImageTk
 
 
 class StartImageFrame(ttk.Toplevel):

@@ -6,9 +6,10 @@ from ui.EventEmstatFrame import EventPlotter
 __author__ = "Edisson A. Naula"
 __date__ = "$ 11/11/2025 at 15:00 p.m. $"
 
-import ttkbootstrap as ttk
 from tkinter.scrolledtext import ScrolledText
+
 import matplotlib.pyplot as plt
+import ttkbootstrap as ttk
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 from templates.constants import font_entry  # Ajusta si no tienes este archivo
@@ -158,12 +159,18 @@ def create_buttons_sqwv(parent, callbacks):
 
 class SWVFrame(ttk.Frame):
     def __init__(
-        self, parent, ip_sender="localhost", callback_get_ip_sender=None, frame_with_scroll=None
+        self,
+        parent,
+        ip_sender="localhost",
+        callback_get_ip_sender=None,
+        callback_get_channel=None,
+        frame_with_scroll=None,
     ):
         ttk.Frame.__init__(self, parent)
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=1)
         self.callback_ip = callback_get_ip_sender
+        self.callback_get_channel = callback_get_channel
         self.frame_w_scroll = frame_with_scroll
 
         content_frame = ttk.Frame(self)
@@ -343,8 +350,21 @@ class SWVFrame(ttk.Frame):
             "t_con": t_con,
             "E_dep": convert_si_integer_full(float(self.entries_pre[2].get())),
             "t_dep": t_dep,
+            "ch": self._get_channel(),
             "method": "sqwv",
         }
+
+    def _get_channel(self):
+        """Canal de electrodo (0-7) para el payload. Degrada a 0 si no hay callback.
+
+        El firmware v1.6 valida el rango; aqui solo garantizamos un int valido.
+        """
+        if self.callback_get_channel is None:
+            return 0
+        try:
+            return int(self.callback_get_channel())
+        except Exception:
+            return 0
 
     def generate_methodscript(self):
         script = construc_individual_script_sqwv(

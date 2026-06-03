@@ -1,14 +1,13 @@
 # -*- coding: utf-8 -*-
 
-from templates.utils import read_settings_from_file
-from templates.constants import serial_port_encoder
-import ttkbootstrap as ttk
-from ttkbootstrap.scrolled import ScrolledFrame
-
-from templates.constants import font_entry
 import threading
 import time
 
+import ttkbootstrap as ttk
+from ttkbootstrap.scrolled import ScrolledFrame
+
+from templates.constants import font_entry, serial_port_encoder
+from templates.utils import read_settings_from_file
 from ui.KeyboardFrame import NumericKeyboard
 
 __author__ = "Edisson A. Naula"
@@ -294,6 +293,7 @@ def spinMotorAngle(
     Requiere 'stop_event' global si se usa modo continuo.
     """
     import time as _t
+
     from Drivers.DriverStepperSys import STEPS_PER_REV
     if drv is None:
         print("[spinMotorAngle] drv no está inicializado.")

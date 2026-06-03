@@ -4,13 +4,14 @@ from Drivers.ClientUDP import UdpClient
 __author__ = "Edisson A. Naula"
 __date__ = "$ 09/12/2025 at 01:07 p.m. $"
 
-import ttkbootstrap as ttk
-import matplotlib.pyplot as plt
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-import time
 import random
+import time
 
+import matplotlib.pyplot as plt
+import ttkbootstrap as ttk
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from ttkbootstrap.scrolled import ScrolledFrame
+
 from templates.constants import font_entry
 from ui.KeyboardFrame import NumericKeyboard
 

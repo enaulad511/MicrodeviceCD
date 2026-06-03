@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-from templates.constants import font_tabs
 import csv
 import os
 import re
@@ -8,10 +7,13 @@ from tkinter.filedialog import askopenfilename, asksaveasfilename
 
 import matplotlib
 
+from templates.constants import font_tabs
+
 matplotlib.use("TkAgg")
+import tkinter as tk
+
 import matplotlib.pyplot as plt
 import numpy as np
-import tkinter as tk
 import ttkbootstrap as ttk
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 from matplotlib.figure import Figure

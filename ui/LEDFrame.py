@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 
-from templates.constants import led_heatin_pin
-from tkinter import StringVar
-from tkinter import Entry
+from tkinter import Entry, StringVar
+
 import ttkbootstrap as ttk
 from ttkbootstrap.scrolled import ScrolledFrame
-from templates.constants import font_entry
+
+from templates.constants import font_entry, led_heatin_pin
 from ui.KeyboardFrame import NumericKeyboard
 
 __author__ = "Edisson A. Naula"

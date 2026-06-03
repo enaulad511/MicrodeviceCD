@@ -1,10 +1,9 @@
 # -*- coding: utf-8 -*-
-from templates.utils import write_settings_to_file
-from ttkbootstrap.scrolled import ScrolledFrame
-from templates.constants import font_entry
-from templates.utils import read_settings_from_file
 import ttkbootstrap as ttk
+from ttkbootstrap.scrolled import ScrolledFrame
 
+from templates.constants import font_entry
+from templates.utils import read_settings_from_file, write_settings_to_file
 from ui.KeyboardFrame import NumericKeyboard
 
 __author__ = "Edisson Naula"

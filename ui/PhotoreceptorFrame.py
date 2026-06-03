@@ -1,15 +1,15 @@
 # -*- coding: utf-8 -*-
 
 
-from templates.utils import read_settings_from_file
-import ttkbootstrap as ttk
-import matplotlib.pyplot as plt
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import time
 
+import matplotlib.pyplot as plt
+import ttkbootstrap as ttk
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from ttkbootstrap.scrolled import ScrolledFrame
 
 from templates.constants import font_entry
+from templates.utils import read_settings_from_file
 from ui.KeyboardFrame import NumericKeyboard
 
 __author__ = "Edisson A. Naula"

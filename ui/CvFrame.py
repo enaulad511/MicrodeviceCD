@@ -1,21 +1,20 @@
 # -*- coding: utf-8 -*-
 
 import threading
-from templates.utils import read_settings_from_file
+
 from Drivers.EmstatUtils import construc_nscans_script_cv
-from templates.utils import convert_si_integer_full
+from templates.utils import convert_si_integer_full, read_settings_from_file
 from ui.EventEmstatFrame import EventPlotter
 
 __author__ = "Edisson A. Naula"
 __date__ = "$ 11/11/2025 at 14:45 p.m. $"
 
-import ttkbootstrap as ttk
 import matplotlib.pyplot as plt
+import ttkbootstrap as ttk
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 from templates.constants import font_entry  # Ajusta si no tienes este archivo
 from ui.KeyboardFrame import NumericKeyboard
-
 
 DEFAUL_VALUES_CV = [
     "0",
@@ -295,10 +294,16 @@ def create_buttons_cv(parent, callbacks):
 
 class CVFrame(ttk.Frame):
     def __init__(
-        self, parent, ip_sender="localhost", callback_get_ip_sender=None, frame_with_scroll=None
+        self,
+        parent,
+        ip_sender="localhost",
+        callback_get_ip_sender=None,
+        callback_get_channel=None,
+        frame_with_scroll=None,
     ):
         ttk.Frame.__init__(self, parent)
         self.parent = parent
+        self.callback_get_channel = callback_get_channel
         self.columnconfigure(0, weight=1)
         self.rowconfigure((0, 1), weight=1)
         self.payload = {}
@@ -393,8 +398,21 @@ class CVFrame(ttk.Frame):
             "range_ba": convert_si_integer_full(self.range_ba),
             "ba_1": convert_si_integer_full(self.ba1),
             "ba_2": convert_si_integer_full(self.ba2),
+            "ch": self._get_channel(),
             "method": "cv",
         }
+
+    def _get_channel(self):
+        """Canal de electrodo (0-7) para el payload. Degrada a 0 si no hay callback.
+
+        El firmware v1.6 valida el rango; aqui solo garantizamos un int valido.
+        """
+        if self.callback_get_channel is None:
+            return 0
+        try:
+            return int(self.callback_get_channel())
+        except Exception:
+            return 0
 
     def update_data_script(self):
         try:

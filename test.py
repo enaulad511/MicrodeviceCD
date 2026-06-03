@@ -2,9 +2,11 @@
 __author__ = "Edisson A. Naula"
 __date__ = "$ 01/oct/2025 at 09:54 $"
 
-import serial
 import threading
 import time
+
+import serial
+
 from Drivers.DriverMotorDC import MotorBTS7960
 
 # Configura el puerto UART

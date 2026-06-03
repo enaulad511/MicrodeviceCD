@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
-from Drivers.DriverEncoder import DriverEncoderSys
-import time
-from templates.constants import serial_port_encoder
 import signal
 import sys
+import time
+
+from Drivers.DriverEncoder import DriverEncoderSys
+from templates.constants import serial_port_encoder
 
 __author__ = "Edisson Naula"
 __date__ = "$ 28/11/2025 at 15:59 $"

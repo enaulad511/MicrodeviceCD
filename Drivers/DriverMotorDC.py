@@ -1,7 +1,8 @@
 # pyrefly: ignore [missing-import]
-import gpiod
 import threading
 from time import sleep
+
+import gpiod
 
 # pyrefly: ignore [missing-import]
 from gpiod.line import Direction, Value

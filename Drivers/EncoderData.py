@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import serial
+
 __author__ = "Edisson Naula"
 __date__ = "$ 18/11/2025 at 15:00 $"
 

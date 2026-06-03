@@ -1,11 +1,8 @@
 # -*- coding: utf-8 -*-
-from templates.constants import font_options
-from templates.constants import font_footer
-from templates.constants import font_text
-from ui.TemperatureFrame import TemperatureFrame
-from templates.constants import font_buttons_small
 from Drivers.ClientUDP import UdpClient
+from templates.constants import font_buttons_small, font_footer, font_options, font_text
 from ui.ConfigFrame import ConfigFrame
+from ui.TemperatureFrame import TemperatureFrame
 
 __author__ = "Edisson A. Naula"
 __date__ = "$ 08/10/2025  at 09:35 a.m. $"
@@ -17,14 +14,14 @@ from PIL import Image, ImageTk
 
 from templates.constants import (
     font_buttons,
-    font_labels,
     font_entry,
+    font_labels,
     font_labels_frame,
     font_tabs,
+    main_tabs_icons,
+    main_tabs_texts,
     tab_icons,
     tab_texts,
-    main_tabs_texts,
-    main_tabs_icons,
 )
 from ui.DiscFrame import ControlDiscFrame
 from ui.ElectrochemicalFrame import ElectrochemicalFrame

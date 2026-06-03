@@ -1,20 +1,23 @@
 # -*- coding: utf-8 -*-
 
-from datetime import datetime
-from templates.utils import read_settings_from_file
-from templates.constants import chip_rasp
-from Drivers.ClientUDP import UdpClient
-from templates.constants import serial_port_encoder
-from templates.constants import led_fluorescence_pin
-from templates.constants import led_heatin_pin
-import time
 import threading
-import ttkbootstrap as ttk
-from ttkbootstrap.scrolled import ScrolledFrame
-from templates.constants import font_entry
-import matplotlib.pyplot as plt
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import time
+from datetime import datetime
 
+import matplotlib.pyplot as plt
+import ttkbootstrap as ttk
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from ttkbootstrap.scrolled import ScrolledFrame
+
+from Drivers.ClientUDP import UdpClient
+from templates.constants import (
+    chip_rasp,
+    font_entry,
+    led_fluorescence_pin,
+    led_heatin_pin,
+    serial_port_encoder,
+)
+from templates.utils import read_settings_from_file
 from ui.DiscFrame import spinMotorRPM_ramped
 from ui.KeyboardFrame import NumericKeyboard
 

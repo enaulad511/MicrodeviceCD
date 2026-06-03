@@ -14,8 +14,8 @@ try:
         from adafruit_ads1x15.analog_in import AnalogIn  # type: ignore
 except Exception:
     # Alternativa clásica (más común en versiones recientes)
-    from adafruit_ads1x15.ads1115 import ADS1115  # type: ignore
     from adafruit_ads1x15.ads1x15 import Mode, ads1x15  # type: ignore
+    from adafruit_ads1x15.ads1115 import ADS1115  # type: ignore
     from adafruit_ads1x15.analog_in import AnalogIn  # type: ignore
 
 # Placas CircuitPython / Blinka
