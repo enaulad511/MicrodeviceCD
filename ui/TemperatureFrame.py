@@ -4,8 +4,10 @@ from Drivers.ClientUDP import UdpClient
 __author__ = "Edisson A. Naula"
 __date__ = "$ 09/12/2025 at 01:07 p.m. $"
 
+import os
 import random
 import time
+from tkinter import filedialog
 
 import matplotlib.pyplot as plt
 import ttkbootstrap as ttk
@@ -233,8 +235,21 @@ class TemperatureFrame(ttk.Frame):
             print("No hay datos para guardar.")
             return
 
+        os.makedirs("files", exist_ok=True)
         fecha = datetime.now().strftime("%Y%m%d_%H%M%S")
-        nombre = f"files/temperature_log_{fecha}.csv"
+        nombre = filedialog.asksaveasfilename(
+            parent=self,
+            title="Guardar datos de temperatura",
+            initialdir="files",
+            initialfile=f"temperature_log_{fecha}.csv",
+            defaultextension=".csv",
+            filetypes=[("CSV files", "*.csv"), ("Todos", "*.*")],
+        )
+        if not nombre:
+            print("Guardado cancelado")
+            return
+        if not nombre.lower().endswith(".csv"):
+            nombre += ".csv"
 
         unidad = self.unit_var.get()
         try:

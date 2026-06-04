@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
 
 
+import os
 import time
+from tkinter import filedialog
 
 import matplotlib.pyplot as plt
 import ttkbootstrap as ttk
@@ -136,8 +138,21 @@ class PhotoreceptorFrame(ttk.Frame):
         if not self.data:
             print("No hay datos para guardar")
             return
+        os.makedirs("files", exist_ok=True)
         timestamp = time.strftime("%Y%m%d_%H%M%S")
-        filename = f"files/photoreceptor_data_{timestamp}.csv"
+        filename = filedialog.asksaveasfilename(
+            parent=self,
+            title="Guardar datos del fotoreceptor",
+            initialdir="files",
+            initialfile=f"photoreceptor_data_{timestamp}.csv",
+            defaultextension=".csv",
+            filetypes=[("CSV files", "*.csv"), ("Todos", "*.*")],
+        )
+        if not filename:
+            print("Guardado cancelado")
+            return
+        if not filename.lower().endswith(".csv"):
+            filename += ".csv"
         with open(filename, "w") as f:
             f.write("Time (s),Intensity\n")
             for t, d in zip(self.timestamps, self.data):
