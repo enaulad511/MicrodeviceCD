@@ -2,11 +2,10 @@
 from Drivers.EmstatUtils import construc_individual_script_sqwv
 from templates.utils import convert_si_integer_full
 from ui.EventEmstatFrame import EventPlotter
+from ui.ShowMethodScript import ShowMethodScript
 
 __author__ = "Edisson A. Naula"
 __date__ = "$ 11/11/2025 at 15:00 p.m. $"
-
-from tkinter.scrolledtext import ScrolledText
 
 import matplotlib.pyplot as plt
 import ttkbootstrap as ttk
@@ -135,26 +134,32 @@ def create_buttons_sqwv(parent, callbacks):
     # ===== CONTROL BUTTONS =====
     frame_buttons = ttk.LabelFrame(parent, text="Actions")
     frame_buttons.grid(row=1, column=0, pady=10, sticky="nswe")
-    frame_buttons.columnconfigure((0, 1, 2), weight=1)
+    frame_buttons.columnconfigure((0, 1, 2, 3), weight=1)
     frame_buttons.configure(style="Custom.TLabelframe")
     ttk.Button(
         frame_buttons,
-        text="📈 & 🗒️",
+        text="📈",
         style="info.TButton",
         command=callbacks["callback_generate_profile"],
     ).grid(row=0, column=0, pady=10, sticky="n")
     ttk.Button(
         frame_buttons,
+        text="🗒️MethodScript",
+        style="info.TButton",
+        command=callbacks["callback_show_script"],
+    ).grid(row=0, column=1, pady=10, sticky="n")
+    ttk.Button(
+        frame_buttons,
         text="⏫Send Script",
         style="info.TButton",
         command=callbacks["callback_send"],
-    ).grid(row=0, column=1, pady=10, sticky="n")
+    ).grid(row=0, column=2, pady=10, sticky="n")
     ttk.Button(
         frame_buttons,
         text="Show Inputs",
         style="danger.TButton",
         command=callbacks["callback_show_inputs"],
-    ).grid(row=0, column=2, pady=10, sticky="n")
+    ).grid(row=0, column=3, pady=10, sticky="n")
 
 
 class SWVFrame(ttk.Frame):
@@ -172,6 +177,7 @@ class SWVFrame(ttk.Frame):
         self.callback_ip = callback_get_ip_sender
         self.callback_get_channel = callback_get_channel
         self.frame_w_scroll = frame_with_scroll
+        self.ShowMethodScrit = None
 
         content_frame = ttk.Frame(self)
         content_frame.grid(row=0, column=0, sticky="nsew")
@@ -182,6 +188,7 @@ class SWVFrame(ttk.Frame):
         self.frame_entries.columnconfigure(0, weight=1)
         callbacks = {
             "callback_generate_profile": self.callback_generate_profile,
+            "callback_show_script": self.callback_show_methodscript,
             "callback_send": self.send_script,
             "callback_show_inputs": self.show_inputs_frame,
         }
@@ -199,10 +206,6 @@ class SWVFrame(ttk.Frame):
         self.profile_frame.grid(row=2, column=0, padx=(5, 15), pady=10, sticky="nswe")
         self.profile_frame.configure(style="Custom.TLabelframe")
         self.profile_frame.grid_forget()
-
-        self.script_box = ScrolledText(content_frame, height=15)
-        self.script_box.grid(row=3, column=0, padx=(5, 15), pady=10, sticky="nswe")
-        self.script_box.grid_forget()
 
         self.canvas = None
         self.frame_plotter = ttk.LabelFrame(self, text="Live Data Plotter")
@@ -311,15 +314,21 @@ class SWVFrame(ttk.Frame):
             self.canvas.draw()
             self.canvas.get_tk_widget().pack(fill="both", expand=True)
 
-            # Generate MethodSCRIPT
-            script = self.generate_methodscript()
-            self.script_box.delete("1.0", "end")
-            self.script_box.insert("end", script)
             self.profile_frame.grid(row=2, column=0, padx=(5, 15), pady=10, sticky="nswe")
-            self.script_box.grid(row=3, column=0, padx=(5, 15), pady=10, sticky="nswe")
             self.frame_plotter.grid_forget()
         except ValueError:
             print("Error: Check input values.")
+
+    def callback_show_methodscript(self):
+        self.generate_payload()
+        script = self.generate_methodscript()
+        if self.ShowMethodScrit is not None:
+            self.ShowMethodScrit.destroy()
+            self.ShowMethodScrit = None
+        self.ShowMethodScrit = ShowMethodScript(self, script)
+
+    def on_close_script_window(self):
+        self.ShowMethodScrit = None
 
     def generate_payload(self):
         try:
@@ -400,7 +409,6 @@ class SWVFrame(ttk.Frame):
         )
         self.frame_plotter.grid(row=4, column=0, padx=10, pady=10, sticky="nsew")
         self.profile_frame.grid_forget()
-        self.script_box.grid_forget()
 
 
 if __name__ == "__main__":

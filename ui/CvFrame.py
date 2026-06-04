@@ -5,6 +5,7 @@ import threading
 from Drivers.EmstatUtils import construc_nscans_script_cv
 from templates.utils import convert_si_integer_full, read_settings_from_file
 from ui.EventEmstatFrame import EventPlotter
+from ui.ShowMethodScript import ShowMethodScript
 
 __author__ = "Edisson A. Naula"
 __date__ = "$ 11/11/2025 at 14:45 p.m. $"
@@ -63,23 +64,6 @@ CURRENT_RANGES = {
 }
 
 thread_lock = threading.Lock()
-
-
-class ShowMethodScript(ttk.Toplevel):
-    def __init__(self, parent, script: str):
-        super().__init__(parent)
-        self.title("Method Script")
-        self.parent = parent
-        # self.geometry("600x400")
-        self.script_box = ttk.ScrolledText(self, height=20)
-        self.script_box.pack(fill="both", expand=True, padx=10, pady=10)
-        self.script_box.insert("end", script)
-        self.script_box.configure(state="disabled")
-        self.protocol("WM_DELETE_WINDOW", self.on_close)
-
-    def on_close(self):
-        self.parent.on_close_script_window()
-        self.destroy()
 
 
 class ShowProfileFrame(ttk.Toplevel):

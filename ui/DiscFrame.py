@@ -50,7 +50,7 @@ def create_widgets_disco_input(parent, callbacks: dict):
         text="Start Rotation",
         style="info.TButton",
         command=callbacks.get("callback_spin", ()),
-    ).grid(row=2, column=0, columnspan=2, pady=5, padx=5, sticky="nswe")
+    ).grid(row=2, column=0, columnspan=2, pady=5, padx=5, sticky="n")
     frame1.rowconfigure((0, 1, 2), weight=1)
     # Mode 2: On/Off cycle
     frame2 = ttk.LabelFrame(parent, text="On/Off Cycle")
@@ -101,7 +101,7 @@ def create_widgets_disco_input(parent, callbacks: dict):
         text="Run Cycle",
         style="info.TButton",
         command=callbacks.get("callback_cycle", ()),
-    ).grid(row=4, column=0, columnspan=2, pady=5, padx=5, sticky="nswe")
+    ).grid(row=4, column=0, columnspan=2, pady=5, padx=5, sticky="n")
 
     # Mode 3: Oscillator
     frame3 = ttk.LabelFrame(parent, text="Oscillator Mode")
@@ -132,7 +132,7 @@ def create_widgets_disco_input(parent, callbacks: dict):
         text="Start Oscillation",
         style="info.TButton",
         command=callbacks.get("callback_oscillator", ()),
-    ).grid(row=2, column=0, columnspan=2, pady=5, padx=5, sticky="nswe")
+    ).grid(row=2, column=0, columnspan=2, pady=5, padx=5, sticky="n")
 
     # mode 4: go to zero require rpm
     frame4 = ttk.LabelFrame(parent, text="Go to Zero")
@@ -154,14 +154,14 @@ def create_widgets_disco_input(parent, callbacks: dict):
         text="Go to Zero",
         style="info.TButton",
         command=callbacks.get("callback_zero", ()),
-    ).grid(row=1, column=0, columnspan=2, pady=5, padx=5, sticky="nswe")
+    ).grid(row=1, column=0, columnspan=2, pady=5, padx=5, sticky="n")
     # Mode 5: Stop
     ttk.Button(
         parent,
         text="Stop",
         style="danger.TButton",
         command=callbacks.get("callback_stop", ()),
-    ).grid(row=1, column=1, pady=10, padx=5, sticky="nswe")
+    ).grid(row=1, column=1, pady=10, padx=5, sticky="n")
 
     return entries, entry_widgets
 

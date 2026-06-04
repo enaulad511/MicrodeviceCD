@@ -24,13 +24,13 @@ def create_widgets_fluorescente_input(parent, callbacks: dict):
         text="On",
         style="info.TButton",
         command=callbacks.get("callback_on", ()),
-    ).grid(row=0, column=0, padx=5, pady=5, sticky="nswe")
+    ).grid(row=0, column=0, padx=5, pady=5, sticky="n")
     ttk.Button(
         frame1,
         text="Off",
         style="info.TButton",
         command=callbacks.get("callback_off", ()),
-    ).grid(row=0, column=1, padx=5, pady=5, sticky="nswe")
+    ).grid(row=0, column=1, padx=5, pady=5, sticky="n")
 
     # Control 2: Encender por tiempo
     frame2 = ttk.LabelFrame(parent, text="Timed On")
@@ -50,7 +50,7 @@ def create_widgets_fluorescente_input(parent, callbacks: dict):
         style="info.TButton",
         text="Turn On by Time",
         command=callbacks.get("callback_on_time", ()),
-    ).grid(row=1, column=0, columnspan=2, pady=5, padx=5, sticky="nswe")
+    ).grid(row=1, column=0, columnspan=2, pady=5, padx=5, sticky="n")
 
     entry_widgets = [duration_entry]
     return entries, entry_widgets

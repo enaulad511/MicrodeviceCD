@@ -238,7 +238,28 @@ class PCRFrame(ttk.Frame):
             room_temp = 20.0
             transition_const = 10000
             transition_time_down = transition_const / max(rpm, 1)
-            transition_time_up = 15
+            # La rampa de calentamiento es proporcional al salto de temperatura
+            # (s/°C). Antes era fija (15 s); ahora escala con |ΔT|.
+            heating_rate_up = 0.2
+
+            def transition_time_up(t_from, t_to):
+                return abs(t_to - t_from) * heating_rate_up
+
+            # Recorte visual de holds largos (denat inicial / ext final): si su
+            # duración real supera 1.5x la de un ciclo, se dibujan comprimidos a
+            # ese tope para no aplastar los ciclos. Es solo visual: el tiempo real
+            # se conserva en la anotación de cada tramo recortado.
+            cycle_dur = (transition_time_up(ext_temp, high_temp) + time_high
+                         + transition_time_down + time_low
+                         + transition_time_up(low_temp, ext_temp) + ext_time)
+            clip_cap = 1.5 * cycle_dur if cycle_dur > 0 else float("inf")
+
+            def clip_hold(real_dur):
+                """Devuelve (ancho_dibujado, duracion_real, recortado?)."""
+                disp = min(real_dur, clip_cap)
+                return disp, real_dur, real_dur > clip_cap
+
+            clip_marks = []  # (x_corte, temp, duracion_real) de tramos comprimidos
 
             # (start, end, from_temp, to_temp, label, color)
             phase_segments = []
@@ -250,22 +271,27 @@ class PCRFrame(ttk.Frame):
             current_time += initial_spin_time
 
             # Rampa hacia denaturation
-            phase_segments.append((current_time, current_time + transition_time_up,
+            ramp_denat = transition_time_up(room_temp, denat_temp)
+            phase_segments.append((current_time, current_time + ramp_denat,
                                     room_temp, denat_temp, "Ramp Denat", "darkorange"))
-            current_time += transition_time_up
+            current_time += ramp_denat
 
-            # Hold Denaturation
-            phase_segments.append((current_time, current_time + denat_time,
+            # Hold Denaturation (recortable si es muy largo)
+            disp_denat, real_denat, clipped_denat = clip_hold(denat_time)
+            phase_segments.append((current_time, current_time + disp_denat,
                                     denat_temp, denat_temp, "Denaturation", "purple"))
-            current_time += denat_time
+            current_time += disp_denat
+            if clipped_denat:
+                clip_marks.append((current_time, denat_temp, real_denat))
 
             n_display = min(5, cycles)
             prev_temp = denat_temp
             for _ in range(n_display):
                 # Rampa hacia High
-                phase_segments.append((current_time, current_time + transition_time_up,
+                ramp_high = transition_time_up(prev_temp, high_temp)
+                phase_segments.append((current_time, current_time + ramp_high,
                                         prev_temp, high_temp, "Heating", "orange"))
-                current_time += transition_time_up
+                current_time += ramp_high
 
                 # Hold High
                 phase_segments.append((current_time, current_time + time_high,
@@ -283,9 +309,10 @@ class PCRFrame(ttk.Frame):
                 current_time += time_low
 
                 # Rampa hacia Extension
-                phase_segments.append((current_time, current_time + transition_time_up,
+                ramp_ext = transition_time_up(low_temp, ext_temp)
+                phase_segments.append((current_time, current_time + ramp_ext,
                                         low_temp, ext_temp, "Ramp Ext", "goldenrod"))
-                current_time += transition_time_up
+                current_time += ramp_ext
 
                 # Hold Extension
                 phase_segments.append((current_time, current_time + ext_time,
@@ -293,10 +320,13 @@ class PCRFrame(ttk.Frame):
                 current_time += ext_time
                 prev_temp = ext_temp
 
-            # Extensión final
-            phase_segments.append((current_time, current_time + ext_time_final,
+            # Extensión final (recortable si es muy larga)
+            disp_ext_final, real_ext_final, clipped_ext_final = clip_hold(ext_time_final)
+            phase_segments.append((current_time, current_time + disp_ext_final,
                                     ext_temp, ext_temp, "Final Ext.", "magenta"))
-            current_time += ext_time_final
+            current_time += disp_ext_final
+            if clipped_ext_final:
+                clip_marks.append((current_time, ext_temp, real_ext_final))
 
             # Crear figura
             fig, ax = plt.subplots(figsize=(7, 4))
@@ -321,8 +351,20 @@ class PCRFrame(ttk.Frame):
             ax.axhline(denat_temp, color="purple", linestyle=":", linewidth=0.8, alpha=0.5)
             ax.axhline(ext_temp, color="darkcyan", linestyle=":", linewidth=0.8, alpha=0.5)
 
+            # Marca de discontinuidad + duración real en los holds recortados
+            for x_cut, temp, real_dur in clip_marks:
+                ax.axvline(x_cut, color="black", linestyle=(0, (2, 2)),
+                           linewidth=1.0, alpha=0.6)
+                ax.annotate(f"≈{real_dur:.0f}s", xy=(x_cut, temp),
+                            xytext=(0, 8), textcoords="offset points",
+                            ha="right", va="bottom", fontsize=7,
+                            fontweight="bold", color="black")
+
             ax.legend(loc="upper right", fontsize=7, ncol=2)
-            ax.set_xlabel("Tiempo (s)")
+            ax.set_xlabel("Tiempo (s) — holds largos comprimidos"
+                          if clip_marks else "Tiempo (s)")
+            # Eje X sin valores: tras el recorte ya no son segundos reales
+            ax.set_xticks([])
             ax.set_ylabel("Temperatura (°C)")
             ax.set_title(f"Perfil PCR ({cycles} ciclos)")
             ax.grid(True)

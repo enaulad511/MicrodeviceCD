@@ -41,7 +41,7 @@ class NumericKeyboard(ttk.Frame):
                     command=lambda ch=char: self.on_press(ch),
                     style="CustomPrimary.TButton",
                 )
-                btn.grid(row=r, column=c, ipadx=10, ipady=10, sticky="nsew")
+                btn.grid(row=r, column=c, ipadx=5, ipady=5, padx=2, pady=2, sticky="nsew")
         for i in range(4):
             self.columnconfigure(i, weight=1)
         for i in range(len(buttons)):

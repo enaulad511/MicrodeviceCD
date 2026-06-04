@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 import math
-from tkinter.scrolledtext import ScrolledText
 
 import ttkbootstrap as ttk
 
@@ -9,6 +8,7 @@ from templates.constants import font_entry, font_text_combobox
 from templates.utils import convert_si_integer_full
 from ui.EventEmstatFrame import EventPlotter
 from ui.KeyboardFrame import NumericKeyboard
+from ui.ShowMethodScript import ShowMethodScript
 
 __author__ = "Edisson A. Naula"
 __date__ = "$ 03/06/2026 at 12:00 p.m. $"
@@ -66,6 +66,7 @@ class EISFrame(ttk.Frame):
         self.columnconfigure(0, weight=1)
         self.rowconfigure((0, 1), weight=1)
         self.payload = {}
+        self.ShowMethodScrit = None
 
         # --- StringVars de las entradas ---
         self.var_econ1 = ttk.StringVar(value=DEF_E_CON)
@@ -136,11 +137,6 @@ class EISFrame(ttk.Frame):
             style="danger.TButton",
             command=self.show_inputs_frame,
         ).grid(row=0, column=2, pady=8, sticky="n")
-
-        # Caja de MethodScript (oculta hasta pedirla)
-        self.script_box = ScrolledText(content_frame, height=15)
-        self.script_box.grid(row=2, column=0, padx=(5, 15), pady=10, sticky="nswe")
-        self.script_box.grid_forget()
 
         # Teclado numerico flotante para todas las entradas editables
         self.keyboard = NumericKeyboard(self, scroll_host=self.frame_w_scroll)
@@ -410,9 +406,13 @@ class EISFrame(ttk.Frame):
         except ValueError:
             self._set_status("Error: check input values.")
             return
-        self.script_box.grid(row=2, column=0, padx=(5, 15), pady=10, sticky="nswe")
-        self.script_box.delete("1.0", "end")
-        self.script_box.insert("end", script)
+        if self.ShowMethodScrit is not None:
+            self.ShowMethodScrit.destroy()
+            self.ShowMethodScrit = None
+        self.ShowMethodScrit = ShowMethodScript(self, script)
+
+    def on_close_script_window(self):
+        self.ShowMethodScrit = None
 
     def _phase1_ok(self):
         if self.scan_selector.current() != 0 or self.freq_selector.current() != 0:
@@ -429,7 +429,6 @@ class EISFrame(ttk.Frame):
             self._set_status("Error: check input values.")
             return
         self.frame_entries.grid_forget()
-        self.script_box.grid_forget()
         ip_sender = self.callback_ip() if self.callback_ip else "localhost"
         self.udp_plotter.update_val_experiment(
             x_key="Z_real",
