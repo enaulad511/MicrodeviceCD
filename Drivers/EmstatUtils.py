@@ -161,6 +161,99 @@ def construc_individual_script_sqwv(
     return script.strip()
 
 
+def construct_eis_script(
+    E_ac,
+    f_max,
+    f_min,
+    n_freq,
+    E_dc,
+    E_con1="",
+    t_con1="",
+    E_con2="",
+    t_con2="",
+):
+    """EIS (Electrochemical Impedance Spectroscopy) -- scan type Default + barrido
+    de frecuencia (frequency Scan). Genera el MethodSCRIPT completo.
+
+    Front-end verificado contra el ejemplo oficial PalmSens (set_pgstat_chan 0,
+    set_pgstat_mode 3 high-speed, set_autoranging ba 10u 1m) + acondicionamiento
+    opcional. No reutiliza construct_header_experiment.
+
+    Orden de meas_loop_eis: f z_r z_i E_ac f_max f_min n_freq E_dc.
+
+    Acondicionamiento: hasta dos bloques meas_loop_ca (E_con1/t_con1, E_con2/t_con2),
+    cada uno omitido si su tiempo es "" (0). Si hay acondicionamiento se hace set_e
+    inicial y se re-asegura el autorango ba tras los bloques.
+    """
+    # Potencial inicial: primer bloque de acondicionamiento activo, si no E_dc.
+    if t_con1 != "":
+        e_start = E_con1
+    elif t_con2 != "":
+        e_start = E_con2
+    else:
+        e_start = E_dc
+
+    sc_con1 = ""
+    if t_con1 != "":
+        sc_con1 = (
+            f"meas_loop_ca e i {E_con1} 200m {t_con1}\n"
+            "  pck_start\n"
+            "    pck_add e\n"
+            "    pck_add i\n"
+            "  pck_end\n"
+            "endloop\n"
+        )
+    sc_con2 = ""
+    if t_con2 != "":
+        sc_con2 = (
+            f"meas_loop_ca e i {E_con2} 200m {t_con2}\n"
+            "  pck_start\n"
+            "    pck_add e\n"
+            "    pck_add i\n"
+            "  pck_end\n"
+            "endloop\n"
+        )
+    sc_reset_ba = ""
+    if t_con1 != "" or t_con2 != "":
+        # Tras el acondicionamiento, re-asegura el rango ba del EIS.
+        sc_reset_ba = "set_autoranging ba 10u 1m\n"
+
+    # Front-end verificado contra el ejemplo oficial PalmSens: canal 0, modo 3
+    # (high speed, requerido por EIS) y autorango ba 10u-1m. set_e solo si hay
+    # acondicionamiento (si no, el E_dc lo aplica meas_loop_eis). Las variables
+    # i/e se declaran para los bloques meas_loop_ca del acondicionamiento.
+    script = (
+        "e\n"
+        "var f\n"
+        "var z_r\n"
+        "var z_i\n"
+        "var i\n"
+        "var e\n"
+        "set_pgstat_chan 0\n"
+        "set_pgstat_mode 3\n"
+        "set_autoranging ba 10u 1m\n"
+    )
+    if t_con1 != "" or t_con2 != "":
+        script += f"set_e {e_start}\n"
+    script += "cell_on\n"
+    script += sc_con1
+    script += sc_con2
+    script += sc_reset_ba
+    script += (
+        f"meas_loop_eis f z_r z_i {E_ac} {f_max} {f_min} {n_freq} {E_dc}\n"
+        "  pck_start\n"
+        "    pck_add f\n"
+        "    pck_add z_r\n"
+        "    pck_add z_i\n"
+        "  pck_end\n"
+        "endloop\n"
+        "on_finished:\n"
+        "  cell_off\n"
+        "\n"
+    )
+    return script
+
+
 class EmstatStreamParser:
     """
     Parser general de streams EmStat (CV, SWV, EIS, etc.)
@@ -177,7 +270,11 @@ class EmstatStreamParser:
             "ba_1": ("I_A_F", 1e-12),
             "ba_2": ("I_A_R", 1e-12),
         },
-        "eis": {"fr": ("freq_Hz", 1), "zr": ("Z_real", 1e-3), "zi": ("Z_imag", 1e-3)},
+        # Códigos de paquete REALES del EmStat en EIS (verificados en salida cruda):
+        #   dc = frecuencia, cc = Z_real, cd = Z_imag.
+        # (La columna 'scale' es vestigial: _decode solo aplica el prefijo de unidad.
+        #  La negación de Z_imag para el Nyquist se hace explícita en _decode.)
+        "eis": {"dc": ("freq_Hz", 1), "cc": ("Z_real", 1), "cd": ("Z_imag", 1)},
     }
     UNIT_MAP = {
         "a": 1e-18,
@@ -226,11 +323,12 @@ class EmstatStreamParser:
             return {"type": "scan_switch", "direction": self.context["direction"]}
 
         if kind == "cycle":
-            self.context["cycle"] = int(raw[1:])
+            self.context["cycle"] = self._safe_hex(raw[1:])
             return {"type": "cycle", "cycle": self.context["cycle"]}
 
         if kind == "method":
-            self.context["method_id"] = int(raw[1:])
+            # El índice del marcador (p.ej. M000D) es HEX, no decimal.
+            self.context["method_id"] = self._safe_hex(raw[1:])
             return {"type": "method", "method_id": self.context["method_id"]}
 
         if kind == "start_method":
@@ -249,6 +347,14 @@ class EmstatStreamParser:
     # ------------------------------------------------------------------
     # Clasificador
     # ------------------------------------------------------------------
+    @staticmethod
+    def _safe_hex(s: str):
+        """Convierte un índice hex (marcadores M/C del EmStat) a int. 0 si falla."""
+        try:
+            return int(s, 16)
+        except (ValueError, TypeError):
+            return 0
+
     def _classify(self, raw: str):
         if raw.startswith("P"):
             return "packet"
@@ -285,6 +391,11 @@ class EmstatStreamParser:
                 "state": parsed["state"],
             }
         )
+
+        # EIS: los paquetes de acondicionamiento (da/ba) no traen campos Z; no son
+        # puntos del Nyquist. Marcarlos como no-dato evita graficar (0,0) espurios.
+        if self.experiment == "eis" and "Z_real" not in decoded and "Z_imag" not in decoded:
+            decoded["type"] = "unknown"
 
         return decoded
 
@@ -326,6 +437,9 @@ class EmstatStreamParser:
             f = parsed["fields"].get(key)
             if f:
                 out[name] = f["value"] * self.UNIT_MAP.get(f["unit"], 1)
+        # Nyquist: el eje Y es -Z_imag por convención (semicírculos hacia arriba).
+        if self.experiment == "eis" and "Z_imag" in out:
+            out["Z_imag"] = -out["Z_imag"]
         return out
 
 

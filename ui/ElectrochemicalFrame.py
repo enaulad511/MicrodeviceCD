@@ -9,6 +9,7 @@ __date__ = "$ 28/10/2025 at 10:24 $"
 import ttkbootstrap as ttk
 
 from ui.CvFrame import CVFrame
+from ui.EisFrame import EISFrame
 from ui.SqwVFrame import SWVFrame
 
 
@@ -73,6 +74,7 @@ class ElectrochemicalFrame(ttk.Frame):
     def get_channel(self):
         """Devuelve el canal de electrodo seleccionado (0-7) como int.
 
+
         Fuente unica de verdad del canal MCP, independiente del metodo (CV/SQWV).
         Degrada a 0 si la lectura falla.
         """
@@ -100,6 +102,14 @@ class ElectrochemicalFrame(ttk.Frame):
                 )
             case "Square Wave Voltammetry":
                 self.current_test_frame = SWVFrame(
+                    self.test_frame_container,
+                    ip_sender=ip_sender,
+                    callback_get_ip_sender=self.callback_ip,
+                    callback_get_channel=self.get_channel,
+                    frame_with_scroll=self.content_frame,
+                )
+            case "Electrochemical Impedance":
+                self.current_test_frame = EISFrame(
                     self.test_frame_container,
                     ip_sender=ip_sender,
                     callback_get_ip_sender=self.callback_ip,
