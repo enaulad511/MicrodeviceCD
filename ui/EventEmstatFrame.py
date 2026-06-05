@@ -3,6 +3,7 @@ import csv
 import json
 import os
 import queue
+import re
 import socket
 import threading
 import time
@@ -11,7 +12,11 @@ from collections import deque
 import matplotlib
 from matplotlib.figure import Figure
 
-from Drivers.EmstatUtils import EmstatStreamParser, LineBufferedSocketReader
+from Drivers.EmstatUtils import (
+    EmstatStreamParser,
+    LineBufferedSocketReader,
+    decode_methodscript_error,
+)
 
 matplotlib.use("TkAgg")  # backend para Tk
 import tkinter as tk
@@ -37,6 +42,7 @@ class EventPlotter(ttk.Frame):
         master,
         method,
         tcp_port=5006,
+        udp_port=5005,
         ip_sender="localhost",
         buffer_size=4096,
         max_points=10000,
@@ -74,6 +80,7 @@ class EventPlotter(ttk.Frame):
         # --- Estado de ejecución ---
         self.q_points = queue.Queue(maxsize=20000)  # grande, pero finita
         self.q_tcp_lines = queue.Queue(maxsize=20000)  # grande, pero finita
+        self.q_udp_lines = queue.Queue(maxsize=20000)  # tap UDP paralelo
         self.storage_dict = {}  # registro parcial de informacion
         self.total_data = []  # registro total de informacion
         self.loaded_lines = []  # Line2D agregadas desde archivos CSV cargados
@@ -83,6 +90,31 @@ class EventPlotter(ttk.Frame):
         self.reader_th = None
         self.processor_th = None
         self.sock = None
+        # --- Tap UDP (recuperación de paquetes perdidos en TCP) ---
+        self.udp_port = udp_port
+        self.udp_sock = None
+        self.udp_reader_th = None
+        # Selector de transporte que alimenta la gráfica/CSV (default TCP).
+        self.transport_var = tk.StringVar(value="TCP")
+        # Retención de datos entre corridas (checkbox). OFF (default): cada Start limpia
+        # la corrida anterior. ON: apila cada corrida como traza(s) separada(s).
+        self.keep_data_var = tk.BooleanVar(value=False)
+        # Copia plana del transporte elegido, fijada en start() (hilo UI) y leída por
+        # el hilo procesador: evita acceso cross-thread al StringVar de Tk.
+        self._plot_source = "tcp"
+        # Cobertura por transporte: set de 'seq' de paquetes emstat_data vistos.
+        self.seq_seen = {"tcp": set(), "udp": set()}
+        # Merge (Fase 2): seq -> evento data (primer transporte que lo trae gana).
+        # Al cerrar se reconstruye la unión ordenada por seq (rellena lo que el
+        # transporte primario perdió con lo que trajo el otro).
+        self.merged_by_seq = {}
+        # Watchdog de inactividad total (s) para cerrar si nadie manda terminal.
+        # Bajo el idle de 16s del Pico, con margen sobre huecos legítimos entre paquetes.
+        self.watchdog_timeout = 10.0
+        self._last_rx = None        # ts del último mensaje EMSTAT (cualquier transporte)
+        self._run_started = False   # gate anti-rezago: visto emstat_start/data
+        self._terminated = False    # primer terminal gana (cualquier transporte)
+        self._coverage_printed = False
         self.running = False
         self.flag_recording = False
         self.after_id = None
@@ -134,6 +166,13 @@ class EventPlotter(ttk.Frame):
             bootstyle="info",
             command=self.open_analysis_window,
         )
+        # Retención de datos entre corridas: si está activo, cada Start apila la nueva
+        # corrida en lugar de limpiar la anterior (ver start()/_reconcile_merge()).
+        self.chk_keep = ttk.Checkbutton(
+            controls2,
+            text="Keep runs",
+            variable=self.keep_data_var,
+        )
         self.analysis_window = None
         self.lbl_status = ttk.Label(self, text="State: stopped.", anchor="w")
         self.lbl_status.pack(side=ttk.TOP, padx=4)
@@ -145,6 +184,19 @@ class EventPlotter(ttk.Frame):
         self.btn_load.pack(side=ttk.LEFT, padx=4)
         self.btn_custom_plot.pack(side=ttk.LEFT, padx=4)
         self.btn_analyze.pack(side=ttk.LEFT, padx=4)
+        self.chk_keep.pack(side=ttk.LEFT, padx=8)
+
+        # Selector de transporte de lectura (TCP/UDP). Fijado antes de Start; ambos
+        # transportes se leen y cuentan cobertura siempre, esto solo elige cuál grafica.
+        self.cmb_transport = ttk.Combobox(
+            controls,
+            textvariable=self.transport_var,
+            values=["TCP", "UDP"],
+            state="readonly",
+            width=5,
+        )
+        self.cmb_transport.pack(side=ttk.RIGHT, padx=4)
+        ttk.Label(controls, text="Read:").pack(side=ttk.RIGHT, padx=(8, 0))
 
         self.canvas_frame = ttk.Frame(self, height=380)
         self.canvas_frame.pack(side=ttk.TOP, fill=ttk.X, padx=1)
@@ -162,6 +214,12 @@ class EventPlotter(ttk.Frame):
         self.x_by_m = {}
         self.y_by_m = {}
         self.lines_by_m = {}
+        # Retención entre corridas: clave de línea -> (run, cycle) para etiquetas
+        # adaptativas, desplazamiento de clave por corrida e índice de corrida.
+        self.key_meta = {}
+        self.plot_run_offset = 0
+        self.run_index = 0
+        self._run_td_start = 0  # offset en total_data donde empieza la corrida actual
         self._style_cycle = self._build_style_cycle()
 
         # self.pack(fill=ttk.BOTH, expand=True)
@@ -218,13 +276,48 @@ class EventPlotter(ttk.Frame):
         self.flag_recording = True
         self.running = True
 
+        # Reset cobertura/estado del tap para esta corrida
+        self.seq_seen = {"tcp": set(), "udp": set()}
+        self.merged_by_seq = {}
+        self._last_rx = None
+        self._run_started = False
+        self._terminated = False
+        self._coverage_printed = False
+        self._plot_source = self.transport_var.get().lower()  # fija el transporte a graficar
+        with self.q_udp_lines.mutex:
+            self.q_udp_lines.queue.clear()
+        with self.q_tcp_lines.mutex:
+            self.q_tcp_lines.queue.clear()
+
+        # Retención entre corridas. OFF: limpia la corrida anterior (conserva las líneas
+        # cargadas de CSV); la nueva arranca con offset 0. ON: apila la nueva corrida
+        # sobre lo que ya esté graficado (offset = clave máxima + 1, sin limpiar).
+        if not self.keep_data_var.get():
+            self._reset_live_plot()
+            self.plot_run_offset = 0
+        else:
+            self.plot_run_offset = (max(self.lines_by_m) + 1) if self.lines_by_m else 0
+        self.run_index += 1
+        self._run_td_start = len(self.total_data)
+
+        # Socket UDP del tap (broadcast 5005, paralelo al control TCP). Si falla el
+        # bind (p.ej. dev/Windows sin red), degrada a TCP-only sin abortar la corrida.
+        self.udp_sock = self._create_udp_tap()
+
         # Lanza hilo productor (solo lectura TCP)
         self.reader_th = threading.Thread(target=self._tcp_reader, daemon=True, name="TCPReader")
         self.reader_th.start()
 
-        # Lanza hilo consumidor (parsing y lógica)
+        # Lanza hilo lector UDP del tap (si hay socket)
+        if self.udp_sock is not None:
+            self.udp_reader_th = threading.Thread(
+                target=self._udp_reader, daemon=True, name="UDPReader"
+            )
+            self.udp_reader_th.start()
+
+        # Lanza hilo consumidor unificado (parsea ambos transportes y aplica la lógica)
         self.processor_th = threading.Thread(
-            target=self._tcp_processor, daemon=True, name="TCPProcessor"
+            target=self._processor, daemon=True, name="EmstatProcessor"
         )
         self.processor_th.start()
         if self.callback_motor is not None:
@@ -232,7 +325,12 @@ class EventPlotter(ttk.Frame):
         # UI
         self.btn_start.configure(state=ttk.DISABLED)
         self.btn_stop.configure(state=ttk.NORMAL)
-        self._set_status(f"TCP connected to {self.ip_sender}:{self.tcp_port}")
+        self.cmb_transport.configure(state=ttk.DISABLED)
+        self.chk_keep.configure(state=ttk.DISABLED)
+        tap = "TCP+UDP" if self.udp_sock is not None else "TCP-only"
+        self._set_status(
+            f"{tap} | plot={self.transport_var.get()} | {self.ip_sender}:{self.tcp_port}"
+        )
         self._schedule_update()
 
     def stop(self, send_abort=False):
@@ -266,11 +364,22 @@ class EventPlotter(ttk.Frame):
         except Exception:
             pass
         self.sock = None
+        try:
+            if self.udp_sock:
+                self.udp_sock.close()
+        except Exception:
+            pass
+        self.udp_sock = None
 
-        # Esperar hilo (rápido gracias al timeout del socket)
+        # Esperar hilos (rápido gracias al timeout de los sockets)
         try:
             if self.reader_th and self.reader_th.is_alive():
                 self.reader_th.join(timeout=0.5)
+        except Exception:
+            pass
+        try:
+            if self.udp_reader_th and self.udp_reader_th.is_alive():
+                self.udp_reader_th.join(timeout=0.5)
         except Exception:
             pass
         try:
@@ -280,21 +389,35 @@ class EventPlotter(ttk.Frame):
             pass
         self.running = False
         self.flag_recording = False
+        self._print_coverage()  # resumen de cobertura TCP vs UDP (Fase 0)
+        # Fase 2: reconcilia TCP+UDP por seq y redibuja en el hilo UI (matplotlib/Tk
+        # no son thread-safe; stop() puede venir del hilo procesador).
+        try:
+            self.after(0, self._reconcile_merge)
+        except Exception:
+            pass
         self.btn_start.configure(state=ttk.NORMAL)
         self.btn_stop.configure(state=ttk.DISABLED)
+        self.cmb_transport.configure(state="readonly")
+        self.chk_keep.configure(state=ttk.NORMAL)
         self._cancel_update()
         self._set_status("Estado: detenido")
         self.on_end_experiment(self.thread_motor)
         self.thread_motor = None
 
     def clear_plot(self):
-        """Limpia datos y resetea el gráfico."""
+        """Limpia datos y resetea el gráfico (wipe total: incluye líneas cargadas)."""
         self.storage_dict.clear()
         self.total_data.clear()
+        self.merged_by_seq.clear()
         self.x_by_m.clear()
         self.y_by_m.clear()
         self.lines_by_m.clear()
         self.loaded_lines.clear()
+        self.key_meta.clear()
+        self.plot_run_offset = 0
+        self.run_index = 0
+        self._run_td_start = 0
         with self.q_points.mutex:
             self.q_points.queue.clear()
 
@@ -304,6 +427,26 @@ class EventPlotter(ttk.Frame):
         self.ax.set_ylabel("Current (A)")
         self.ax.legend([], [])
         self.canvas.draw_idle()
+
+    def _reset_live_plot(self):
+        """Limpia SOLO los datos de experimento en vivo (deja las líneas cargadas de
+        CSV en self.loaded_lines). Lo usa start() cuando 'Keep runs' está apagado para
+        empezar una corrida en limpio sin borrar las trazas de referencia."""
+        for ln in self.lines_by_m.values():
+            try:
+                ln.remove()
+            except Exception:
+                pass
+        self.lines_by_m.clear()
+        self.x_by_m.clear()
+        self.y_by_m.clear()
+        self.key_meta.clear()
+        self.total_data.clear()
+        self.merged_by_seq.clear()
+        with self.q_points.mutex:
+            self.q_points.queue.clear()
+        self.plot_run_offset = 0
+        self.run_index = 0
 
     def save_data(self):
         """
@@ -324,10 +467,11 @@ class EventPlotter(ttk.Frame):
         filename = f"IV_data_{time.strftime('%Y%m%d_%H%M')}{suffix}.csv"
         try:
             with open(f"{path}/{filename}", "w") as f:
-                f.write(f"sample,{self.x_key}, {self.y_key}, cycle\n")
+                f.write(f"sample,{self.x_key}, {self.y_key}, cycle, run\n")
                 for index, event in enumerate(self.total_data):
                     f.write(
-                        f"{index}, {event.get(self.x_key)}, {event.get(self.y_key)}, {event.get('cycle')}\n"
+                        f"{index}, {event.get(self.x_key)}, {event.get(self.y_key)},"
+                        f" {event.get('cycle')}, {event.get('run', 1)}\n"
                     )
             self._set_status(f"Data saved to file: {filename}")
         except Exception as e:
@@ -355,6 +499,8 @@ class EventPlotter(ttk.Frame):
         if not path:
             self._set_status("No file selected.")
             return
+        # Agrupa por (run, cycle): un CSV multi-corrida recarga como trazas distintas.
+        # La columna 'run' es opcional (trailing); si falta se asume run=0 (compat).
         cycles_x = {}
         cycles_y = {}
         try:
@@ -368,10 +514,11 @@ class EventPlotter(ttk.Frame):
                         x = float(row[1])
                         y = float(row[2])
                         cycle = int(float(row[3]))
+                        run = int(float(row[4])) if len(row) >= 5 else 0
                     except (ValueError, TypeError):
                         continue
-                    cycles_x.setdefault(cycle, []).append(x)
-                    cycles_y.setdefault(cycle, []).append(y)
+                    cycles_x.setdefault((run, cycle), []).append(x)
+                    cycles_y.setdefault((run, cycle), []).append(y)
         except Exception as e:
             self._set_status(f"Error loading data: {e}")
             print(f"Error loading data: {e}")
@@ -380,23 +527,23 @@ class EventPlotter(ttk.Frame):
             self._set_status("No data parsed from file.")
             return
         label_base = os.path.splitext(os.path.basename(path))[0]
-        for cycle in sorted(cycles_x.keys()):
+        for (run, cycle) in sorted(cycles_x.keys()):
             (line,) = self.ax.plot(
-                cycles_x[cycle],
-                cycles_y[cycle],
+                cycles_x[(run, cycle)],
+                cycles_y[(run, cycle)],
                 linestyle="--",
                 linewidth=1.5,
                 alpha=0.7,
                 marker="x",
                 markersize=3,
-                label=f"{label_base}-c{cycle}",
+                label=f"{label_base}-r{run}c{cycle}",
             )
             self.loaded_lines.append(line)
         self.ax.relim()
         self.ax.autoscale_view()
         self._update_legends()
         self._set_status(
-            f"Loaded {len(cycles_x)} cycle(s) from {os.path.basename(path)}"
+            f"Loaded {len(cycles_x)} trace(s) from {os.path.basename(path)}"
         )
 
     def update_val_experiment(
@@ -442,7 +589,7 @@ class EventPlotter(ttk.Frame):
         self._update_legends()
 
     # ---------------------------
-    # Hilo lector UDP
+    # Hilo lector TCP (control + datos) y tap UDP paralelo
     # ---------------------------
     def _tcp_reader(self):
         print(f"starting tcp on port {self.tcp_port} and address {self.ip_sender} …")
@@ -475,76 +622,346 @@ class EventPlotter(ttk.Frame):
                     # si la cola se llena, descarta (mejor que bloquear TCP)
                     pass
         self.flag_recording = False
-        self.sock.close() if self.sock else None
-        print("TCP reader stopped.")
+        # IMPORTANTE: el cierre de TCP NO termina la corrida. Antes aquí se hacía
+        # stop_event.set(), lo que mataba el tap UDP justo cuando se necesita para
+        # recuperar paquetes/terminal perdidos en TCP. Ahora solo muere el lector
+        # TCP; la corrida la cierra un terminal (cualquier transporte), Stop o el
+        # watchdog de inactividad del procesador. El socket lo cierra stop().
+        print("TCP reader detenido (control TCP cerrado; el tap UDP sigue vivo).")
         self.reader_th = None
-        self.stop_event.set()
 
-    def _tcp_processor(self):
-        parser = EmstatStreamParser(experiment=self.method)
+    def _create_udp_tap(self):
+        """Crea el socket UDP del tap (broadcast 5005, paralelo al control TCP).
+
+        SO_REUSEADDR + (SO_REUSEPORT donde exista) para convivir con el UdpClient de
+        temperatura en el mismo puerto; SO_BROADCAST para recibir los broadcasts del
+        Wemos; RCVBUF grande para no perder paquetes en ráfagas. Devuelve None y
+        degrada a TCP-only si el bind falla (p.ej. dev/Windows sin red)."""
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            if hasattr(socket, "SO_REUSEPORT"):
+                try:
+                    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+                except OSError:
+                    pass
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            try:
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1 << 20)
+            except OSError:
+                pass
+            s.bind(("", self.udp_port))
+            s.settimeout(0.2)
+            print(f"UDP tap escuchando en :{self.udp_port}")
+            return s
+        except OSError as e:
+            print(f"UDP tap no disponible ({e}); sigo en TCP-only")
+            return None
+
+    def _udp_reader(self):
+        """Lee el broadcast UDP y encola las líneas EMSTAT: (descarta temperatura/beacons).
+        1 datagrama = 1 mensaje; tolera prefijos basura buscando 'EMSTAT:' por substring."""
+        sock = self.udp_sock
+        if sock is None:
+            return
         while not self.stop_event.is_set():
             try:
-                line = self.q_tcp_lines.get(timeout=0.1)
-            except Exception:
+                data, _addr = sock.recvfrom(2048)
+            except socket.timeout:
                 continue
-            if not line.startswith("EMSTAT:"):
-                continue
-            raw_json = line[len("EMSTAT:") :]
+            except OSError:
+                break
+            text = data.decode("utf-8", errors="replace")
+            idx = text.find("EMSTAT:")
+            if idx < 0:
+                continue  # temperatura (UDP:...) / beacon (CD_DISCOVERY:...) / ruido
             try:
-                msg = json.loads(raw_json)
+                self.q_udp_lines.put_nowait(text[idx:].strip())
             except Exception:
-                if "e!4" in raw_json.lower():
-                    print(f"Error in the methodscript: {raw_json.strip()}")
-                else:
-                    print(f"JSON decode error: {raw_json}")
+                pass
+        print("UDP reader detenido.")
+        self.udp_reader_th = None
+
+    def _processor(self):
+        """Consumidor unificado: drena ambas colas (TCP y UDP), cada una con su propio
+        parser (stateful), aplica la lógica y mantiene la cobertura por transporte.
+        La corrida termina por: primer terminal de cualquier transporte (Fase 1),
+        Stop, o watchdog de inactividad total."""
+        parsers = {
+            "tcp": EmstatStreamParser(experiment=self.method),
+            "udp": EmstatStreamParser(experiment=self.method),
+        }
+        while not self.stop_event.is_set():
+            got = False
+            for _ in range(256):
+                try:
+                    line = self.q_tcp_lines.get_nowait()
+                except queue.Empty:
+                    break
+                got = True
+                self._handle_emstat_line(line, "tcp", parsers["tcp"])
+                if self.stop_event.is_set():
+                    break
+            for _ in range(256):
+                try:
+                    line = self.q_udp_lines.get_nowait()
+                except queue.Empty:
+                    break
+                got = True
+                self._handle_emstat_line(line, "udp", parsers["udp"])
+                if self.stop_event.is_set():
+                    break
+            if self.stop_event.is_set():
+                break
+            if not got:
+                # Watchdog: si arrancó la corrida y nadie manda nada por un rato,
+                # cerramos (red de seguridad ante un terminal perdido en ambos).
+                if (
+                    self._run_started
+                    and self._last_rx is not None
+                    and (time.time() - self._last_rx) > self.watchdog_timeout
+                    and not self._terminated
+                ):
+                    self._terminated = True
+                    print(f"WATCHDOG: sin paquetes por {self.watchdog_timeout}s; cierro corrida")
+                    self._set_status("Watchdog: inactividad total, corrida cerrada.")
+                    self.stop_event.set()
+                    break
+                time.sleep(0.01)
+        print("Processor detenido.")
+        self.processor_th = None
+        self.stop(send_abort=False)
+
+    def _handle_emstat_line(self, line, source, parser):
+        """Procesa una "línea" EMSTAT de un transporte. Una línea puede traer VARIOS
+        mensajes pegados: si el buffer RX del UART del Wemos se desborda en un mensaje
+        largo (p.ej. emstat_start, que lleva todos los params) se pierde el '\\n' y el
+        siguiente mensaje queda concatenado. Partimos por el marcador 'EMSTAT:' y
+        procesamos cada segmento por separado, así un segmento truncado no se traga al
+        mensaje válido que viene pegado."""
+        if "EMSTAT:" not in line:
+            return
+        # Guard temporal (hardcode): un error de MethodSCRIPT (e!####:) en CUALQUIER
+        # parte del payload se maneja como fatal, aunque venga en un mensaje truncado/
+        # pegado que no parsea como JSON. Independiente del framing; el split de abajo
+        # no siempre lo rescata si el segmento del error quedó cortado.
+        m = re.search(r'e!\d{3,}:[^"}]*', line)
+        if m:
+            self._handle_methodscript_error(m.group(0), source)
+            return
+        for seg in line.split("EMSTAT:"):
+            seg = seg.strip()
+            if not seg:
                 continue
-            if msg.get("type") == "emstat_data":
-                event = parser.feed_raw(msg["raw"])
-                if not event:
-                    continue
-                if event["type"] == "data":
+            try:
+                msg = json.loads(seg)
+            except Exception:
+                # Segmento truncado/corrupto. Si trae un error de MethodSCRIPT (e!####)
+                # lo surfaceamos igual; si no, lo registramos y seguimos con el resto.
+                if "e!" in seg.lower():
+                    self._handle_methodscript_error(seg, source)
+                else:
+                    print(f"JSON parcial/corrupto descartado [{source}]: {seg[:80]}")
+                continue
+            if isinstance(msg, dict):
+                self._handle_emstat_msg(msg, source, parser)
+
+    def _handle_emstat_msg(self, msg, source, parser):
+        """Aplica la lógica de un mensaje EMSTAT ya parseado. Cuenta cobertura por 'seq'
+        (ambos transportes) pero solo grafica/almacena el transporte seleccionado
+        (Fase 0). Cierra con el primer terminal/error de cualquier transporte (Fase 1)."""
+        self._last_rx = time.time()
+        mtype = msg.get("type")
+        seq = msg.get("seq")
+        selected = source == self._plot_source
+
+        if mtype == "emstat_start":
+            self._run_started = True
+            return
+
+        if mtype == "script_dbg":
+            # Eco de diagnóstico del script enviado al EmStat (DEBUG_ECHO_SCRIPT en el Pico).
+            print(f"  SCRIPT[{msg.get('line')}]: {msg.get('text')!r}")
+            return
+
+        if mtype == "emstat_data":
+            self._run_started = True
+            if seq is not None:
+                self.seq_seen[source].add(seq)
+            raw = msg.get("raw", "")
+            event = parser.feed_raw(raw)
+            if not event:
+                return
+            etype = event.get("type")
+            if etype == "error":
+                # Error de MethodSCRIPT (e!####) embebido en un emstat_data: el EmStat
+                # rechazó el script. Fatal -> mostrar y cerrar la corrida.
+                self._handle_methodscript_error(event.get("raw", raw), source)
+                return
+            if etype == "data":
+                # Fase 2: guarda el evento por seq (ambos transportes; el primero que
+                # llega gana). Al cerrar se reconstruye la unión ordenada -> rellena lo
+                # que el primario perdió con lo que trajo el otro.
+                if seq is not None:
+                    event["seq"] = seq
+                    event["source"] = source
+                    self.merged_by_seq.setdefault(seq, event)
+                if selected:  # el transporte elegido alimenta la gráfica en vivo
+                    # Clave de línea desplazada por corrida (retención): cycle crudo se
+                    # conserva en el evento; run etiqueta la corrida para leyenda/CSV.
+                    cyc = event.get("cycle", 0)
+                    m = self.plot_run_offset + cyc
+                    event["run"] = self.run_index
+                    self.key_meta.setdefault(m, (self.run_index, cyc))
                     self.total_data.append(event)
                     try:
                         self.q_points.put_nowait(
                             (
                                 event.get(self.x_key, 0.0),
                                 event.get(self.y_key, 0.0),
-                                event.get("cycle", 0),
+                                m,
                             )
                         )
                     except Exception:
                         pass
-                if "method" in event["type"]:
-                    if event["type"] == "method":
-                        self._set_status(f"Method: {event['type']} {event['method_id']}")
-                        print("Method:", event["method_id"])
-                    elif event["type"] == "method_end":
-                        self._set_status(f"Method: {event['type']}")
+            elif "method" in etype and selected:
+                if etype == "method":
+                    name = event.get("method_name", "")
+                    self._set_status(f"Method: {name} (id {event['method_id']})")
+                    print("Method:", event["method_id"], name)
+                elif etype == "method_end":
+                    self._set_status(f"Method: {etype}")
+            return
 
-                    else:
-                        print("Event method unknow: ", event)
-            elif msg.get("type") == "emstat_end":
-                print("END OF EXPERIMENT")
-                self._set_status("End of experiment.")
-                self.stop_event.set()
-                break
-            elif msg.get("type") in (
-                "emstat_error",
-                "emstat_aborted",
-                "emstat_maxtime",
-                "emstat_timeout",
-            ):
-                # Cierres terminales del firmware v1.6: el experimento ya termino
-                # en el Pico (canal MCP liberado, celda apagada). Mostramos el
-                # motivo y cerramos la corrida sin reenviar ABORT.
-                status = self._format_terminal_status(msg)
-                print(f"TERMINAL: {status}")
-                self._set_status(status)
-                self.stop_event.set()
-                break
-        print("TCP processor stopped.")
-        self.processor_th = None
-        self.stop(send_abort=False)
+        if mtype in (
+            "emstat_end",
+            "emstat_error",
+            "emstat_aborted",
+            "emstat_maxtime",
+            "emstat_timeout",
+        ):
+            # Fase 1: el primer terminal de CUALQUIER transporte cierra limpio
+            # (send_abort=False; el experimento ya terminó en el Pico). Gate
+            # anti-rezago: solo se honra tras ver start/data de la corrida actual,
+            # para que un broadcast viejo no corte una corrida nueva.
+            if not self._run_started or self._terminated:
+                return
+            self._terminated = True
+            if mtype == "emstat_end":
+                status = f"End of experiment (via {source.upper()})."
+            else:
+                status = f"{self._format_terminal_status(msg)} (via {source.upper()})"
+            print(f"TERMINAL [{source}]: {status}")
+            self._set_status(status)
+            self.stop_event.set()
+
+    def _handle_methodscript_error(self, raw, source):
+        """Surface + cierre ante un error de MethodSCRIPT (e!####) del EmStat. Es fatal:
+        el script fue rechazado y no vendrán datos. NO se manda ABORT (ante un error de
+        parseo la celda no llegó a encenderse). Idempotente: cierra una sola vez.
+        Decodifica el código (Appendix A) y la ubicación para un mensaje legible."""
+        info = decode_methodscript_error(raw)
+        if info.get("code"):
+            desc = info.get("description") or "código desconocido"
+            loc = ""
+            if info.get("line") is not None:
+                loc = f" @ L{info['line']}:C{info.get('col', '?')}"
+            detail = f"{info['code']} ({desc}){loc}"
+        else:
+            detail = str(raw).strip()
+        print(f"METHODSCRIPT ERROR [{source}]: {detail}")
+        if self._terminated:
+            return
+        self._terminated = True
+        self._set_status(f"MethodSCRIPT error: {detail} (via {source.upper()})")
+        self.stop_event.set()
+
+    def _print_coverage(self):
+        """Resumen en consola de cobertura TCP vs UDP por 'seq' de paquetes data (Fase 0).
+        El 'solo-UDP' es la evidencia de pérdida en TCP; el 'solo-TCP' mide si UDP también
+        pierde; 'perdidos por AMBOS' = huecos en la unión sobre [min,max] (el seq de los
+        emstat_data es contiguo en corrida), que es lo que el merge TCP+UDP NO podría
+        recuperar -> si es 0, la unión es el dataset completo."""
+        if self._coverage_printed:
+            return
+        self._coverage_printed = True
+        tcp = self.seq_seen["tcp"]
+        udp = self.seq_seen["udp"]
+        only_udp = sorted(udp - tcp)
+        only_tcp = sorted(tcp - udp)
+        union = tcp | udp
+        cap = 60
+
+        def _fmt(xs):
+            return f"{xs[:cap]}{' …(+%d)' % (len(xs) - cap) if len(xs) > cap else ''}"
+
+        lost_both = []
+        if union:
+            lo, hi = min(union), max(union)
+            lost_both = [s for s in range(lo, hi + 1) if s not in union]
+
+        print("=" * 56)
+        print(f"COBERTURA EMSTAT '{self.method}' (paquetes data por seq)")
+        print(f"  TCP={len(tcp)}  UDP={len(udp)}  union={len(union)}")
+        print(f"  solo-UDP (perdidos en TCP): {len(only_udp)} -> {_fmt(only_udp)}")
+        print(f"  solo-TCP (perdidos en UDP): {len(only_tcp)} -> {_fmt(only_tcp)}")
+        print(f"  perdidos por AMBOS (huecos en la unión): {len(lost_both)} -> {_fmt(lost_both)}")
+        if union:
+            print(
+                f"  pérdida TCP={100 * len(only_udp) / len(union):.1f}%  "
+                f"pérdida UDP={100 * len(only_tcp) / len(union):.1f}%"
+            )
+            if not lost_both:
+                print("  => MERGE TCP+UDP = dataset COMPLETO (unión sin huecos)")
+            else:
+                print(f"  => merge dejaría {len(lost_both)} hueco(s) reales (perdidos por ambos)")
+        print("=" * 56)
+
+    def _reconcile_merge(self):
+        """Fase 2 (al cerrar): fusiona TCP+UDP por 'seq'. El transporte primario ya
+        graficó en vivo; aquí se reconstruye la UNIÓN ordenada por seq -> rellena los
+        seq que el primario perdió con los que trajo el otro transporte, reordena, redibuja
+        el dataset completo y lo deja en total_data para Save. Corre en el hilo UI."""
+        if not self.merged_by_seq:
+            return
+        primary = self.seq_seen.get(self._plot_source, set())
+        ordered_seq = sorted(self.merged_by_seq)
+        filled = sum(1 for s in ordered_seq if s not in primary)
+        ordered = [self.merged_by_seq[s] for s in ordered_seq]
+        for ev in ordered:
+            ev["run"] = self.run_index
+
+        # Reemplaza SOLO la porción de esta corrida en total_data (para Save) — con
+        # retención ON conserva las corridas anteriores ya almacenadas.
+        self.total_data[self._run_td_start:] = ordered
+
+        # Limpia/reconstruye SOLO las líneas de esta corrida (claves >= offset); las
+        # corridas anteriores (claves < offset) quedan intactas en el gráfico.
+        for m in [k for k in list(self.lines_by_m) if k >= self.plot_run_offset]:
+            try:
+                self.lines_by_m[m].remove()
+            except Exception:
+                pass
+            self.lines_by_m.pop(m, None)
+            self.x_by_m.pop(m, None)
+            self.y_by_m.pop(m, None)
+            self.key_meta.pop(m, None)
+
+        for ev in ordered:
+            cyc = ev.get("cycle", 0)
+            m = self.plot_run_offset + cyc
+            self.key_meta.setdefault(m, (self.run_index, cyc))
+            self._get_or_create_line(m)  # crea deque + Line2D para esta corrida/ciclo
+            self.x_by_m[m].append(ev.get(self.x_key, 0.0))
+            self.y_by_m[m].append(ev.get(self.y_key, 0.0))
+        for m, line in self.lines_by_m.items():
+            line.set_data(self.x_by_m[m], self.y_by_m[m])
+        self.ax.relim()
+        self.ax.autoscale_view()
+        self._update_legends()
+        self.canvas.draw_idle()
+        print(f"MERGE: dataset={len(ordered)} puntos; recuperados del otro transporte: {filled}")
+        self._set_status(f"Merge TCP+UDP: {len(ordered)} pts (+{filled} recuperados)")
 
     @staticmethod
     def _format_terminal_status(msg):
@@ -623,7 +1040,19 @@ class EventPlotter(ttk.Frame):
                 labels = labels[: len(handles)]
         else:
             handles = [line for line in self.lines_by_m.values()]
-            labels = [f"{self.prefix_legend}{m}" for m in self.lines_by_m.keys()]
+            # Etiqueta adaptativa por corrida: R{run} si la corrida aporta un solo ciclo
+            # (SWV/EIS), R{run}c{cycle} si aporta varios (CV multi-scan).
+            cycles_per_run = {}
+            for m in self.lines_by_m:
+                run, cyc = self.key_meta.get(m, (1, m))
+                cycles_per_run.setdefault(run, set()).add(cyc)
+            labels = []
+            for m in self.lines_by_m:
+                run, cyc = self.key_meta.get(m, (1, m))
+                if len(cycles_per_run.get(run, {cyc})) > 1:
+                    labels.append(f"R{run}c{cyc}")
+                else:
+                    labels.append(f"R{run}")
         # Agrega líneas cargadas desde CSV (usa su propio label, omite ocultas)
         for line in self.loaded_lines:
             if not line.get_visible():

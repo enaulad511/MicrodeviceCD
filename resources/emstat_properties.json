@@ -1,0 +1,33 @@
+{
+  "device": "EmStat Pico",
+  "source": "MethodSCRIPT manual",
+  "modes": [
+    {
+      "mode_name": "Low speed mode properties",
+      "table_reference": "Table 20",
+      "properties": [
+        { "parameter": "Bandwidth", "min_value": "0.016 Hz", "max_value": "100 Hz" },
+        { "parameter": "Potential range", "min_value": "-1.25 V", "max_value": "2.0 V" },
+        { "parameter": "Dynamic potential window", "min_value": "2.2 V", "max_value": "2.2 V" }
+      ]
+    },
+    {
+      "mode_name": "High speed mode properties",
+      "table_reference": "Table 21",
+      "properties": [
+        { "parameter": "Bandwidth", "min_value": "0.016 Hz", "max_value": "200 kHz" },
+        { "parameter": "Potential range", "min_value": "-1.7 V", "max_value": "2.0 V" },
+        { "parameter": "Dynamic potential window", "min_value": "1.214 V", "max_value": "1.214 V" }
+      ]
+    },
+    {
+      "mode_name": "Max range mode properties",
+      "table_reference": "Table 22",
+      "properties": [
+        { "parameter": "Bandwidth", "min_value": "0.016 Hz", "max_value": "100 Hz" },
+        { "parameter": "Potential range", "min_value": "-1.7 V", "max_value": "2.0 V" },
+        { "parameter": "Dynamic potential window", "min_value": "2.6 V", "max_value": "2.6 V" }
+      ]
+    }
+  ]
+}

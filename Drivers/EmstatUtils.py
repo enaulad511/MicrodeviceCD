@@ -1,3 +1,7 @@
+import json
+import os
+import re
+
 # ------function utilities------------
 def construct_header_experiment(
     m_bandwidth,
@@ -13,9 +17,8 @@ def construct_header_experiment(
     if i_forward:
         script += "var i_forward\n"
     if i_reverse:
-        script += "var i_forward\n"
+        script += "var i_reverse\n"
     script += (
-        "var i_reverse\n"
         "set_pgstat_chan 1\n"
         "set_pgstat_mode 0\n"
         "set_pgstat_chan 0\n"
@@ -95,7 +98,9 @@ def construc_individual_script_sqwv(
     con_flag = False
     dep_flag = False
     sc_deposition = ""
-    if t_dep != "":
+    # Cada bloque requiere TIEMPO y POTENCIAL: con el tiempo pero sin potencial se
+    # generaba 'set_e ' / 'meas_loop_ca e i  200m t' (potencial vacío) -> e!4001/e!4008.
+    if t_dep != "" and E_dep != "":
         e_start = E_dep
         con_flag = True
         sc_deposition = (
@@ -106,7 +111,7 @@ def construc_individual_script_sqwv(
             "  pck_end\n"
             "endloop\n"
         )
-    if t_con != "":
+    if t_con != "" and E_con != "":
         e_start = E_con
         dep_flag = True
         sc_condition = (
@@ -289,6 +294,29 @@ class EmstatStreamParser:
         "G": 1e9,
         "T": 1e12,
     }
+    # Tabla 5 del manual MethodSCRIPT: ID de técnica de medición (marcador M<hex>).
+    # 0x06 y 0x0C no están definidos en la tabla.
+    TECHNIQUE_IDS = {
+        0x00: "LSV",       # Linear Sweep Voltammetry
+        0x01: "DPV",       # Differential Pulse Voltammetry
+        0x02: "SWV",       # Square Wave Voltammetry
+        0x03: "NPV",       # Normal Pulse Voltammetry
+        0x04: "ACV",       # AC Voltammetry
+        0x05: "CV",        # Cyclic Voltammetry
+        0x07: "CA",        # Chronoamperometry
+        0x08: "PAD",       # Pulsed Amperometric Detection
+        0x09: "FCA",       # Fast Chronoamperometry
+        0x0A: "CP",        # Chronopotentiometry
+        0x0B: "OCP",       # Open Circuit Potentiometry
+        0x0D: "EIS",       # Electrochemical Impedance Spectroscopy
+        0x0E: "GEIS",      # Galvanostatic EIS
+        0x0F: "LSP",       # Linear Sweep Potentiometry
+        0x10: "FCV",       # Fast Cyclic Voltammetry
+        0x11: "CA_MUX",    # Chronoamperometry con mux alternante
+        0x12: "CP_MUX",    # Chronopotentiometry con mux alternante
+        0x13: "OCP_MUX",   # Open Circuit Potentiometry con mux alternante
+        0x14: "DUAL_EIS",  # Dual EIS
+    }
 
     def __init__(self, experiment: str):
         if experiment not in self.FIELD_MAP:
@@ -297,7 +325,7 @@ class EmstatStreamParser:
         self.experiment = experiment
 
         # Contexto dinámico
-        self.context = {"cycle": 0, "direction": +1, "point": 0, "method_id": None}
+        self.context = {"cycle": 0, "direction": +1, "method_id": None}
 
         self.finished = False
 
@@ -327,9 +355,15 @@ class EmstatStreamParser:
             return {"type": "cycle", "cycle": self.context["cycle"]}
 
         if kind == "method":
-            # El índice del marcador (p.ej. M000D) es HEX, no decimal.
-            self.context["method_id"] = self._safe_hex(raw[1:])
-            return {"type": "method", "method_id": self.context["method_id"]}
+            # El marcador M<hex> trae el ID de técnica de medición (Tabla 5 del manual
+            # MethodSCRIPT), p.ej. M000D = EIS. Es HEX, no decimal.
+            mid = self._safe_hex(raw[1:])
+            self.context["method_id"] = mid
+            return {
+                "type": "method",
+                "method_id": mid,
+                "method_name": self.TECHNIQUE_IDS.get(mid, "unknown"),
+            }
 
         if kind == "start_method":
             return {"type": "start_method"}
@@ -338,8 +372,11 @@ class EmstatStreamParser:
             self.finished = True
             return {"type": "method_end"}
         
-        if kind =="syntax_error":
-            return {"type": "error", "raw": raw}
+        if kind == "syntax_error":
+            # e!<hex>: Line L, Col C -> agrega code/description/line/col (Appendix A).
+            info = decode_methodscript_error(raw)
+            info["type"] = "error"
+            return info
 
         # ruido o mensajes no relevantes
         return {"type": "unknown", "raw": raw}
@@ -380,15 +417,14 @@ class EmstatStreamParser:
         if parsed is None:
             return None
         decoded = self._decode(parsed)
-        self.context["point"] = int(parsed["index"][0])
 
         decoded.update(
             {
                 "type": "data",
                 "cycle": self.context["cycle"],
                 "direction": self.context["direction"],
-                "point": parsed["index"],
-                "state": parsed["state"],
+                "status": parsed["status"],            # metadata id=1 (estado del punto)
+                "current_range": parsed["current_range"],  # metadata id=2 (diagnóstico)
             }
         )
 
@@ -400,20 +436,35 @@ class EmstatStreamParser:
         return decoded
 
     def _parse_packet(self, line: str):
+        """Parsea un paquete de medición 'P...'. Cada sub-paquete (separado por ';') es
+        '<tipo><valor><unidad>[,<meta>...]', p.ej. 'ba8000800u,10,20B':
+          - tipo: 2 chars (da/ba/...); valor: hex con offset 0x8000000; unidad: 1 char.
+          - metadata (opcional): cada token es <id><valor_hex>. id=1 -> status del punto;
+            id=2 -> current range (diagnóstico, NO interviene en el cálculo del valor).
+        Ver manual MethodSCRIPT, "measurement data package". (Antes este método trataba
+        la metadata como un 'index'/'state' inexistente; corregido.)
+        """
         try:
             bodies = line[1:].split(";")
-            indexes = []
-            states = []
             fields = {}
+            statuses = []
+            ranges = []
             for body in bodies:
                 parts = body.split(",")
-                key_base = parts[0][:2]
-                unit = parts[0][-1]
-                raw_val = parts[0][2:-1]
-                if len(parts) > 1:
-                    indexes.append(int(parts[-1][:-1]))
-                    states.append(parts[-2])
+                head = parts[0]
+                key_base = head[:2]
+                unit = head[-1]
+                raw_val = head[2:-1]
                 value = int(raw_val, 16) - 0x8000000
+                # Metadata: primer char = id (hex), resto = valor (hex).
+                for meta in parts[1:]:
+                    if not meta:
+                        continue
+                    mid, mval = meta[0], meta[1:]
+                    if mid == "1":
+                        statuses.append(self._safe_hex(mval))
+                    elif mid == "2":
+                        ranges.append(self._safe_hex(mval))
                 key = key_base
                 counter = 1
                 while key in fields:
@@ -421,7 +472,7 @@ class EmstatStreamParser:
                     counter += 1
                 fields[key] = {"value": value, "unit": unit, "value_hex": raw_val}
 
-            return {"fields": fields, "state": states, "index": indexes}
+            return {"fields": fields, "status": statuses, "current_range": ranges}
 
         except Exception:
             return None
@@ -441,6 +492,60 @@ class EmstatStreamParser:
         if self.experiment == "eis" and "Z_imag" in out:
             out["Z_imag"] = -out["Z_imag"]
         return out
+
+
+# ----------------------------------------------------------------------
+# Códigos de error de MethodSCRIPT (Appendix A del manual)
+# ----------------------------------------------------------------------
+_ERROR_CODES = None
+
+
+def _load_error_codes():
+    """Carga (y cachea) resources/errors_emstat.json -> {code_int: descripción}.
+    Ruta relativa a este archivo para no depender del cwd. {} si falla."""
+    global _ERROR_CODES
+    if _ERROR_CODES is not None:
+        return _ERROR_CODES
+    path = os.path.join(os.path.dirname(__file__), "..", "resources", "errors_emstat.json")
+    table = {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        for item in data.get("error_codes", []):
+            try:
+                table[int(item["code"], 16)] = item["description"]
+            except (KeyError, ValueError, TypeError):
+                continue
+    except Exception:
+        pass
+    _ERROR_CODES = table
+    return table
+
+
+def decode_methodscript_error(raw):
+    """Decodifica un error de MethodSCRIPT 'e!<hex>: Line L, Col C' a un dict legible:
+    code ('0x4001'), code_int, description (Appendix A), line, col. Tolera la ausencia
+    de la ubicación o del prefijo 'e!'. Campos no hallados quedan en None."""
+    text = str(raw).strip()
+    out = {
+        "raw": text,
+        "code": None,
+        "code_int": None,
+        "description": None,
+        "line": None,
+        "col": None,
+    }
+    m = re.search(r"e!\s*([0-9A-Fa-f]+)", text)
+    if m:
+        ci = int(m.group(1), 16)
+        out["code_int"] = ci
+        out["code"] = "0x%04X" % ci
+        out["description"] = _load_error_codes().get(ci)
+    loc = re.search(r"[Ll]ine\s+(\d+),\s*[Cc]ol\s+(\d+)", text)
+    if loc:
+        out["line"] = int(loc.group(1))
+        out["col"] = int(loc.group(2))
+    return out
 
 
 class LineBufferedSocketReader:
