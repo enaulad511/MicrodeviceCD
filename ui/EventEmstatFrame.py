@@ -20,7 +20,7 @@ from Drivers.EmstatUtils import (
 
 matplotlib.use("TkAgg")  # backend para Tk
 import tkinter as tk
-from tkinter.filedialog import askdirectory, askopenfilename
+from tkinter.filedialog import askopenfilename, asksaveasfilename
 
 import matplotlib.pyplot as plt
 import ttkbootstrap as ttk
@@ -459,21 +459,31 @@ class EventPlotter(ttk.Frame):
             self._set_status("No hay datos para guardar.")
             return
         print("Saving data …")
-        path = askdirectory(title="Select directory to save data")
-        if not path:
-            self._set_status("No directory selected.")
-            return
+        os.makedirs("files", exist_ok=True)
         suffix = self._build_filename_suffix()
-        filename = f"IV_data_{time.strftime('%Y%m%d_%H%M')}{suffix}.csv"
+        initialfile = f"{self.method}_data_{time.strftime('%Y%m%d_%H%M%S')}{suffix}.csv"
+        filename = asksaveasfilename(
+            parent=self,
+            title="Save data",
+            initialdir="files",
+            initialfile=initialfile,
+            defaultextension=".csv",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+        )
+        if not filename:
+            self._set_status("Save cancelled.")
+            return
+        if not filename.lower().endswith(".csv"):
+            filename += ".csv"
         try:
-            with open(f"{path}/{filename}", "w") as f:
+            with open(filename, "w") as f:
                 f.write(f"sample,{self.x_key}, {self.y_key}, cycle, run\n")
                 for index, event in enumerate(self.total_data):
                     f.write(
                         f"{index}, {event.get(self.x_key)}, {event.get(self.y_key)},"
                         f" {event.get('cycle')}, {event.get('run', 1)}\n"
                     )
-            self._set_status(f"Data saved to file: {filename}")
+            self._set_status(f"Data saved to file: {os.path.basename(filename)}")
         except Exception as e:
             self._set_status(f"Error saving data: {e}")
 
