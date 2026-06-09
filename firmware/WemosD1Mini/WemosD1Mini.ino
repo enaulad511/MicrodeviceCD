@@ -216,34 +216,66 @@ void injectAbortToPico() {
   Serial.println("{\"cmd\":\"ABORT\"}");
 }
 
+// Debug por UDP broadcast: el host lo ve en su tap UDP (5005) como
+// EMSTAT:{"type":"wemos_dbg","msg":...} y lo imprime en consola. Útil para seguir
+// el ciclo de vida del cliente TCP sin acceso al serial del Wemos. Pon
+// DEBUG_TCP=false para silenciarlo en operación normal.
+const bool DEBUG_TCP = true;
+void dbgUdp(const char* msg) {
+  if (!DEBUG_TCP) return;
+  udp.beginPacket(broadcastIP, UDP_PORT);
+  udp.print(HDR_EMSTAT);
+  udp.print("{\"type\":\"wemos_dbg\",\"msg\":\"");
+  udp.print(msg);
+  udp.print("\"}");
+  udp.endPacket();
+}
+
 void acceptTcpIfNeeded() {
+  // PREEMPCIÓN: un cliente NUEVO en cola tiene prioridad. El host abre una conexión
+  // TCP fresca por experimento; al cerrar la anterior, el socket viejo queda en
+  // CLOSE_WAIT y en el ESP8266 connected() SIGUE devolviendo true (quirk del core).
+  // Si confiamos en connected() para liberar el slot, nunca llegamos a available()
+  // y el 2º experimento se cuelga hasta que el idle-timeout (4 min) recicla el
+  // zombie. hasClient() sí detecta la conexión nueva pendiente -> la adoptamos ya,
+  // soltando el cliente viejo (esté zombie o vivo).
+  if (tcpServer.hasClient()) {
+    if (tcpClient) {
+      // Dead-man por si el viejo seguía con experimento activo (no debería).
+      if (experimentActive) {
+        injectAbortToPico();
+        experimentActive = false;
+      }
+      tcpClient.stop();
+    }
+    tcpClient = tcpServer.available();
+    tcpClient.setNoDelay(true);
+    tcpClient.setTimeout(50);
+    lastTcpActivity = millis();
+    tcpWasConnected = true;
+    dbgUdp("tcp_new_client");
+    tcpClient.println("{\"hello\":\"CD_TCP_READY\"}");
+    return;
+  }
+
   if (tcpClient && tcpClient.connected()) {
     tcpWasConnected = true;
     return;
   }
-  // Aquí el cliente NO está conectado. Si lo estaba antes, es una caída (cierre
-  // del host, crash o pérdida de red). Dead-man switch: si había experimento en
-  // curso, aborta ANTES de stop() (que descartaría el buffer RX con un posible
-  // ABORT del host aún sin reenviar) para no dejar la celda energizada.
+  // Aquí el cliente NO está conectado y NO hay uno nuevo en cola. Si lo estaba
+  // antes, es una caída (cierre del host, crash o pérdida de red). Dead-man switch:
+  // si había experimento en curso, aborta ANTES de stop() (que descartaría el buffer
+  // RX con un posible ABORT del host aún sin reenviar) para no dejar la celda
+  // energizada.
   if (tcpWasConnected) {
     if (experimentActive) {
       injectAbortToPico();
       experimentActive = false;
     }
     tcpWasConnected = false;
+    dbgUdp("tcp_client_dropped");
   }
   if (tcpClient) tcpClient.stop();
-
-  WiFiClient newClient = tcpServer.available();
-  if (newClient) {
-    tcpClient = newClient;
-    tcpClient.setNoDelay(true);
-    tcpClient.setTimeout(50);
-    lastTcpActivity = millis();
-    tcpWasConnected = true;
-    // Mensaje de bienvenida
-    tcpClient.println("{\"hello\":\"CD_TCP_READY\"}");
-  }
 }
 
 // REGLA: toda línea que llegue por TCP es un payload JSON que se manda a UART con encabezado EMSTAT:
@@ -260,6 +292,7 @@ void handleTcpRx() {
     // Reenviar al Pico por UART con encabezado EMSTAT:
     Serial.print(HDR_EMSTAT);
     Serial.println(jsonLine);
+    if (jsonLine.indexOf("keepalive") < 0) dbgUdp("fwd_cmd_to_pico");
 
     // (Opcional) ACK al cliente
     tcpClient.println("{\"status\":\"FORWARDED\",\"to\":\"UART_EMSTAT\"}");
@@ -277,6 +310,7 @@ void handleTcpRx() {
     tcpClient.println("{\"status\":\"TIMEOUT\"}");
     tcpClient.stop();
     tcpWasConnected = false;
+    dbgUdp("tcp_idle_timeout");
   }
 }
 

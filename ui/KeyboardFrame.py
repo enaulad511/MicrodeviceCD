@@ -51,14 +51,23 @@ class NumericKeyboard(ttk.Frame):
 
         # Ocultar el teclado cuando el usuario scrollea: queda desfasado del
         # entry porque vive en coords del host, no del contenido scrolleado.
+        # Guardamos (widget, sequence, funcid) de cada bind para poder quitarlos en
+        # destroy(): el scroll_host SOBREVIVE al teclado (al cambiar de metodo
+        # CV/SWV/EIS se destruye el frame y su teclado, pero el ScrolledFrame es
+        # uno solo y persiste). Sin limpiar, cada scroll posterior dispara
+        # _hide_on_scroll sobre un teclado muerto -> TclError repetido en consola.
+        self._scroll_bindings = []
         if scroll_host is not None:
-            scroll_host.bind("<MouseWheel>", self._hide_on_scroll, add="+")
+            fid = scroll_host.bind("<MouseWheel>", self._hide_on_scroll, add="+")
+            self._scroll_bindings.append((scroll_host, "<MouseWheel>", fid))
             container = getattr(scroll_host, "container", None)
             if container is not None:
-                container.bind("<MouseWheel>", self._hide_on_scroll, add="+")
+                fid = container.bind("<MouseWheel>", self._hide_on_scroll, add="+")
+                self._scroll_bindings.append((container, "<MouseWheel>", fid))
             vscroll = getattr(scroll_host, "vscroll", None)
             if vscroll is not None:
-                vscroll.bind("<B1-Motion>", self._hide_on_scroll, add="+")
+                fid = vscroll.bind("<B1-Motion>", self._hide_on_scroll, add="+")
+                self._scroll_bindings.append((vscroll, "<B1-Motion>", fid))
 
     def attach(self, entries):
         """Bindea <Button-1> en cada entry para que muestre el teclado solo al hacer click/tap."""
@@ -126,11 +135,33 @@ class NumericKeyboard(ttk.Frame):
         return 0, self.host.winfo_height()
 
     def _hide_on_scroll(self, _event=None):
+        # Red de seguridad: si el teclado ya fue destruido pero quedo un bind
+        # huerfano sobre el scroll_host (que sobrevive), winfo_exists() devuelve 0
+        # sin lanzar; asi evitamos el TclError "bad window path name" de
+        # winfo_ismapped() sobre un widget muerto. destroy() ademas quita los binds.
+        if not self.winfo_exists():
+            return
         try:
             if self.winfo_ismapped():
                 self.place_forget()
-        except Exception as e:
-            print(e)
+        except Exception:
+            pass
+
+    def destroy(self):
+        """Quita los binds registrados sobre el scroll_host antes de destruirse.
+
+        El scroll_host (ScrolledFrame de ElectrochemicalFrame) es unico y persiste
+        entre cambios de metodo; los bind(..., add='+') de este teclado quedarian
+        huerfanos y dispararian _hide_on_scroll sobre un widget muerto en cada
+        scroll. unbind(seq, funcid) en Python 3.13 quita SOLO este callback (deja
+        intactos los binds de scroll del propio ScrolledFrame)."""
+        for widget, seq, fid in getattr(self, "_scroll_bindings", []):
+            try:
+                widget.unbind(seq, fid)
+            except Exception:
+                pass
+        self._scroll_bindings = []
+        super().destroy()
 
     def on_press(self, char):
         if not self.target_entry:

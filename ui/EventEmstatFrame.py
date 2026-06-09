@@ -827,6 +827,13 @@ class EventPlotter(ttk.Frame):
             print(f"  SCRIPT[{msg.get('line')}]: {msg.get('text')!r}")
             return
 
+        if isinstance(mtype, str) and mtype.endswith("_dbg"):
+            # Debug del firmware (p.ej. wemos_dbg: ciclo de vida del cliente TCP). Llega
+            # por el broadcast UDP; lo imprimimos para diagnosticar sin acceso al serial
+            # del Wemos/Pico. Apagar con DEBUG_TCP=false (Wemos) cuando ya no se necesite.
+            print(f"  DBG[{source}/{mtype}]: {msg.get('msg', msg)}")
+            return
+
         if mtype == "emstat_data":
             self._run_started = True
             if seq is not None:

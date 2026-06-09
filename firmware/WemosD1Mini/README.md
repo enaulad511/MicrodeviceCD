@@ -67,6 +67,32 @@ celda no quede energizada. Detalles:
 
 Contexto host del aborto: [docs/emstat_abort_y_canal.md](../../docs/emstat_abort_y_canal.md).
 
+## Ciclo de vida del cliente TCP (una conexión por experimento)
+
+El host **abre una conexión TCP nueva por cada experimento** y la cierra al terminar. El
+servidor del Wemos es de **un solo cliente** (`WiFiClient tcpClient`). El bug:
+`acceptTcpIfNeeded()` hacía `if (tcpClient.connected()) return;` y solo adoptaba al nuevo
+cliente vía `tcpServer.available()` cuando el viejo dejaba de estar conectado. Pero en el
+ESP8266, tras el cierre del host el socket queda en **CLOSE_WAIT y `connected()` SIGUE
+devolviendo `true`** (quirk del core). Resultado: el primer experimento funciona, pero del
+**segundo en adelante el host se cuelga** ("starting tcp …" sin respuesta) porque el Wemos
+nunca adopta la conexión nueva — hasta que el **idle-timeout de 4 min** recicla el zombie y
+recién entonces arranca solo. La temperatura (UDP) no se ve afectada, lo que despista.
+
+**Fix:** preemptar con `tcpServer.hasClient()` al inicio de `acceptTcpIfNeeded()`. Si hay una
+conexión nueva en cola, se suelta el cliente viejo (`stop()`, con dead-man si seguía activo)
+y se adopta la nueva de inmediato. No se confía en `connected()` para liberar el slot.
+
+## Debug por UDP (`dbgUdp` / `DEBUG_TCP`)
+
+Como `Serial` está cableado al Pico (no se puede `Serial.print` para depurar), el ciclo de
+vida del TCP se observa por **UDP broadcast**: `dbgUdp(msg)` emite
+`EMSTAT:{"type":"wemos_dbg","msg":...}`, que viaja por el mismo 5005 que la temperatura. El
+host lo imprime en consola (`DBG[udp/wemos_dbg]: …`) gracias a una rama en
+`EventEmstatFrame._handle_emstat_msg` que captura cualquier `*_dbg`. Eventos emitidos:
+`tcp_new_client`, `tcp_client_dropped`, `fwd_cmd_to_pico`, `tcp_idle_timeout`. Pon
+**`DEBUG_TCP = false`** en el `.ino` para silenciarlo en operación normal.
+
 ## Build & Upload
 
 Arduino IDE o `arduino-cli`. Board: `esp8266:esp8266:d1_mini`.
