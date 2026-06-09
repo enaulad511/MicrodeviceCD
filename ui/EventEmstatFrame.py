@@ -47,7 +47,7 @@ class EventPlotter(ttk.Frame):
         buffer_size=4096,
         max_points=10000,
         update_interval_ms=80,
-        title="CV",
+        title=None,
         x_label="E(V)",
         y_label="I(A)",
         x_key="E_V",
@@ -73,6 +73,13 @@ class EventPlotter(ttk.Frame):
         self.prefix_legend = "M-"
         self.legends_list = None
         self.config_legend = None
+        # Título por defecto según el método si el llamador no lo fija. cv y sqwv comparten
+        # ejes (E vs I) y antes ambos caían en el default "CV", así que el SWV mostraba "CV";
+        # eis pasa su propio título. Centralizar aquí evita que cada frame deba recordarlo.
+        if title is None:
+            title = {"cv": "CV", "sqwv": "SWV", "eis": "EIS (Nyquist)"}.get(
+                method, str(method).upper()
+            )
         self.title = title
         self.method = method
         self.x_label = x_label
@@ -423,9 +430,9 @@ class EventPlotter(ttk.Frame):
             self.q_points.queue.clear()
 
         self.ax.clear()
-        self.ax.set_title("V vs A (online)")
-        self.ax.set_xlabel("Potential (V)")
-        self.ax.set_ylabel("Current (A)")
+        self.ax.set_title(self.title)
+        self.ax.set_xlabel(self.x_label)
+        self.ax.set_ylabel(self.y_label)
         self.ax.legend([], [])
         self.canvas.draw_idle()
 
