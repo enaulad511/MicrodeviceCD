@@ -280,6 +280,7 @@ class EventPlotter(ttk.Frame):
         self.seq_seen = {"tcp": set(), "udp": set()}
         self.merged_by_seq = {}
         self._last_rx = None
+        self._run_start_ts = time.time()  # para el watchdog de "nunca arranco"
         self._run_started = False
         self._terminated = False
         self._coverage_printed = False
@@ -737,6 +738,22 @@ class EventPlotter(ttk.Frame):
                     self._set_status("Watchdog: inactividad total, corrida cerrada.")
                     self.stop_event.set()
                     break
+                # Watchdog de arranque: conecto el TCP, mando el payload, pero el Pico
+                # nunca respondio (ni emstat_start ni JSON_PARSE) -> el comando se perdio
+                # corrupto/entero en el UART_LINK. Sin esto la corrida se cuelga para
+                # siempre tras "starting tcp". Doblamos el timeout normal como margen.
+                if (
+                    not self._run_started
+                    and not self._terminated
+                    and (time.time() - self._run_start_ts) > (2 * self.watchdog_timeout)
+                ):
+                    self._terminated = True
+                    print("WATCHDOG: el experimento nunca arranco; cierro corrida")
+                    self._set_status(
+                        "Watchdog: el Pico no respondio (comando perdido?); reintenta."
+                    )
+                    self.stop_event.set()
+                    break
                 time.sleep(0.01)
         print("Processor detenido.")
         self.processor_th = None
@@ -784,6 +801,22 @@ class EventPlotter(ttk.Frame):
         mtype = msg.get("type")
         seq = msg.get("seq")
         selected = source == self._plot_source
+
+        if mtype is None:
+            # Mensaje EMSTAT sin 'type' reconocido. El Pico emite
+            # {"error":"JSON_PARSE", ...} cuando el comando ENTRANTE llego corrupto por
+            # el UART_LINK (p.ej. el JSON largo de SWV desbordo su RX). Antes esto se
+            # descartaba en silencio y la corrida quedaba colgada esperando datos que
+            # nunca llegarian (el watchdog solo dispara tras _run_started). Lo
+            # surfaceamos y cerramos: el experimento no va a arrancar, hay que reintentar.
+            err = msg.get("error")
+            if err and not self._terminated:
+                self._terminated = True
+                detail = f"Pico rechazo el comando ({err}); reintenta (via {source.upper()})."
+                print(f"PICO ERROR [{source}]: {msg}")
+                self._set_status(detail)
+                self.stop_event.set()
+            return
 
         if mtype == "emstat_start":
             self._run_started = True

@@ -109,7 +109,13 @@ print("LED configurado")
 UART_LINK_ID = 1
 UART_LINK_BAUD = 230400  # debe coincidir con Serial del Wemos
 # Nota: si GP8/GP9 no funcionan en tu build, cambia a tx=Pin(0), rx=Pin(1)
-uart_link = UART(UART_LINK_ID, baudrate=UART_LINK_BAUD, tx=Pin(8), rx=Pin(9), timeout=0)
+# rxbuf=2048: el comando SWV entrante es una linea JSON larga (~350 B). El RX por
+# defecto del puerto RP2 (256 B) se desborda cuando el Wemos la vuelca en rafaga
+# mientras el Pico esta en la lectura I2C de temperatura -> JSON corrupto ->
+# json.loads falla -> el experimento nunca arranca (CV cabia en 256 B, SWV no).
+uart_link = UART(
+    UART_LINK_ID, baudrate=UART_LINK_BAUD, tx=Pin(8), rx=Pin(9), timeout=0, rxbuf=2048
+)
 
 # UART1: EmStat Pico
 UART_EMSTAT_ID = 0

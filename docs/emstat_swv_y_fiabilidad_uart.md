@@ -56,6 +56,48 @@ def write_lines(self, lines):
 subir el pacing, bajar el baud de `uart_emstat` (230400→115200, ambos lados) o revisar
 cableado/tierra Pico↔EmStat.
 
+## 3-bis. El gemelo de entrada: el comando SWV desborda el RX del Pico
+
+Síntoma distinto al `e!####`: el SWV **a veces ni arranca**. La consola del host queda en
+
+```
+reseting states
+UDP tap escuchando en :5005
+starting tcp on port 5006 and address 192.168.137.223 …
+```
+
+y no avanza. CV arranca siempre y múltiples veces; SWV es intermitente.
+
+**Causa.** Es el mismo desbordamiento de ráfaga, pero en el sentido **host → Wemos → Pico**.
+El payload de SWV es una línea JSON larga (~350 B: ~16 parámetros) frente a los ~150 B de CV.
+El UART_LINK del Pico se creaba **sin `rxbuf`** → RX por defecto del puerto RP2 = **256 B**.
+Cuando el Wemos vuelca la línea de SWV en ráfaga a 230400 baud mientras el Pico está en la
+lectura I2C de temperatura (`maybe_send_temperature` es bloqueante) + `sleep_ms(2)` del
+`main_loop`, el RX de 256 B se desborda y se caen bytes → `json.loads` falla en
+`process_uart_rx` → el Pico manda `{"error":"JSON_PARSE", ...}` (sin `"type"`). CV cabe en
+256 B y nunca desborda; SWV no cabe → intermitente según coincida la ráfaga con la ventana
+ocupada del Pico.
+
+**Por qué se colgaba el host (no solo fallaba).** El host descartaba en silencio cualquier
+mensaje EMSTAT sin `"type"` reconocido, y su watchdog de inactividad solo dispara tras
+`_run_started`. Como el experimento nunca arrancó, `_run_started` quedaba en False → cuelgue
+indefinido tras "starting tcp".
+
+**Fixes (tres):**
+
+- **Pico (reflash):** `uart_link = UART(..., rxbuf=2048)`. Da margen para absorber la línea
+  larga aunque el Pico esté ocupado. Resuelve la causa.
+- **Host:** `_handle_emstat_msg` ahora **surfacea** un mensaje sin `type` que trae `error`
+  (`JSON_PARSE`): muestra el estado y cierra la corrida (no va a arrancar, hay que reintentar)
+  en vez de tragárselo.
+- **Host:** watchdog de **arranque** — si se conectó el TCP y se mandó el payload pero el Pico
+  no respondió nada en `2 × watchdog_timeout`, cierra la corrida con aviso (red de seguridad
+  si hasta el `JSON_PARSE` se pierde).
+
+**Si persistiera tras el `rxbuf`**: el Pico podría seguir perdiendo bytes si la lectura I2C
+del MLX90614 bloquea demasiado; opciones: leer temperatura con menos frecuencia durante un
+experimento, o no medir temperatura mientras `process_uart_rx` tenga datos a medio recibir.
+
 ## 4. Bugs de generación del script SWV (corregidos de paso)
 
 Encontrados al regenerar el script con los parámetros reales. En `construc_*` (presentes
@@ -100,9 +142,9 @@ estresa el enlace Pico→Wemos).
 | Archivo | Cambio | ¿Reflasheo? |
 |---|---|---|
 | `DiscPCB/EmstatDrivers.py` | pacing en `write_lines`; Fix A + Fix B en builders | **Sí (Pico)** |
-| `DiscPCB/emstat_wifi_v1.7.py` | `DEBUG_ECHO_SCRIPT` + eco en rama sqwv | **Sí (Pico)** |
+| `DiscPCB/emstat_wifi_v1.7.py` | `DEBUG_ECHO_SCRIPT` + eco en rama sqwv; `uart_link rxbuf=2048` (§3-bis) | **Sí (Pico)** |
 | `Drivers/EmstatUtils.py` | Fix A + Fix B (preview); `decode_methodscript_error` | No (host) |
-| `ui/EventEmstatFrame.py` | manejo de error legible, split de pegados, eco a consola | No (host) |
+| `ui/EventEmstatFrame.py` | error legible, split de pegados, eco; surfacear `JSON_PARSE` + watchdog de arranque (§3-bis) | No (host) |
 | `resources/errors_emstat.json` | tabla de códigos (Appendix A) | No (datos) |
 
 Espejos git-trackeados en [../firmware/DiscPCB/](../firmware/DiscPCB/).
@@ -111,6 +153,7 @@ Espejos git-trackeados en [../firmware/DiscPCB/](../firmware/DiscPCB/).
 
 - [x] Eco confirma que el script SWV se genera correcto (sin `var` duplicado, 4 variables).
 - [x] Con pacing (5 ms/línea), el SWV corre sin `e!####` y entrega paquetes `da;ba;ba;ba`.
+- [ ] Con `rxbuf=2048` (§3-bis), el SWV arranca de forma fiable (no se queda en "starting tcp").
 - [ ] (Opcional) Confirmar estabilidad en corridas largas / con acondicionamiento.
 
 ---
