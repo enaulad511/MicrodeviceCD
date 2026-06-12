@@ -187,22 +187,54 @@ def construct_eis_script(
     t_con1="",
     E_con2="",
     t_con2="",
+    scan_type=1,
+    bandwidth="",
+    E_begin="",
+    E_step="",
+    E_break="",
+    E_dir=1,
+    t_run=0,
+    t_interval=0,
 ):
-    """EIS (Electrochemical Impedance Spectroscopy) -- scan type Default + barrido
-    de frecuencia (frequency Scan). Genera el MethodSCRIPT completo.
+    """EIS (Electrochemical Impedance Spectroscopy). Genera el MethodSCRIPT completo
+    para los modos de la Fase 2 (ver docs/eis_impedancia.md, seccion 7).
 
-    Front-end verificado contra el ejemplo oficial PalmSens (set_pgstat_chan 0,
-    set_pgstat_mode 3 high-speed, set_autoranging ba 10u 1m) + acondicionamiento
-    opcional. No reutiliza construct_header_experiment.
-    Orden de meas_loop_eis: f z_r z_i E_ac f_max f_min n_freq E_dc.
+    Front-end comun (los 5 modos): el de Fase 1 verificado contra el ejemplo oficial
+    PalmSens (chan 0, mode 3 high-speed, autorango ba 10u-1m) + dos adopciones del
+    export PSTrace: set_e inicial INCONDICIONAL antes de cell_on y set_max_bandwidth
+    (10x la frecuencia maxima, calculado por el caller). No reutiliza
+    construct_header_experiment.
 
-    Acondicionamiento: hasta dos meas_loop_ca (omitidos si su tiempo es "").
-    Si hay acondicionamiento se hace set_e inicial y se re-asegura el autorango ba.
+    scan_type (cuerpo del script):
+      1 = Default: un meas_loop_eis directo a E_dc.
+      2 = E_dc Scan: loop generico PSTrace (store_var/loop/add_var/breakloop) con el
+          potencial en extra1; cada paquete agrega pck_add extra1 (desviacion nuestra
+          del export para que los datos sean autodescriptivos). E_step llega CON signo;
+          E_break = E_end + signo*E_step/2 (tolerancia de medio paso); E_dir elige la
+          comparacion del breakloop (1 ascendente '>', -1 descendente '<').
+      3 = Time Scan: UN solo meas_loop_eis con n_freq = t_run/t_interval + 1
+          repeticiones, pacificado por timer_start/set_int/await_int (patron exacto
+          del export PSTrace); el tiempo transcurrido viaja en extra1 (tipo eb) y el
+          script corta con abort al llegar a t_run.
+
+    El tipo de frecuencia NO llega aqui: el caller degenera f_max=f_min=f y n_freq=1
+    (o n_meas en Time Scan) para frecuencia fija. Orden de meas_loop_eis:
+    f z_r z_i E_ac f_max f_min n_freq E_dc.
+
+    Acondicionamiento: hasta dos bloques meas_loop_ca (E_con1/t_con1, E_con2/t_con2),
+    cada uno omitido si su tiempo es "" (0); tras ellos se re-asegura el autorango ba.
+
+    IMPORTANTE: esta funcion vive duplicada byte a byte en DiscPCB/EmstatDrivers.py
+    (Pico). Cualquier cambio aqui debe replicarse alla y flashearse.
     """
+    # Potencial inicial: primer bloque de acondicionamiento activo, si no el
+    # potencial inicial del modo (E_begin en barrido de potencial, E_dc en el resto).
     if t_con1 != "":
         e_start = E_con1
     elif t_con2 != "":
         e_start = E_con2
+    elif scan_type == 2:
+        e_start = E_begin
     else:
         e_start = E_dc
 
@@ -231,39 +263,77 @@ def construct_eis_script(
         # Tras el acondicionamiento, re-asegura el rango ba del EIS.
         sc_reset_ba = "set_autoranging ba 10u 1m\n"
 
-    # Front-end verificado contra el ejemplo oficial PalmSens: canal 0, modo 3
-    # (high speed, requerido por EIS) y autorango ba 10u-1m. set_e solo si hay
-    # acondicionamiento (si no, el E_dc lo aplica meas_loop_eis). Las variables
-    # i/e se declaran para los bloques meas_loop_ca del acondicionamiento.
-    script = (
-        "e\n"
-        "var f\n"
-        "var z_r\n"
-        "var z_i\n"
-        "var i\n"
-        "var e\n"
-        "set_pgstat_chan 0\n"
-        "set_pgstat_mode 3\n"
-        "set_autoranging ba 10u 1m\n"
-    )
-    if t_con1 != "" or t_con2 != "":
-        script += f"set_e {e_start}\n"
+    # Las variables i/e se declaran para los bloques meas_loop_ca del
+    # acondicionamiento; extra1 solo cuando el modo la usa (potencial o tiempo).
+    script = "e\nvar f\nvar z_r\nvar z_i\nvar i\nvar e\n"
+    if scan_type in (2, 3):
+        script += "var extra1\n"
+    script += "set_pgstat_chan 0\nset_pgstat_mode 3\n"
+    if bandwidth != "":
+        script += f"set_max_bandwidth {bandwidth}\n"
+    script += "set_autoranging ba 10u 1m\n"
+    script += f"set_e {e_start}\n"
     script += "cell_on\n"
     script += sc_con1
     script += sc_con2
     script += sc_reset_ba
-    script += (
-        f"meas_loop_eis f z_r z_i {E_ac} {f_max} {f_min} {n_freq} {E_dc}\n"
-        "  pck_start\n"
-        "    pck_add f\n"
-        "    pck_add z_r\n"
-        "    pck_add z_i\n"
-        "  pck_end\n"
-        "endloop\n"
-        "on_finished:\n"
-        "  cell_off\n"
-        "\n"
-    )
+
+    if scan_type == 2:
+        cmp_op = ">" if E_dir >= 0 else "<"
+        script += (
+            f"store_var extra1 {E_begin} da\n"
+            "loop 1i == 1i\n"
+            f"  meas_loop_eis f z_r z_i {E_ac} {f_max} {f_min} {n_freq} extra1\n"
+            "    pck_start\n"
+            "      pck_add f\n"
+            "      pck_add z_r\n"
+            "      pck_add z_i\n"
+            "      pck_add extra1\n"
+            "    pck_end\n"
+            "  endloop\n"
+            f"  add_var extra1 {E_step}\n"
+            f"  if extra1 {cmp_op} {E_break}\n"
+            "    breakloop\n"
+            "  endif\n"
+            "endloop\n"
+        )
+    elif scan_type == 3:
+        script += (
+            "store_var extra1 0 eb\n"
+            f"meas_loop_eis f z_r z_i {E_ac} {f_max} {f_min} {n_freq} {E_dc}\n"
+            "  if extra1 == 0\n"
+            "    timer_start\n"
+            f"    set_int {t_interval}\n"
+            "  else\n"
+            "    timer_get extra1\n"
+            "  endif\n"
+            "  pck_start\n"
+            "    pck_add f\n"
+            "    pck_add z_r\n"
+            "    pck_add z_i\n"
+            "    pck_add extra1\n"
+            "  pck_end\n"
+            "  if extra1 == 0\n"
+            f"    store_var extra1 {t_interval} eb\n"
+            "  endif\n"
+            f"  if extra1 >= {t_run}\n"
+            "    abort\n"
+            "  endif\n"
+            "  await_int\n"
+            "endloop\n"
+        )
+    else:
+        script += (
+            f"meas_loop_eis f z_r z_i {E_ac} {f_max} {f_min} {n_freq} {E_dc}\n"
+            "  pck_start\n"
+            "    pck_add f\n"
+            "    pck_add z_r\n"
+            "    pck_add z_i\n"
+            "  pck_end\n"
+            "endloop\n"
+        )
+
+    script += "on_finished:\n  cell_off\n\n"
     return script
 
 
@@ -426,6 +496,14 @@ class EmstatPico:
                 parameters.get("t_con1", ""),
                 parameters.get("E_con2", ""),
                 parameters.get("t_con2", ""),
+                scan_type=parameters.get("scan_type", 1),
+                bandwidth=parameters.get("bandwidth", ""),
+                E_begin=parameters.get("E_begin", ""),
+                E_step=parameters.get("E_step", ""),
+                E_break=parameters.get("E_break", ""),
+                E_dir=parameters.get("E_dir", 1),
+                t_run=parameters.get("t_run", 0),
+                t_interval=parameters.get("t_interval", 0),
             )
         else:
             return "Error method not recognized"

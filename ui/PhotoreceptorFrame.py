@@ -113,9 +113,9 @@ class PhotoreceptorFrame(ttk.Frame):
             return False
 
     def iniciar_lectura(self):
-        print("Iniciar lectura del fotoreceptor")
+        print("Starting photoreceptor reading")
         if self.running:
-            print("Ya se está leyendo")
+            print("Already reading")
             return
         if not self._ensure_ads():
             print("ADS1115 not available")
@@ -131,25 +131,25 @@ class PhotoreceptorFrame(ttk.Frame):
             self.interval_entry.configure(background="salmon")
 
     def detener_lectura(self):
-        print("Detener lectura del fotoreceptor")
+        print("Stopping photoreceptor reading")
         self.running = False
 
     def save_data(self):
         if not self.data:
-            print("No hay datos para guardar")
+            print("No data to save")
             return
         os.makedirs("files", exist_ok=True)
         timestamp = time.strftime("%Y%m%d_%H%M%S")
         filename = filedialog.asksaveasfilename(
             parent=self,
-            title="Guardar datos del fotoreceptor",
+            title="Save photoreceptor data",
             initialdir="files",
             initialfile=f"photoreceptor_data_{timestamp}.csv",
             defaultextension=".csv",
-            filetypes=[("CSV files", "*.csv"), ("Todos", "*.*")],
+            filetypes=[("CSV files", "*.csv"), ("All", "*.*")],
         )
         if not filename:
-            print("Guardado cancelado")
+            print("Save cancelled")
             return
         if not filename.lower().endswith(".csv"):
             filename += ".csv"
@@ -157,7 +157,7 @@ class PhotoreceptorFrame(ttk.Frame):
             f.write("Time (s),Intensity\n")
             for t, d in zip(self.timestamps, self.data):
                 f.write(f"{t:.3f},{d}\n")
-        print(f"Datos guardados en {filename}")
+        print(f"Data saved to {filename}")
 
     def adquirir_dato(self):
         if not self.running:

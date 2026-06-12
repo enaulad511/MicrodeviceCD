@@ -11,10 +11,12 @@ Archivos:
 - `ui/ElectrochemicalFrame.py` — caso `"Electrochemical Impedance"` cableado.
 - `Drivers/EmstatUtils.py` — `construct_eis_script` + escala `zi` negada para Nyquist.
 - `DiscPCB/EmstatDrivers.py` (Pico) — `construct_eis_script` + rama `"eis"` en `send_script`.
-- `DiscPCB/emstat_wifi_v1.7.py` (Pico) — copia de v1.6 + rama `"eis"` en `handle_command`.
+- `DiscPCB/emstat_wifi_v1.8.py` (Pico) — copia de v1.7 + EIS Fase 2 (claves nuevas en la
+  rama `"eis"`, topes `max_ms`/`idle_ms` por corrida). v1.7 = copia de v1.6 + rama `"eis"`.
 
-> El firmware del Pico vive en un proyecto **separado, no versionado en este repo**.
-> v1.6 se conserva intacto; el activo pasa a ser **v1.7** (convención de versionado).
+> El firmware del Pico vive en un proyecto **separado, no versionado en este repo**
+> (`~/MicroPython/DiscPCB`, espejo en `firmware/DiscPCB/`). Cada versión previa se
+> conserva intacta; el activo pasa a ser **v1.8** (convención de versionado).
 
 ---
 
@@ -51,6 +53,12 @@ for now."* y no se envía nada. Quedan listas para la Fase 2.
 
 `val/dec` se recalcula en vivo al cambiar `f_max`/`f_min`/`n_freq` (vía `trace_add` sobre
 las `StringVar`); es informativo, no se envía. El parámetro que va al script es `n_freq`.
+
+**Est. duration** (Fase 2, en el frame *Experiment type*): duración estimada del
+experimento, recalculada en vivo (trace sobre todas las entradas de tiempo/barrido y al
+cambiar de modo). Usa `_estimate_duration_s` — el mismo modelo `_point_s` de los topes
+(§7.4) pero **sin** el margen ×1.5+60 de `max_time_s`. Muestra `—` con entradas
+inválidas o la combo no soportada. Solo informativo, no se envía.
 
 Los rangos de corriente (`da`/`ba`/`ab`) **no se exponen** en la UI: quedan fijos en el
 generador de script (decisión de diseño — EIS usa autorango interno).
@@ -172,13 +180,214 @@ que EIS hereda gratis el manejo de cierres terminales y el dead-man switch del W
 
 ---
 
-## 7. Fase 2 (no implementado)
+## 7. Fase 2 — implementada (host + firmware v1.8 flasheado)
 
-Entradas ya presentes en la UI, pendientes de cablear payload + script:
+Diseño cerrado en entrevista (2026-06-11) contra **4 exports reales de PSTrace** (uno por
+modo, valores distintivos para mapeo unívoco). El lado host está implementado
+(`ui/EisFrame.py`, `Drivers/EmstatUtils.py`, `ui/EventEmstatFrame.py`); los 5 scripts
+generados se verificaron contra los exports. El firmware **v1.8 está flasheado en la
+placa** (2026-06-11) y **E_dc Scan + freq Scan quedó validado end-to-end en hardware**
+(9 espectros superpuestos, leyenda por potencial, cierre con `emstat_end` tras el fix
+del marcador `'+'` — ver §7.5). Decisiones:
 
-- **Scan type E_dc Scan:** `E_begin`, `E_step`, `E_end`, `E_ac` (barrido de potencial DC).
-- **Scan type Time Scan:** `E_dc`, `t_run`, `t_interval`, `E_ac` (impedancia vs tiempo).
-- **Frequency type Fixed:** `frequency` (una sola frecuencia).
+### 7.1 Matriz soportada
+
+| Combo | Sentido físico | Plot |
+|---|---|---|
+| Default + Fixed | Un punto Z a una frecuencia | Nyquist (1 punto) |
+| E_dc Scan + Scan | Espectro completo por potencial | Nyquist superpuestos, una curva por potencial (mecanismo de cycles; leyenda `E=…V`) |
+| E_dc Scan + Fixed | Z vs E a una frecuencia (Mott-Schottky-style) | x=potencial, y=\|Z\| |
+| Time Scan + Fixed | Z vs tiempo a una frecuencia | x=tiempo, y=\|Z\| |
+
+**Time Scan + Scan queda excluido** (espectros repetidos en el tiempo: corridas larguísimas,
+choca con el tope del firmware). `\|Z\| = sqrt(Z_real²+Z_imag²)` es un campo derivado
+calculado en el parser (`Z_mod`); Z_real/Z_imag completos siguen en `total_data`/CSV.
+
+### 7.2 Construcciones MethodSCRIPT (verificadas contra exports PSTrace)
+
+- **Frequency Fixed** = `meas_loop_eis` degenerado: `f_max = f_min = f`, `n_freq = 1`.
+  No hay comando nuevo; el parser `dc`/`cc`/`cd` sirve tal cual.
+- **E_dc Scan** = loop genérico envolviendo `meas_loop_eis` con potencial en variable:
+
+  ```
+  store_var extra1 {E_begin} da
+  loop 1i == 1i
+    meas_loop_eis f z_r z_i {E_ac} {f_max} {f_min} {n_freq} extra1
+      pck_start / pck_add f / pck_add z_r / pck_add z_i / pck_add extra1 / pck_end
+    endloop
+    add_var extra1 {±E_step}
+    if extra1 {>|<} {E_end ± E_step/2}   ← tolerancia de medio paso (acumulación float)
+      breakloop
+    endif
+  endloop
+  ```
+
+  El `pck_add extra1` (código `da`) es **desviación nuestra** del export: PSTrace no mete
+  el potencial en el paquete (habría que contar marcadores `M…`, frágil ante pérdidas).
+  Con el potencial en el paquete los datos son autodescriptivos y la recuperación UDP
+  funciona. **Ambas direcciones soportadas**: el generador deriva el signo del paso de
+  `(E_end − E_begin)`; el usuario captura `E_step` siempre positivo.
+- **Time Scan** = **un solo** `meas_loop_eis` con `n_freq = floor(t_run/t_interval) + 1`
+  a frecuencia fija, pacificado por timer (patrón exacto del export PSTrace):
+
+  ```
+  store_var extra1 0 eb
+  meas_loop_eis f z_r z_i {E_ac} {f} {f} {n} {E_dc}
+    if extra1 == 0:  timer_start / set_int {t_interval}   else:  timer_get extra1
+    pck_start / f / z_r / z_i / pck_add extra1 / pck_end
+    if extra1 == 0:  store_var extra1 {t_interval} eb
+    if extra1 >= {t_run}:  abort
+    await_int
+  endloop
+  ```
+
+  El tiempo viaja en el paquete con tipo **`eb`** (código de paquete a verificar en
+  hardware). ⚠️ PSTrace termina con `abort` dentro del script: verificar en hardware
+  cómo lo reporta el EmStat (si el Pico lo mapea a `emstat_aborted`, una corrida exitosa
+  se marcaría abortada).
+
+### 7.3 Front-end común (los 5 modos)
+
+Se mantiene el de Fase 1 (chan 0, mode 3, `set_autoranging ba 10u 1m` — verificado con
+paquetes reales) + dos adopciones del export PSTrace:
+
+- `set_e {potencial inicial}` **incondicional** antes de `cell_on` (E_con1 si hay
+  acondicionamiento, si no E_dc / E_begin).
+- `set_max_bandwidth` = **10 × frecuencia máxima** (regla confirmada en 3 exports:
+  10k→100k, 100k→1M, 5k→50k, 2k→20k).
+
+**No** se adopta el resto del boilerplate PSTrace (chan 1 off, rangos fijos min=max:
+dependen de la corriente esperada de la celda; contradice la decisión de autorango §2).
+
+### 7.4 Payload / firmware / parser
+
+- **Encoding 1-based** (ya enviado en Fase 1): `scan_type` 1=Default, 2=E_dc Scan,
+  3=Time Scan; `freq_type` 1=Scan, 2=Fixed. Claves nuevas por modo: `E_begin`/`E_step`/
+  `E_end`, `f` (fixed), `t_run`/`t_interval`.
+- **Topes dinámicos**: el host estima la duración y manda `max_time_s` en el payload; el
+  firmware usa `max(estimado×1.5, 10 min)` como tope absoluto de esa corrida. Además el
+  host manda **`idle_s`**: el EmStat emite UN paquete por punto AL TERMINARLO, así que el
+  hueco máximo legítimo entre paquetes es la duración del punto más lento — modelo
+  `_point_s(f) = 30/f + 3 s` (≈30 periodos + overhead), `idle_s = punto_más_lento×1.5+15`
+  (en Time Scan también cubre `t_interval`). Sin esto, el idle fijo del Pico (16 s)
+  abortaba con `emstat_timeout` cualquier barrido con puntos bajo ~1 Hz (corridas reales
+  de 51 puntos llegan a ~20 min). El watchdog del host se deriva del mismo valor
+  (`idle_s + 15`) para que el terminal del firmware siempre gane. Dead-man del Wemos
+  intacto. Requiere firmware v1.8.
+- **Parser**: `da` → `E_V` y `eb` → `t_s` en `FIELD_MAP["eis"]`; el filtro de
+  acondicionamiento (unknown si no trae Z) ya cubría el caso mixto da+Z. `Z_mod`
+  (=|Z|) se deriva en `_decode`. La asignación de cycle por cambio de potencial es
+  opt-in (`EmstatStreamParser(..., eis_group_by_potential=True)`, solo E_dc Scan +
+  freq Scan — en Mott-Schottky partiría la traza única) y se plumbea vía
+  `EventPlotter.update_val_experiment(parser_kwargs=..., cycle_legend=...)`; la
+  leyenda por potencial usa `cycle_legend=("E_V", "E={:.3g}V")`.
+- **Fix de parseo descubierto en pruebas**: el valor de cada subcampo es SIEMPRE
+  7 hex + 1 char de unidad; si el último subcampo de la línea tiene unidad espacio
+  (adimensional: `eb` segundos, `da` en volts exactos) y no trae metadata, el strip
+  del transporte se la comía y `head[-1]` corrompía el valor. `_parse_packet` ahora
+  corta por longitud fija (`head[2:9]` + `head[9]`).
+- **Watchdog del host**: `EventPlotter.watchdog_timeout` (10 s) se ajusta por corrida
+  en `EisFrame.send_script` a `max(10, t_interval+5)` — un Time Scan con intervalo
+  ≥10 s cerraría la corrida a medias con el default.
+- **CSV**: columnas extra *trailing* (`freq_Hz`, `E_V`, `t_s`, `Z_mod` cuando existen
+  y no son ya x/y); Load solo lee las 5 primeras, así que no rompen la recarga.
+- `construct_eis_script` sigue duplicado byte a byte (host + Pico), ahora parametrizado
+  por `scan_type` (el freq_type no llega al generador: el host degenera
+  f_max=f_min=f / n_freq antes).
+
+### 7.5 Pendientes de verificación en hardware (Fase 2)
+
+**E_dc Scan + freq Scan validado end-to-end** (2026-06-11): 9 espectros 0.1→0.5 V
+correctos, superpuestos y con leyenda por potencial; tras re-flashear con el fix del
+`'+'`, la corrida cierra con `emstat_end` ✓.
+
+- [x] **Fin anticipado en E_dc Scan**: NO ocurre — los 9 espectros completaron (tras
+      cada `*` viene directo el siguiente bloque, sin blank intercalada).
+- [x] **Fin de corrida en E_dc Scan** — RESUELTO con el TAIL de la 2ª corrida. El
+      script anidado termina `'*'` (último meas_loop) → **`'+'`** (fin del loop
+      GENÉRICO, marcador que CV/SWV/Fase-1 nunca producían) → blank. El Pico solo
+      reconocía `'*' + blank`, así que ignoraba la blank tras `'+'`, esperaba su
+      idle (16 s), mandaba `Z` y el EmStat respondía **`Z!0006`** (nada que abortar:
+      el script ya había acabado) → `emstat_timeout`; y como el watchdog del host
+      (10 s) era menor, el usuario veía "watchdog". Fixes: firmware v1.8 reconoce
+      fin con blank tras `'*'` **o** `'+'` (`last_was_star = stripped in ("*", "+")`),
+      y el watchdog EIS del host subió a `max(25 s, t_interval+15)`. `EventPlotter`
+      ganó el volcado **TAIL** (últimos 20 mensajes crudos al cerrar) como
+      herramienta de diagnóstico permanente.
+      Evidencia adicional del TAIL: `da` llega con unidad `u` (0.5 V = `da807A120u`),
+      merge = 99 puntos exactos (9 espectros × 11), pérdida TCP 0%.
+- [ ] Código de paquete real de `eb` (tiempo) en salida cruda.
+- [x] Código/formato de `da` (potencial) en paquetes EIS mixtos — funciona (el
+      agrupado por potencial salió bien en hardware).
+- [ ] Terminal del `abort` de fin de Time Scan (`emstat_end` vs `emstat_aborted`).
+- [ ] Interacción cycles-por-potencial × Keep runs (los offsets de
+      `plot_run_offset` deben apilarse sobre los cycles por espectro).
+- [x] `MAX_IDLE_MS` del Pico vs `t_interval` grandes — idle dinámico en v1.8 (§7.6).
+
+### 7.6 Diff de firmware v1.8 — aplicado y **flasheado** (2026-06-11)
+
+Aplicado en `~/MicroPython/DiscPCB` (v1.7 intacto), resincronizado a
+`firmware/DiscPCB/` y flasheado a la placa (`main.py` + `EmstatDrivers.py`). Los
+cambios:
+
+1. **`EmstatDrivers.py` — `construct_eis_script`**: reemplazar la función completa por
+   la de `Drivers/EmstatUtils.py` de este repo (byte a byte; ya incluye los kwargs
+   nuevos `scan_type`, `bandwidth`, `E_begin/E_step/E_break/E_dir`, `t_run/t_interval`).
+
+2. **`EmstatDrivers.py` — `send_script`, rama `"eis"`**: añadir el reenvío de los
+   kwargs nuevos:
+
+   ```python
+   elif method == "eis":
+       script = construct_eis_script(
+           parameters.get("E_ac", "10m"),
+           parameters.get("f_max", "100k"),
+           parameters.get("f_min", "100"),
+           parameters.get("n_freq", 11),
+           parameters.get("E_dc", "0"),
+           parameters.get("E_con1", ""),
+           parameters.get("t_con1", ""),
+           parameters.get("E_con2", ""),
+           parameters.get("t_con2", ""),
+           scan_type=parameters.get("scan_type", 1),
+           bandwidth=parameters.get("bandwidth", ""),
+           E_begin=parameters.get("E_begin", ""),
+           E_step=parameters.get("E_step", ""),
+           E_break=parameters.get("E_break", ""),
+           E_dir=parameters.get("E_dir", 1),
+           t_run=parameters.get("t_run", 0),
+           t_interval=parameters.get("t_interval", 0),
+       )
+   ```
+
+3. **`emstat_wifi_v1.8.py`**:
+   - `run_experiment_read_loop(method, on_data=None, max_ms=None, idle_ms=None)`:
+     usar `max_ms or MAX_EXPERIMENT_MS` en el chequeo del tope absoluto y
+     `idle_ms or MAX_IDLE_MS` en el chequeo de idle (defaults actuales intactos
+     para cv/sqwv).
+   - Rama `"eis"` de `handle_command`: extender `params` con las claves nuevas
+     (`scan_type`, `bandwidth`, `E_begin`, `E_step`, `E_break`, `E_dir`, `t_run`,
+     `t_interval` — mismos defaults que el punto 2) y calcular los topes dinámicos:
+
+     ```python
+     max_ms = max(int(cmd_obj.get("max_time_s", 0)) * 1000, MAX_EXPERIMENT_MS)
+     idle_ms = max(int(cmd_obj.get("idle_s", 0)) * 1000,
+                   (int(cmd_obj.get("t_interval", 0)) + 5) * 1000, MAX_IDLE_MS)
+     ...
+     run_experiment_read_loop("eis", max_ms=max_ms, idle_ms=idle_ms)
+     ```
+
+     El dead-man del Wemos queda intacto como red de seguridad; `max_time_s` e
+     `idle_s` vienen ya calculados desde el host (`EisFrame._estimate_max_time_s` /
+     `EisFrame._point_s` — ver §7.4 *Topes dinámicos*). El modelo del punto
+     (`30/f + 3 s`) es calibración conservadora: **si una corrida real muere con
+     `emstat_maxtime`/`emstat_timeout` siendo legítima, subir la constante en
+     `_point_s` (host) — el firmware no se toca.**
+
+4. (Post-hardware) **Fin normal con `'+'`**: `run_experiment_read_loop` reconoce el
+   fin con blank tras `'*'` **o** `'+'` (fin de loop genérico, emitido por el script
+   anidado del E_dc Scan). Ver hallazgo en §7.5. Sin cambio para cv/sqwv (nunca
+   emiten `'+'`).
 
 ---
 

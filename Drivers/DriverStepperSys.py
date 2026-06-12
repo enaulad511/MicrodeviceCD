@@ -14,6 +14,86 @@ __date__ = "$ 19/02/2026  at 08:11 a.m. $"
 STEPS_PER_REV = 6400
 
 
+def spinMotorRPM_ramped(
+    direction: str,
+    setpoint_rpm: float,
+    ts: float,
+    accel_rpm_s: float = 200.0,  # pendiente real de la rampa (RPM por segundo)
+    max_rpm: float = 1000.0,  # límite absoluto
+    soft_stop: bool = True,  # True: STOP:0 (rampa en firmware); False: STOP:1 inmediato
+    drv_motor=None,
+    time_exp=None,
+    stop_func=None,  # función opcional; True => detener
+    stop_event=None,
+):
+    """
+    Gira el motor a 'setpoint_rpm' con rampa trapezoidal ejecutada EN EL
+    FIRMWARE del Pico (un solo comando MODO:1:<rpm>:<accel_rpm_s>). Al detener
+    (stop_event / stop_func / time_exp) envía STOP:0 y el Pico desacelera con
+    la misma pendiente; la espera de la desaceleración es por tiempo calculado
+    (|rpm|/accel), NO por telemetría, para que una pérdida de UART no deje el
+    frenado a medias (la rampa host-side se descartó por esa razón).
+    Al final regresa el disco a la marca de cero (go_zero) como siempre.
+
+    direction: "CW" o "CCW"
+    setpoint_rpm: objetivo en RPM (positivo; la dirección fija el signo)
+    ts: cadencia de sondeo de stop_func/time_exp en segundos
+    accel_rpm_s: RPM/s para subida y bajada (<=0 => cambio inmediato)
+    """
+    drv = drv_motor
+    if drv is None:
+        print("[spinMotorRPM_ramped] Error: drv not initialized")
+        return False
+    if stop_event is None:
+        print("[spinMotorRPM_ramped] Error: stop_event not provided; required for stop control.")
+        return False
+
+    d = direction.strip().upper()
+    if d not in ("CW", "CCW"):
+        print("[spinMotorRPM_ramped] Invalid direction. Use 'CW' or 'CCW'.")
+        return False
+    sign = 1 if d == "CW" else -1
+    target = sign * min(abs(setpoint_rpm), abs(max_rpm))
+    accel = abs(accel_rpm_s)
+    if ts <= 0:
+        ts = 0.1  # fallback
+
+    drv.set_init_vals(pos_deg=0.0, rpm=0.0)
+    drv.run_rpm(target, accel)  # un solo comando: la rampa corre en el Pico
+    start_time = time.perf_counter()
+    while not stop_event.is_set():
+        if stop_func is not None and stop_func():
+            print("[spinMotorRPM_ramped] stop_func requested a stop; stopping...")
+            break
+        if time_exp is not None and (time.perf_counter() - start_time) >= time_exp:
+            print(f"[spinMotorRPM_ramped] Execution time {time_exp}s reached; stopping motor.")
+            break
+        time.sleep(ts)
+
+    if soft_stop:
+        drv.stop()  # STOP:0 => el firmware frena en rampa
+        if accel > 0:
+            time.sleep(abs(target) / accel + 0.5)  # cota superior de la desaceleración
+    else:
+        drv.stop_hard()
+
+    # Regresar el disco a la posición cero y esperar a que quede quieto
+    drv.go_zero(50)
+    rpm_hist = [1.0, 1.0, abs(drv.get_status().get("rpm", 1.0))]
+    t0 = time.perf_counter()
+    while sum(rpm_hist) > 0:
+        if (time.perf_counter() - t0) > 15.0:  # el homing del Pico expira a los 5 s
+            print("[spinMotorRPM_ramped] go_zero wait timed out.")
+            break
+        time.sleep(0.5)
+        rpm_hist = rpm_hist[1:] + [abs(drv.get_status().get("rpm", 1.0))]
+
+    drv.stop()
+    status = drv.get_status()
+    print(f"Stopped--> pos: {status.get('pos_deg'):.2f}°, rpm: {status.get('rpm'):.2f}")
+    return True
+
+
 def spinMotorAngleDriver(angle, rpm, max_rpm, n_times=None, flag_continue=False, stop_event=None, drv=None):
     """
     Versión global que usa los helpers del objeto global 'drv':
@@ -252,7 +332,8 @@ class DriverStepperSys:
                 if self.ser is None:
                     time.sleep(0.1)
                     break
-                self.ser.reset_input_buffer()  # Asegura que se envíen los comandos sin demora
+                # NO usar reset_input_buffer() aquí: descartaba casi toda la
+                # telemetría STAT y get_status() se quedaba con valores viejos.
                 raw = self.ser.readline()  # lee hasta '\n' o timeout
                 if not raw:
                     continue
@@ -328,12 +409,13 @@ class DriverStepperSys:
                 return False
             time.sleep(0.1)
 
-    def run_rpm(self, rpm: float) -> bool:
-        """Velocidad continua en RPM (signo = dirección)."""
+    def run_rpm(self, rpm: float, accel_rpm_s: float = 0.0) -> bool:
+        """Velocidad continua en RPM (signo = dirección).
+        accel_rpm_s > 0 => el firmware aplica rampa hacia el setpoint
+        (MODO:1:<rpm>:<accel_rpm_s>); 0 => cambio inmediato (legado)."""
         if self.ser is None:
             return False
-        self.ser.reset_output_buffer()
-        self._cmd_mode(1, rpm, 0)
+        self._cmd_mode(1, rpm, accel_rpm_s)
         return True
 
     def run_hz(self, hz_signed: float) -> bool:
@@ -353,8 +435,14 @@ class DriverStepperSys:
         return self._cmd_mode(4, angle, speed_hz)
 
     def stop(self) -> bool:
-        """Detiene el movimiento."""
+        """Detiene el movimiento. STOP:0 => si el último run_rpm llevó rampa,
+        el firmware desacelera con esa pendiente; si no, paro inmediato."""
         return self._cmd_stop()
+
+    def stop_hard(self) -> bool:
+        """Paro de emergencia: STOP:1 detiene inmediato, sin rampa."""
+        self._send_line("STOP:1:0:0")
+        return True
 
     def get_status(self) -> dict:
         """

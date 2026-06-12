@@ -21,6 +21,7 @@ font_labels_frame = ("Arial", 11, "bold")
 font_labels_plates = ("Arial", 10, "bold")
 format_timestamp = "%Y-%m-%d %H:%M:%S"
 tab_icons = {
+    "Quick Control": "⚡",
     "LED Control": "💡",
     "Fluorescence LED Control": "🔬",
     "Disc Control": "💿",
@@ -28,6 +29,7 @@ tab_icons = {
     "Temperature Control": "🌡️",
 }
 tab_texts = [
+    "Quick Control",
     "LED Control",
     "Fluorescence LED Control",
     "Disc Control",

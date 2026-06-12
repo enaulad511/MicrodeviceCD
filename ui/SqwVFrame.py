@@ -65,6 +65,246 @@ CURRENT_RANGES = {
 }
 
 
+class ShowProfileFrame(ttk.Toplevel):
+    """Perfil esquematico del SWV en ventana aparte (mismo patron que CvFrame).
+
+    No se dibuja la senal completa (con E_step tipico son ~100 steps y se ve
+    como una banda solida): solo los primeros N_SCHEMATIC steps, o todos si el
+    experimento tiene <= MAX_FULL_STEPS. Las fases previas (condition,
+    deposition, equilibration) se dibujan con ancho fijo si su t > 0. El eje X
+    NO esta a escala; los tiempos reales van en las cotas y el titulo.
+    """
+
+    MAX_FULL_STEPS = 5
+    N_SCHEMATIC = 3
+
+    def __init__(
+        self,
+        parent,
+        t_equilibration,
+        e_begin,
+        e_end,
+        e_step,
+        amplitude,
+        freq,
+        e_con,
+        t_con,
+        e_dep,
+        t_dep,
+    ):
+        super().__init__(parent)
+        self.title("SWV Profile Preview")
+        self.parent = parent
+
+        t_interval = 1 / (2 * freq)
+        direction = 1 if e_end >= e_begin else -1
+        e_step_abs = abs(e_step)
+        total_steps = int(round(abs(e_end - e_begin) / e_step_abs)) + 1
+        # Escalon dibujado: con valores tipicos (E_step 0.01 V vs pulso 0.2 V
+        # pico a pico) la escalera es invisible y el perfil parece una onda
+        # cuadrada plana. Si E_step queda chico junto a la amplitud se exagera
+        # solo el dibujo; la cota sigue mostrando el valor real.
+        step_draw = (
+            e_step_abs if amplitude <= 0 else max(e_step_abs, 0.6 * amplitude)
+        )
+        exaggerated = step_draw > e_step_abs
+        # Con escalon exagerado la escalera ya no aterriza en E_end, asi que se
+        # usa siempre el modo truncado (pocos steps + flecha de continuacion).
+        truncated = total_steps > self.MAX_FULL_STEPS or (
+            exaggerated and total_steps > self.N_SCHEMATIC
+        )
+        n_draw = min(self.N_SCHEMATIC, total_steps) if truncated else total_steps
+        w = 2 * t_interval  # un step completo (forward + reverse)
+
+        self.fig, ax = plt.subplots(figsize=(8, 4.5))
+
+        # Orden real del MethodSCRIPT: condition -> deposition -> equilibration
+        pre_phases = [
+            ("Cond.", e_con, t_con, "darkcyan"),
+            ("Dep.", e_dep, t_dep, "saddlebrown"),
+            ("Equil.", e_begin, t_equilibration, "purple"),
+        ]
+        base_last = e_begin + (n_draw - 1) * step_draw * direction
+        pot_refs = [e_begin, e_end]
+        pot_refs += [pot for _, pot, dur, _ in pre_phases if dur > 0]
+        pot_refs += [
+            e_begin + amplitude,
+            e_begin - amplitude,
+            base_last + amplitude,
+            base_last - amplitude,
+        ]
+        span = (max(pot_refs) - min(pot_refs)) or 1.0
+
+        x = 0.0
+        prev_pot = None
+        for name, pot, dur, color in pre_phases:
+            if dur <= 0:
+                continue
+            if prev_pot is not None:
+                ax.plot([x, x], [prev_pot, pot], color="blue", linewidth=2)
+            ax.plot([x, x + w], [pot, pot], color="blue", linewidth=2)
+            ax.text(
+                x + w / 2,
+                pot + 0.04 * span,
+                f"{name} {dur:g} s @ {pot:g} V",
+                ha="center",
+                color=color,
+                fontsize=8,
+            )
+            x += w
+            prev_pot = pot
+
+        x0 = x  # inicio de los pulsos SWV
+        for i in range(n_draw):
+            base = e_begin + i * step_draw * direction
+            fwd, rev = base + amplitude, base - amplitude
+            if prev_pot is not None:
+                ax.plot([x, x], [prev_pot, fwd], color="blue", linewidth=2)
+            ax.plot([x, x + t_interval], [fwd, fwd], color="blue", linewidth=2)
+            ax.plot(
+                [x + t_interval, x + t_interval], [fwd, rev], color="blue", linewidth=2
+            )
+            ax.plot([x + t_interval, x + w], [rev, rev], color="blue", linewidth=2)
+            prev_pot = rev
+            x += w
+
+        # Etiquetas Forward/Reverse solo en el primer step
+        fwd0 = e_begin + amplitude
+        rev0 = e_begin - amplitude
+        ax.text(
+            x0 + t_interval / 2,
+            fwd0 + 0.04 * span,
+            "Forward",
+            ha="center",
+            color="orange",
+            fontsize=8,
+        )
+        ax.text(
+            x0 + 1.5 * t_interval,
+            rev0 - 0.09 * span,
+            "Reverse",
+            ha="center",
+            color="green",
+            fontsize=8,
+        )
+
+        # Cota 2*Amplitude (altura pico a pico del pulso)
+        x_amp = x0 + 1.5 * t_interval
+        ax.annotate(
+            "",
+            xy=(x_amp, fwd0),
+            xytext=(x_amp, rev0),
+            arrowprops=dict(arrowstyle="<->", color="black"),
+        )
+        ax.text(
+            x_amp + 0.15 * t_interval,
+            e_begin,
+            f"2·Amp = {2 * amplitude:g} V",
+            va="center",
+            fontsize=8,
+        )
+
+        # Cota E_step: referencia punteada al nivel forward del step 1
+        if n_draw >= 2:
+            fwd1 = fwd0 + step_draw * direction
+            ax.plot(
+                [x0, x0 + w + t_interval],
+                [fwd0, fwd0],
+                color="gray",
+                linestyle=":",
+                linewidth=1,
+            )
+            x_es = x0 + w + 0.5 * t_interval
+            ax.annotate(
+                f"E step = {e_step_abs:g} V" + (" (enlarged)" if exaggerated else ""),
+                xy=(x_es, (fwd0 + fwd1) / 2),
+                xytext=(x_es + 0.6 * t_interval, fwd1 + 0.12 * span),
+                arrowprops=dict(arrowstyle="->", color="black"),
+                fontsize=8,
+            )
+
+        # Cota t_interval bajo el primer pulso forward
+        y_t = min(pot_refs) - 0.12 * span
+        ax.annotate(
+            "",
+            xy=(x0, y_t),
+            xytext=(x0 + t_interval, y_t),
+            arrowprops=dict(arrowstyle="<->", color="black"),
+        )
+        ax.text(
+            x0 + t_interval / 2,
+            y_t - 0.06 * span,
+            f"t_interval = {t_interval:.4g} s",
+            ha="center",
+            fontsize=8,
+        )
+
+        # Indicador de continuacion hacia E_end
+        if truncated:
+            ax.annotate(
+                "",
+                xy=(x + 1.5 * w, e_end),
+                xytext=(x + 0.3 * w, base_last),
+                arrowprops=dict(arrowstyle="->", color="red", linestyle="--"),
+            )
+            ax.text(
+                x + 0.9 * w,
+                (base_last + e_end) / 2,
+                f"+{total_steps - n_draw} steps",
+                color="red",
+                fontsize=8,
+                ha="center",
+                va="bottom",
+            )
+
+        x_max = x + (2.0 * w if truncated else 0.6 * w)
+        ax.set_xlim(-0.3 * w, x_max)
+        ax.axhline(e_begin, color="gray", linestyle=":", linewidth=1)
+        ax.axhline(e_end, color="red", linestyle=":", linewidth=1)
+        ax.text(
+            x_max, e_begin, f"E_begin {e_begin:g} V", color="gray", fontsize=8,
+            ha="right", va="bottom",
+        )
+        ax.text(
+            x_max, e_end, f"E_end {e_end:g} V", color="red", fontsize=8,
+            ha="right", va="bottom",
+        )
+        ax.set_ylim(min(pot_refs) - 0.25 * span, max(pot_refs) + 0.15 * span)
+
+        dur_total = t_con + t_dep + t_equilibration + total_steps * w
+        head = (
+            f"SWV Profile (schematic — first {n_draw} of {total_steps} steps)"
+            if truncated
+            else "SWV Profile (schematic)"
+        )
+        ax.set_title(
+            head + "\n"
+            f"{total_steps} steps · t_interval = {t_interval:.4g} s · "
+            f"total ≈ {dur_total:.4g} s · E: {e_begin:g} → {e_end:g} V @ {freq:g} Hz",
+            fontsize=10,
+        )
+        ax.set_xlabel("Time (not to scale)")
+        ax.set_ylabel("Potential (not to scale)")
+        ax.set_xticks([])
+        ax.set_yticks([])
+        self.fig.tight_layout()
+
+        self.canvas = FigureCanvasTkAgg(self.fig, master=self)
+        self.canvas.draw()
+        self.canvas.get_tk_widget().pack(fill="both", expand=True)
+
+        self.protocol("WM_DELETE_WINDOW", self.on_close)
+
+    def destroy(self):
+        # liberar la figura tambien cuando se destruye sin pasar por on_close
+        plt.close(self.fig)
+        super().destroy()
+
+    def on_close(self):
+        self.parent.on_close_profile_window()
+        self.destroy()
+
+
 def create_widgets_swv(parent, callbacks, n_cols=2):
     frame = ttk.LabelFrame(parent, text="Square Wave Voltammetry Settings")
     frame.grid(row=0, column=0, padx=10, pady=10, sticky="nswe")
@@ -178,6 +418,7 @@ class SWVFrame(ttk.Frame):
         self.callback_get_channel = callback_get_channel
         self.frame_w_scroll = frame_with_scroll
         self.ShowMethodScrit = None
+        self.ShowProfile: ShowProfileFrame | None = None
 
         content_frame = ttk.Frame(self)
         content_frame.grid(row=0, column=0, sticky="nsew")
@@ -202,18 +443,11 @@ class SWVFrame(ttk.Frame):
         self.frame_buttons.columnconfigure(0, weight=1)
         create_buttons_sqwv(self.frame_buttons, callbacks)
 
-        self.profile_frame = ttk.LabelFrame(content_frame, text="SWV Profile Preview")
-        self.profile_frame.grid(row=2, column=0, padx=(5, 15), pady=10, sticky="nswe")
-        self.profile_frame.configure(style="Custom.TLabelframe")
-        self.profile_frame.grid_forget()
-
-        self.canvas = None
         self.frame_plotter = ttk.LabelFrame(self, text="Live Data Plotter")
         self.frame_plotter.grid(row=4, column=0, padx=10, pady=10, sticky="nsew")
         self.frame_plotter.columnconfigure(0, weight=1)
         self.frame_plotter.configure(style="Custom.TLabelframe")
         self.generate_payload()
-        self.callback_generate_profile()
         self.udp_plotter = EventPlotter(
             self.frame_plotter,
             "sqwv",
@@ -229,7 +463,6 @@ class SWVFrame(ttk.Frame):
 
     def show_inputs_frame(self):
         self.frame_entries.grid(row=0, column=0, sticky="nsew")
-        self.frame_plotter.grid_forget()
 
     def callback_generate_profile(self):
         try:
@@ -239,85 +472,35 @@ class SWVFrame(ttk.Frame):
             e_step = float(self.entries[3].get())
             amplitude = float(self.entries[4].get())
             freq = float(self.entries[5].get())
-
-            t_interval = 1 / (2 * freq)
-
-            times, potentials, segments = [], [], []
-            current_time = 0
-
-            # Equilibration
-            times += [current_time, current_time + t_equilibration]
-            potentials += [e_begin, e_begin]
-            segments.append((current_time, current_time + t_equilibration, "Equilibration"))
-            current_time += t_equilibration
-
-            # Generate SWV pulses
-            e_i = e_begin
-            while e_i <= e_end:
-                # Forward pulse
-                start = current_time
-                times.append(current_time)
-                potentials.append(e_i + amplitude)
-                current_time += t_interval
-                times.append(current_time)
-                potentials.append(e_i + amplitude)
-                segments.append((start, current_time, "Forward"))
-
-                # Reverse pulse
-                start = current_time
-                times.append(current_time)
-                potentials.append(e_i - amplitude)
-                current_time += t_interval
-                times.append(current_time)
-                potentials.append(e_i - amplitude)
-                segments.append((start, current_time, "Reverse"))
-                e_i += e_step
-
-            # Plot
-            fig, ax = plt.subplots(figsize=(7, 4))
-            ax.step(times, potentials, where="post", color="blue", linewidth=2)
-
-            # Annotate segments
-            if len(segments) <= 20:
-                for s in segments:
-                    start_time, end_time, label = s
-                    mid_time = (start_time + end_time) / 2
-                    mid_potential = (
-                        potentials[times.index(start_time)] + potentials[times.index(end_time)]
-                    ) / 2
-                    color = (
-                        "purple"
-                        if label == "Equilibration"
-                        else "orange"
-                        if label == "Forward"
-                        else "green"
-                    )
-                    ax.text(
-                        mid_time,
-                        mid_potential,
-                        label,
-                        ha="center",
-                        color=color,
-                        fontsize=8,
-                    )
-
-            ax.axhline(e_begin, color="gray", linestyle=":")
-            ax.axhline(e_end, color="red", linestyle=":")
-            ax.set_xlabel("Time (s)")
-            ax.set_ylabel("Potential (V)")
-            ax.set_title(f"SWV Profile · t_interval = {t_interval:.3f} s")
-            ax.grid(True)
-
-            if self.canvas:
-                self.canvas.get_tk_widget().destroy()
-            self.canvas = FigureCanvasTkAgg(fig, master=self.profile_frame)
-            self.canvas.draw()
-            self.canvas.get_tk_widget().pack(fill="both", expand=True)
-
-            self.profile_frame.grid(row=2, column=0, padx=(5, 15), pady=10, sticky="nswe")
-            self.frame_plotter.grid_forget()
+            e_con = float(self.entries_pre[0].get())
+            t_con = float(self.entries_pre[1].get())
+            e_dep = float(self.entries_pre[2].get())
+            t_dep = float(self.entries_pre[3].get())
         except ValueError:
             print("Error: Check input values.")
+            return
+        if freq <= 0 or e_step == 0:
+            print("Error: Frequency must be > 0 and E step != 0.")
+            return
+        if self.ShowProfile is not None:
+            self.ShowProfile.destroy()
+            self.ShowProfile = None
+        self.ShowProfile = ShowProfileFrame(
+            self,
+            t_equilibration,
+            e_begin,
+            e_end,
+            e_step,
+            amplitude,
+            freq,
+            e_con,
+            t_con,
+            e_dep,
+            t_dep,
+        )
+
+    def on_close_profile_window(self):
+        self.ShowProfile = None
 
     def callback_show_methodscript(self):
         self.generate_payload()
@@ -408,7 +591,6 @@ class SWVFrame(ttk.Frame):
             callback_spin_motor=None
         )
         self.frame_plotter.grid(row=4, column=0, padx=10, pady=10, sticky="nsew")
-        self.profile_frame.grid_forget()
 
 
 if __name__ == "__main__":

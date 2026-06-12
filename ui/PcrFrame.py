@@ -18,8 +18,11 @@ from templates.constants import (
     serial_port_encoder,
 )
 from templates.utils import read_settings_from_file
-from ui.DiscFrame import spinMotorRPM_ramped
 from ui.KeyboardFrame import NumericKeyboard
+
+# spinMotorRPM_ramped se importa lazy desde Drivers.DriverStepperSys dentro de
+# los métodos que lo usan (el módulo del driver importa gpiod/serial y a nivel
+# de módulo rompería el modo dev en Windows).
 
 __author__ = "Edisson A. Naula"
 __date__ = "$ 21/10/2025 at 11:30 a.m. $"
@@ -361,12 +364,12 @@ class PCRFrame(ttk.Frame):
                             fontweight="bold", color="black")
 
             ax.legend(loc="upper right", fontsize=7, ncol=2)
-            ax.set_xlabel("Tiempo (s) — holds largos comprimidos"
-                          if clip_marks else "Tiempo (s)")
+            ax.set_xlabel("Time (s) — long holds compressed"
+                          if clip_marks else "Time (s)")
             # Eje X sin valores: tras el recorte ya no son segundos reales
             ax.set_xticks([])
-            ax.set_ylabel("Temperatura (°C)")
-            ax.set_title(f"Perfil PCR ({cycles} ciclos)")
+            ax.set_ylabel("Temperature (°C)")
+            ax.set_title(f"PCR Profile ({cycles} cycles)")
             ax.grid(True)
 
             if self.canvas:
@@ -843,6 +846,8 @@ class PCRFrame(ttk.Frame):
         ads,
     ):
         global sistemaMotor
+        from Drivers.DriverStepperSys import spinMotorRPM_ramped
+
         if self.stop_udp_listenner is None:
             self.stop_udp_listenner = threading.Event()
         self.start_cycle_time = time.time()
@@ -991,7 +996,7 @@ class PCRFrame(ttk.Frame):
         self.prefix_row = prefix_col
         self.client_temperature.start()
         self.fase = "Initial"
-        from Drivers.DriverStepperSys import DriverStepperSys
+        from Drivers.DriverStepperSys import DriverStepperSys, spinMotorRPM_ramped
 
         self.start_pcr_time = time.time()
 

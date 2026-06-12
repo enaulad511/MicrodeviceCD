@@ -39,7 +39,7 @@ class ElectrochemicalFrame(ttk.Frame):
             values=[
                 "Cyclic Voltammetry",
                 "Square Wave Voltammetry",
-                "Electrochemical Impedance",
+                "Impedance Spectroscopy",
             ],
             state="readonly",
             width=25,
@@ -108,7 +108,7 @@ class ElectrochemicalFrame(ttk.Frame):
                     callback_get_channel=self.get_channel,
                     frame_with_scroll=self.content_frame,
                 )
-            case "Electrochemical Impedance":
+            case "Impedance Spectroscopy":
                 self.current_test_frame = EISFrame(
                     self.test_frame_container,
                     ip_sender=ip_sender,

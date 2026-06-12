@@ -85,6 +85,13 @@ UDP** justo cuando se necesita para recuperar el final. Nuevo modelo: el cierre 
 - **IDs de técnica de medición (hecho):** `EmstatStreamParser.TECHNIQUE_IDS` mapea la
   Tabla 5 del manual (marcador `M<hex>`: `0x05`=CV, `0x02`=SWV, `0x0D`=EIS, …). El evento
   `method` ahora trae `method_name`.
+- **Estado final visible (hecho):** antes `stop()` pisaba siempre la etiqueta de estado
+  con `"Status: stopped"`, borrando el mensaje terminal recién publicado
+  (`End of experiment (via …)`, errores, watchdog, etc.), y `_reconcile_merge` la volvía
+  a pisar con el resumen del merge. Ahora `stop()` solo escribe `"Stopped by user."`
+  cuando `_terminated` es `False` (stop manual), y `_reconcile_merge` **anexa** su
+  resumen al estado terminal en vez de reemplazarlo:
+  `"End of experiment (via TCP). Merge: 250 pts (+3 recovered)"`.
 - **Fin de experimento con preprocesamiento (firmware, hecho):** el Pico terminaba en
   *cualquier* línea en blanco, así que con varios `meas_loop` antes del método principal
   (p.ej. acondicionamiento antes de EIS) terminaba antes de tiempo. Ahora el fin normal es

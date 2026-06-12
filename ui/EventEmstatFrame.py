@@ -111,6 +111,10 @@ class EventPlotter(ttk.Frame):
         self._plot_source = "tcp"
         # Cobertura por transporte: set de 'seq' de paquetes emstat_data vistos.
         self.seq_seen = {"tcp": set(), "udp": set()}
+        # Diagnóstico: últimas líneas EMSTAT crudas recibidas (cualquier transporte);
+        # se vuelca al cerrar para ver CÓMO terminó el stream (p.ej. si tras el último
+        # '*' llegó la blank/terminal o la corrida murió por watchdog).
+        self._raw_tail = deque(maxlen=20)
         # Merge (Fase 2): seq -> evento data (primer transporte que lo trae gana).
         # Al cerrar se reconstruye la unión ordenada por seq (rellena lo que el
         # transporte primario perdió con lo que trajo el otro).
@@ -224,6 +228,13 @@ class EventPlotter(ttk.Frame):
         # Retención entre corridas: clave de línea -> (run, cycle) para etiquetas
         # adaptativas, desplazamiento de clave por corrida e índice de corrida.
         self.key_meta = {}
+        # Kwargs extra para construir los parsers de la corrida (p.ej. EIS E_dc Scan
+        # pasa eis_group_by_potential=True). Se fijan en update_val_experiment.
+        self.parser_kwargs = {}
+        # Leyenda por valor de evento: (clave, formato), p.ej. ("E_V", "E={:.3g}V")
+        # para etiquetar cada espectro EIS con su potencial. None -> R{run}c{cycle}.
+        self.cycle_legend = None
+        self.cycle_label_values = {}  # clave de línea -> valor para la leyenda
         self.plot_run_offset = 0
         self.run_index = 0
         self._run_td_start = 0  # offset en total_data donde empieza la corrida actual
@@ -285,6 +296,7 @@ class EventPlotter(ttk.Frame):
 
         # Reset cobertura/estado del tap para esta corrida
         self.seq_seen = {"tcp": set(), "udp": set()}
+        self._raw_tail.clear()
         self.merged_by_seq = {}
         self._last_rx = None
         self._run_start_ts = time.time()  # para el watchdog de "nunca arranco"
@@ -409,7 +421,10 @@ class EventPlotter(ttk.Frame):
         self.cmb_transport.configure(state="readonly")
         self.chk_keep.configure(state=ttk.NORMAL)
         self._cancel_update()
-        self._set_status("Estado: detenido")
+        # No pisar el estado final ya publicado por un terminal/watchdog
+        # (end/error/aborted/maxtime/timeout); solo el stop manual reporta aquí.
+        if not self._terminated:
+            self._set_status("Stopped by user.")
         self.on_end_experiment(self.thread_motor)
         self.thread_motor = None
 
@@ -423,6 +438,7 @@ class EventPlotter(ttk.Frame):
         self.lines_by_m.clear()
         self.loaded_lines.clear()
         self.key_meta.clear()
+        self.cycle_label_values.clear()
         self.plot_run_offset = 0
         self.run_index = 0
         self._run_td_start = 0
@@ -449,6 +465,7 @@ class EventPlotter(ttk.Frame):
         self.x_by_m.clear()
         self.y_by_m.clear()
         self.key_meta.clear()
+        self.cycle_label_values.clear()
         self.total_data.clear()
         self.merged_by_seq.clear()
         with self.q_points.mutex:
@@ -464,7 +481,7 @@ class EventPlotter(ttk.Frame):
             self._set_status("Stop aquisition before saving data.")
             return
         if not self.total_data:
-            self._set_status("No hay datos para guardar.")
+            self._set_status("No data to save.")
             return
         print("Saving data …")
         os.makedirs("files", exist_ok=True)
@@ -483,14 +500,26 @@ class EventPlotter(ttk.Frame):
             return
         if not filename.lower().endswith(".csv"):
             filename += ".csv"
+        # Columnas extra TRAILING (Load solo lee las 5 primeras, así que no rompen
+        # la recarga): campos EIS presentes en los eventos que no sean ya x/y.
+        extra_keys = [
+            k
+            for k in ("freq_Hz", "E_V", "t_s", "Z_mod")
+            if k not in (self.x_key, self.y_key)
+            and any(k in ev for ev in self.total_data)
+        ]
         try:
             with open(filename, "w") as f:
-                f.write(f"sample,{self.x_key}, {self.y_key}, cycle, run\n")
+                header = f"sample,{self.x_key}, {self.y_key}, cycle, run"
+                header += "".join(f", {k}" for k in extra_keys)
+                f.write(header + "\n")
                 for index, event in enumerate(self.total_data):
-                    f.write(
+                    row = (
                         f"{index}, {event.get(self.x_key)}, {event.get(self.y_key)},"
-                        f" {event.get('cycle')}, {event.get('run', 1)}\n"
+                        f" {event.get('cycle')}, {event.get('run', 1)}"
                     )
+                    row += "".join(f", {event.get(k, '')}" for k in extra_keys)
+                    f.write(row + "\n")
             self._set_status(f"Data saved to file: {os.path.basename(filename)}")
         except Exception as e:
             self._set_status(f"Error saving data: {e}")
@@ -565,7 +594,15 @@ class EventPlotter(ttk.Frame):
         )
 
     def update_val_experiment(
-        self, x_key, y_key, payload, ip_sender, callback_spin_motor, filename_meta=None
+        self,
+        x_key,
+        y_key,
+        payload,
+        ip_sender,
+        callback_spin_motor,
+        filename_meta=None,
+        parser_kwargs=None,
+        cycle_legend=None,
     ):
         if self.flag_recording:
             print("not posible to update payload while running experiment")
@@ -575,6 +612,10 @@ class EventPlotter(ttk.Frame):
         self.payload_exp = payload
         self.ip_sender = ip_sender
         self.callback_motor = callback_spin_motor
+        # Se reasignan SIEMPRE (no solo si vienen): el mismo plotter alterna modos
+        # entre corridas (EIS) y un valor viejo contaminaría la corrida nueva.
+        self.parser_kwargs = dict(parser_kwargs) if parser_kwargs else {}
+        self.cycle_legend = cycle_legend
         if filename_meta is not None:
             self.filename_meta = dict(filename_meta)
 
@@ -706,8 +747,8 @@ class EventPlotter(ttk.Frame):
         La corrida termina por: primer terminal de cualquier transporte (Fase 1),
         Stop, o watchdog de inactividad total."""
         parsers = {
-            "tcp": EmstatStreamParser(experiment=self.method),
-            "udp": EmstatStreamParser(experiment=self.method),
+            "tcp": EmstatStreamParser(experiment=self.method, **self.parser_kwargs),
+            "udp": EmstatStreamParser(experiment=self.method, **self.parser_kwargs),
         }
         while not self.stop_event.is_set():
             got = False
@@ -742,7 +783,7 @@ class EventPlotter(ttk.Frame):
                 ):
                     self._terminated = True
                     print(f"WATCHDOG: sin paquetes por {self.watchdog_timeout}s; cierro corrida")
-                    self._set_status("Watchdog: inactividad total, corrida cerrada.")
+                    self._set_status("Watchdog: total inactivity, run closed.")
                     self.stop_event.set()
                     break
                 # Watchdog de arranque: conecto el TCP, mando el payload, pero el Pico
@@ -757,7 +798,7 @@ class EventPlotter(ttk.Frame):
                     self._terminated = True
                     print("WATCHDOG: el experimento nunca arranco; cierro corrida")
                     self._set_status(
-                        "Watchdog: el Pico no respondio (comando perdido?); reintenta."
+                        "Watchdog: Pico did not respond (lost command?); retry."
                     )
                     self.stop_event.set()
                     break
@@ -808,6 +849,13 @@ class EventPlotter(ttk.Frame):
         mtype = msg.get("type")
         seq = msg.get("seq")
         selected = source == self._plot_source
+
+        # Cola de diagnóstico (se imprime al cerrar): datos con su raw recortado,
+        # el resto solo con su type — suficiente para ver cómo terminó el stream.
+        if mtype == "emstat_data":
+            self._raw_tail.append(f"{source} seq={seq} {str(msg.get('raw', ''))[:70]}")
+        else:
+            self._raw_tail.append(f"{source} seq={seq} <{mtype}>")
 
         if mtype is None:
             # Mensaje EMSTAT sin 'type' reconocido. El Pico emite
@@ -870,6 +918,7 @@ class EventPlotter(ttk.Frame):
                     m = self.plot_run_offset + cyc
                     event["run"] = self.run_index
                     self.key_meta.setdefault(m, (self.run_index, cyc))
+                    self._capture_cycle_label(m, event)
                     self.total_data.append(event)
                     try:
                         self.q_points.put_nowait(
@@ -942,6 +991,11 @@ class EventPlotter(ttk.Frame):
         if self._coverage_printed:
             return
         self._coverage_printed = True
+        # Cola de diagnóstico: cómo terminó el stream (¿llegó '*'? ¿terminal?).
+        if self._raw_tail:
+            print(f"TAIL (últimos {len(self._raw_tail)} mensajes EMSTAT):")
+            for entry in self._raw_tail:
+                print("   ", entry)
         tcp = self.seq_seen["tcp"]
         udp = self.seq_seen["udp"]
         only_udp = sorted(udp - tcp)
@@ -1003,11 +1057,13 @@ class EventPlotter(ttk.Frame):
             self.x_by_m.pop(m, None)
             self.y_by_m.pop(m, None)
             self.key_meta.pop(m, None)
+            self.cycle_label_values.pop(m, None)
 
         for ev in ordered:
             cyc = ev.get("cycle", 0)
             m = self.plot_run_offset + cyc
             self.key_meta.setdefault(m, (self.run_index, cyc))
+            self._capture_cycle_label(m, ev)
             self._get_or_create_line(m)  # crea deque + Line2D para esta corrida/ciclo
             self.x_by_m[m].append(ev.get(self.x_key, 0.0))
             self.y_by_m[m].append(ev.get(self.y_key, 0.0))
@@ -1018,7 +1074,11 @@ class EventPlotter(ttk.Frame):
         self._update_legends()
         self.canvas.draw_idle()
         print(f"MERGE: dataset={len(ordered)} puntos; recuperados del otro transporte: {filled}")
-        self._set_status(f"Merge TCP+UDP: {len(ordered)} pts (+{filled} recuperados)")
+        # Anexa el resumen al estado terminal en vez de reemplazarlo, p.ej.
+        # "End of experiment (via TCP). Merge: 250 pts (+3 recovered)".
+        self._set_status(
+            f"{self.lbl_status.cget('text')} Merge: {len(ordered)} pts (+{filled} recovered)"
+        )
 
     @staticmethod
     def _format_terminal_status(msg):
@@ -1084,6 +1144,15 @@ class EventPlotter(ttk.Frame):
     # ---------------------------
     # Utilidades de plotting
     # ---------------------------
+    def _capture_cycle_label(self, m, event):
+        """Captura (una vez por línea) el valor de leyenda configurado en
+        cycle_legend, p.ej. el potencial E_V del primer paquete de cada espectro EIS."""
+        if self.cycle_legend is None or m in self.cycle_label_values:
+            return
+        val = event.get(self.cycle_legend[0])
+        if val is not None:
+            self.cycle_label_values[m] = val
+
     def _update_legends(self):
         """Actualiza las leyendas del gráfico según las líneas actuales."""
         if self.legends_list is not None:
@@ -1103,10 +1172,16 @@ class EventPlotter(ttk.Frame):
             for m in self.lines_by_m:
                 run, cyc = self.key_meta.get(m, (1, m))
                 cycles_per_run.setdefault(run, set()).add(cyc)
+            multi_run = len({r for r, _ in self.key_meta.values()}) > 1
             labels = []
             for m in self.lines_by_m:
                 run, cyc = self.key_meta.get(m, (1, m))
-                if len(cycles_per_run.get(run, {cyc})) > 1:
+                # Leyenda por valor (p.ej. "E=0.1V" por espectro EIS); el prefijo
+                # R{run} solo cuando hay varias corridas retenidas (Keep runs).
+                if self.cycle_legend is not None and m in self.cycle_label_values:
+                    label = self.cycle_legend[1].format(self.cycle_label_values[m])
+                    labels.append(f"R{run} {label}" if multi_run else label)
+                elif len(cycles_per_run.get(run, {cyc})) > 1:
                     labels.append(f"R{run}c{cyc}")
                 else:
                     labels.append(f"R{run}")
@@ -1116,7 +1191,13 @@ class EventPlotter(ttk.Frame):
                 continue
             handles.append(line)
             labels.append(line.get_label())
-        self.ax.legend(handles, labels, loc="best", frameon=True)
+        # Leyenda compacta: con muchas trazas (p.ej. un espectro EIS por potencial)
+        # la leyenda a tamaño normal colapsa los ejes de la figura chica (warning
+        # "axes sizes collapsed to zero" del constrained layout).
+        ncol = 2 if len(labels) > 6 else 1
+        self.ax.legend(
+            handles, labels, loc="best", frameon=True, fontsize="small", ncol=ncol
+        )
         self.canvas.draw_idle()
 
     def _build_style_cycle(self):

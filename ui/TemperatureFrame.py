@@ -64,7 +64,7 @@ class TemperatureFrame(ttk.Frame):
         self.interval_entry.insert(0, "500")  # Por defecto 1 segundo
         self.interval_entry.grid(row=0, column=1, padx=5, pady=5, sticky="we")
 
-        ttk.Label(control_frame, text="Unidad:", style="Custom.TLabel").grid(
+        ttk.Label(control_frame, text="Unit:", style="Custom.TLabel").grid(
             row=0, column=2, padx=5, pady=5, sticky="e"
         )
 
@@ -128,9 +128,9 @@ class TemperatureFrame(ttk.Frame):
     # ----------------- Control -----------------
 
     def iniciar_lectura(self):
-        print("Iniciar lectura de temperatura")
+        print("Starting temperature reading")
         if self.running:
-            print("Ya se está leyendo")
+            print("Already reading")
             return
         self.client = UdpClient(
             port=5005,
@@ -156,10 +156,10 @@ class TemperatureFrame(ttk.Frame):
             self.after(intervalo, self.adquirir_dato)
         except ValueError:
             self.interval_entry.configure(background="salmon")
-            print("Intervalo inválido")
+            print("Invalid interval")
 
     def detener_lectura(self):
-        print("Detener lectura de temperatura")
+        print("Stopping temperature reading")
         if self.client is not None:
             self.client.stop()
         self.running = False
@@ -170,7 +170,7 @@ class TemperatureFrame(ttk.Frame):
         self.temps.clear()
         self.timestamps.clear()
         self.actualizar_grafico()
-        print("Datos limpiados")
+        print("Data cleared")
 
     # ----------------- Adquisición -----------------
 
@@ -182,7 +182,7 @@ class TemperatureFrame(ttk.Frame):
         try:
             temp_c = float(self.sensor_reader())
         except Exception as e:
-            print(f"Error leyendo el sensor: {e}")
+            print(f"Error reading sensor: {e}")
             temp_c = self.temps_filter[-1]
 
         timestamp = time.time() - self.start_time
@@ -232,21 +232,21 @@ class TemperatureFrame(ttk.Frame):
         from datetime import datetime
 
         if not self.timestamps:
-            print("No hay datos para guardar.")
+            print("No data to save.")
             return
 
         os.makedirs("files", exist_ok=True)
         fecha = datetime.now().strftime("%Y%m%d_%H%M%S")
         nombre = filedialog.asksaveasfilename(
             parent=self,
-            title="Guardar datos de temperatura",
+            title="Save temperature data",
             initialdir="files",
             initialfile=f"temperature_log_{fecha}.csv",
             defaultextension=".csv",
-            filetypes=[("CSV files", "*.csv"), ("Todos", "*.*")],
+            filetypes=[("CSV files", "*.csv"), ("All", "*.*")],
         )
         if not nombre:
-            print("Guardado cancelado")
+            print("Save cancelled")
             return
         if not nombre.lower().endswith(".csv"):
             nombre += ".csv"
@@ -258,9 +258,9 @@ class TemperatureFrame(ttk.Frame):
                 writer.writerow(["t (s)", f"Temp ({unidad})"])
                 for t, c in zip(self.timestamps, self.temps):
                     writer.writerow([f"{t:.3f}", f"{self._convert_units(c):.3f}"])
-            print(f"CSV guardado: {nombre}")
+            print(f"CSV saved: {nombre}")
         except Exception as e:
-            print(f"Error guardando CSV: {e}")
+            print(f"Error saving CSV: {e}")
 
     # ----------------- Lectores de ejemplo -----------------
 

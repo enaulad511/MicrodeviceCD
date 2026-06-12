@@ -1,4 +1,5 @@
 import json
+import math
 import os
 import re
 
@@ -176,25 +177,54 @@ def construct_eis_script(
     t_con1="",
     E_con2="",
     t_con2="",
+    scan_type=1,
+    bandwidth="",
+    E_begin="",
+    E_step="",
+    E_break="",
+    E_dir=1,
+    t_run=0,
+    t_interval=0,
 ):
-    """EIS (Electrochemical Impedance Spectroscopy) -- scan type Default + barrido
-    de frecuencia (frequency Scan). Genera el MethodSCRIPT completo.
+    """EIS (Electrochemical Impedance Spectroscopy). Genera el MethodSCRIPT completo
+    para los modos de la Fase 2 (ver docs/eis_impedancia.md, seccion 7).
 
-    Front-end verificado contra el ejemplo oficial PalmSens (set_pgstat_chan 0,
-    set_pgstat_mode 3 high-speed, set_autoranging ba 10u 1m) + acondicionamiento
-    opcional. No reutiliza construct_header_experiment.
+    Front-end comun (los 5 modos): el de Fase 1 verificado contra el ejemplo oficial
+    PalmSens (chan 0, mode 3 high-speed, autorango ba 10u-1m) + dos adopciones del
+    export PSTrace: set_e inicial INCONDICIONAL antes de cell_on y set_max_bandwidth
+    (10x la frecuencia maxima, calculado por el caller). No reutiliza
+    construct_header_experiment.
 
-    Orden de meas_loop_eis: f z_r z_i E_ac f_max f_min n_freq E_dc.
+    scan_type (cuerpo del script):
+      1 = Default: un meas_loop_eis directo a E_dc.
+      2 = E_dc Scan: loop generico PSTrace (store_var/loop/add_var/breakloop) con el
+          potencial en extra1; cada paquete agrega pck_add extra1 (desviacion nuestra
+          del export para que los datos sean autodescriptivos). E_step llega CON signo;
+          E_break = E_end + signo*E_step/2 (tolerancia de medio paso); E_dir elige la
+          comparacion del breakloop (1 ascendente '>', -1 descendente '<').
+      3 = Time Scan: UN solo meas_loop_eis con n_freq = t_run/t_interval + 1
+          repeticiones, pacificado por timer_start/set_int/await_int (patron exacto
+          del export PSTrace); el tiempo transcurrido viaja en extra1 (tipo eb) y el
+          script corta con abort al llegar a t_run.
+
+    El tipo de frecuencia NO llega aqui: el caller degenera f_max=f_min=f y n_freq=1
+    (o n_meas en Time Scan) para frecuencia fija. Orden de meas_loop_eis:
+    f z_r z_i E_ac f_max f_min n_freq E_dc.
 
     Acondicionamiento: hasta dos bloques meas_loop_ca (E_con1/t_con1, E_con2/t_con2),
-    cada uno omitido si su tiempo es "" (0). Si hay acondicionamiento se hace set_e
-    inicial y se re-asegura el autorango ba tras los bloques.
+    cada uno omitido si su tiempo es "" (0); tras ellos se re-asegura el autorango ba.
+
+    IMPORTANTE: esta funcion vive duplicada byte a byte en DiscPCB/EmstatDrivers.py
+    (Pico). Cualquier cambio aqui debe replicarse alla y flashearse.
     """
-    # Potencial inicial: primer bloque de acondicionamiento activo, si no E_dc.
+    # Potencial inicial: primer bloque de acondicionamiento activo, si no el
+    # potencial inicial del modo (E_begin en barrido de potencial, E_dc en el resto).
     if t_con1 != "":
         e_start = E_con1
     elif t_con2 != "":
         e_start = E_con2
+    elif scan_type == 2:
+        e_start = E_begin
     else:
         e_start = E_dc
 
@@ -223,39 +253,77 @@ def construct_eis_script(
         # Tras el acondicionamiento, re-asegura el rango ba del EIS.
         sc_reset_ba = "set_autoranging ba 10u 1m\n"
 
-    # Front-end verificado contra el ejemplo oficial PalmSens: canal 0, modo 3
-    # (high speed, requerido por EIS) y autorango ba 10u-1m. set_e solo si hay
-    # acondicionamiento (si no, el E_dc lo aplica meas_loop_eis). Las variables
-    # i/e se declaran para los bloques meas_loop_ca del acondicionamiento.
-    script = (
-        "e\n"
-        "var f\n"
-        "var z_r\n"
-        "var z_i\n"
-        "var i\n"
-        "var e\n"
-        "set_pgstat_chan 0\n"
-        "set_pgstat_mode 3\n"
-        "set_autoranging ba 10u 1m\n"
-    )
-    if t_con1 != "" or t_con2 != "":
-        script += f"set_e {e_start}\n"
+    # Las variables i/e se declaran para los bloques meas_loop_ca del
+    # acondicionamiento; extra1 solo cuando el modo la usa (potencial o tiempo).
+    script = "e\nvar f\nvar z_r\nvar z_i\nvar i\nvar e\n"
+    if scan_type in (2, 3):
+        script += "var extra1\n"
+    script += "set_pgstat_chan 0\nset_pgstat_mode 3\n"
+    if bandwidth != "":
+        script += f"set_max_bandwidth {bandwidth}\n"
+    script += "set_autoranging ba 10u 1m\n"
+    script += f"set_e {e_start}\n"
     script += "cell_on\n"
     script += sc_con1
     script += sc_con2
     script += sc_reset_ba
-    script += (
-        f"meas_loop_eis f z_r z_i {E_ac} {f_max} {f_min} {n_freq} {E_dc}\n"
-        "  pck_start\n"
-        "    pck_add f\n"
-        "    pck_add z_r\n"
-        "    pck_add z_i\n"
-        "  pck_end\n"
-        "endloop\n"
-        "on_finished:\n"
-        "  cell_off\n"
-        "\n"
-    )
+
+    if scan_type == 2:
+        cmp_op = ">" if E_dir >= 0 else "<"
+        script += (
+            f"store_var extra1 {E_begin} da\n"
+            "loop 1i == 1i\n"
+            f"  meas_loop_eis f z_r z_i {E_ac} {f_max} {f_min} {n_freq} extra1\n"
+            "    pck_start\n"
+            "      pck_add f\n"
+            "      pck_add z_r\n"
+            "      pck_add z_i\n"
+            "      pck_add extra1\n"
+            "    pck_end\n"
+            "  endloop\n"
+            f"  add_var extra1 {E_step}\n"
+            f"  if extra1 {cmp_op} {E_break}\n"
+            "    breakloop\n"
+            "  endif\n"
+            "endloop\n"
+        )
+    elif scan_type == 3:
+        script += (
+            "store_var extra1 0 eb\n"
+            f"meas_loop_eis f z_r z_i {E_ac} {f_max} {f_min} {n_freq} {E_dc}\n"
+            "  if extra1 == 0\n"
+            "    timer_start\n"
+            f"    set_int {t_interval}\n"
+            "  else\n"
+            "    timer_get extra1\n"
+            "  endif\n"
+            "  pck_start\n"
+            "    pck_add f\n"
+            "    pck_add z_r\n"
+            "    pck_add z_i\n"
+            "    pck_add extra1\n"
+            "  pck_end\n"
+            "  if extra1 == 0\n"
+            f"    store_var extra1 {t_interval} eb\n"
+            "  endif\n"
+            f"  if extra1 >= {t_run}\n"
+            "    abort\n"
+            "  endif\n"
+            "  await_int\n"
+            "endloop\n"
+        )
+    else:
+        script += (
+            f"meas_loop_eis f z_r z_i {E_ac} {f_max} {f_min} {n_freq} {E_dc}\n"
+            "  pck_start\n"
+            "    pck_add f\n"
+            "    pck_add z_r\n"
+            "    pck_add z_i\n"
+            "  pck_end\n"
+            "endloop\n"
+        )
+
+    script += "on_finished:\n  cell_off\n\n"
     return script
 
 
@@ -277,9 +345,18 @@ class EmstatStreamParser:
         },
         # Códigos de paquete REALES del EmStat en EIS (verificados en salida cruda):
         #   dc = frecuencia, cc = Z_real, cd = Z_imag.
+        # Fase 2: da = potencial DC del barrido E_dc Scan (pck_add extra1, tipo da);
+        # eb = tiempo transcurrido del Time Scan (pck_add extra1, tipo eb). Ambos
+        # pendientes de verificación contra salida cruda en hardware.
         # (La columna 'scale' es vestigial: _decode solo aplica el prefijo de unidad.
         #  La negación de Z_imag para el Nyquist se hace explícita en _decode.)
-        "eis": {"dc": ("freq_Hz", 1), "cc": ("Z_real", 1), "cd": ("Z_imag", 1)},
+        "eis": {
+            "dc": ("freq_Hz", 1),
+            "cc": ("Z_real", 1),
+            "cd": ("Z_imag", 1),
+            "da": ("E_V", 1),
+            "eb": ("t_s", 1),
+        },
     }
     UNIT_MAP = {
         "a": 1e-18,
@@ -318,14 +395,22 @@ class EmstatStreamParser:
         0x14: "DUAL_EIS",  # Dual EIS
     }
 
-    def __init__(self, experiment: str):
+    def __init__(self, experiment: str, eis_group_by_potential: bool = False):
         if experiment not in self.FIELD_MAP:
             raise ValueError(f"Unsupported experiment: {experiment}")
 
         self.experiment = experiment
+        # EIS E_dc Scan + freq Scan: agrupa los paquetes en "espectros" (cycle) por
+        # cambio del potencial E_V que viaja en cada paquete -> una curva Nyquist por
+        # potencial. Apagado en los demás modos (en Mott-Schottky cada punto trae un
+        # potencial distinto y partiría la traza única en N líneas de 1 punto).
+        self.eis_group_by_potential = eis_group_by_potential
 
         # Contexto dinámico
         self.context = {"cycle": 0, "direction": +1, "method_id": None}
+        # Rastreo de espectros EIS (solo con eis_group_by_potential)
+        self._eis_last_e: float | None = None
+        self._eis_spectrum = 0
 
         self.finished = False
 
@@ -430,8 +515,23 @@ class EmstatStreamParser:
 
         # EIS: los paquetes de acondicionamiento (da/ba) no traen campos Z; no son
         # puntos del Nyquist. Marcarlos como no-dato evita graficar (0,0) espurios.
+        # (Los paquetes del barrido E_dc Scan traen da + dc/cc/cd: pasan el filtro.)
         if self.experiment == "eis" and "Z_real" not in decoded and "Z_imag" not in decoded:
             decoded["type"] = "unknown"
+
+        # EIS E_dc Scan + freq Scan: el "cycle" pasa a ser el índice de espectro,
+        # detectado por cambio del potencial embebido en el paquete (robusto ante
+        # marcadores M/C perdidos en TCP; el potencial sí se recupera vía UDP).
+        if (
+            self.experiment == "eis"
+            and self.eis_group_by_potential
+            and decoded["type"] == "data"
+            and "E_V" in decoded
+        ):
+            if self._eis_last_e is not None and decoded["E_V"] != self._eis_last_e:
+                self._eis_spectrum += 1
+            self._eis_last_e = decoded["E_V"]
+            decoded["cycle"] = self._eis_spectrum
 
         return decoded
 
@@ -453,8 +553,17 @@ class EmstatStreamParser:
                 parts = body.split(",")
                 head = parts[0]
                 key_base = head[:2]
-                unit = head[-1]
-                raw_val = head[2:-1]
+                # El valor es SIEMPRE 7 hex (28 bits con offset 0x8000000) + 1 char
+                # de unidad. Si la unidad es el espacio (adimensional: eb segundos,
+                # da en volts exactos) y el campo cierra la línea sin metadata, el
+                # strip() del transporte la pierde -> unidad implícita ' '. Antes se
+                # usaba head[-1] como unidad y eso corrompía el valor en ese caso.
+                if len(head) >= 10:
+                    raw_val = head[2:9]
+                    unit = head[9]
+                else:
+                    raw_val = head[2:]
+                    unit = " "
                 value = int(raw_val, 16) - 0x8000000
                 # Metadata: primer char = id (hex), resto = valor (hex).
                 for meta in parts[1:]:
@@ -491,6 +600,10 @@ class EmstatStreamParser:
         # Nyquist: el eje Y es -Z_imag por convención (semicírculos hacia arriba).
         if self.experiment == "eis" and "Z_imag" in out:
             out["Z_imag"] = -out["Z_imag"]
+            # |Z| derivado para los modos de frecuencia fija (y vs E o vs t). La
+            # negación no afecta la magnitud.
+            if "Z_real" in out:
+                out["Z_mod"] = math.sqrt(out["Z_real"] ** 2 + out["Z_imag"] ** 2)
         return out
 
 

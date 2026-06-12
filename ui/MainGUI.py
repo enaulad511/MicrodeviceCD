@@ -30,6 +30,7 @@ from ui.FrameInit import StartImageFrame
 from ui.LEDFrame import ControleLEDFrame
 from ui.PcrFrame import PCRFrame
 from ui.PhotoreceptorFrame import PhotoreceptorFrame
+from ui.QuickControlFrame import QuickControlFrame
 
 
 def configure_styles():
@@ -143,24 +144,30 @@ class MainGUI(ttk.Window):
         self.notebook.bind("<<NotebookTabChanged>>", self.on_tab_changed)
         print("init tabs")
 
+        self.tab_quick = QuickControlFrame(
+            self.notebook, self.ads, lock_tabs_callback=self.set_tabs_locked
+        )
+        self.notebook.add(self.tab_quick, text=tab_texts[0])
+        print("init tabs Quick Control")
+
         self.tab1 = ControleLEDFrame(self.notebook)
-        self.notebook.add(self.tab1, text=tab_texts[0])
+        self.notebook.add(self.tab1, text=tab_texts[1])
         print("init tabs LED")
 
         self.tab2 = ControlFluorescenteFrame(self.notebook)
-        self.notebook.add(self.tab2, text=tab_texts[1])
+        self.notebook.add(self.tab2, text=tab_texts[2])
         print("init tabs Fluorescence")
 
         self.tab3 = ControlDiscFrame(self.notebook)
-        self.notebook.add(self.tab3, text=tab_texts[2])
+        self.notebook.add(self.tab3, text=tab_texts[3])
         print("init tabs Disc")
 
         self.tab4 = PhotoreceptorFrame(self.notebook, self.ads)
-        self.notebook.add(self.tab4, text=tab_texts[3])
+        self.notebook.add(self.tab4, text=tab_texts[4])
         print("init tabs Photoreceptor")
 
         self.tab5 = TemperatureFrame(self.notebook, sensor_reader="termocupula")
-        self.notebook.add(self.tab5, text=tab_texts[4])
+        self.notebook.add(self.tab5, text=tab_texts[5])
         # # --------------------footer-------------------
         self.frame_footer = ttk.Frame(self)
         self.frame_footer.grid(row=1, column=0, sticky="nswe", padx=5)
@@ -214,6 +221,23 @@ class MainGUI(ttk.Window):
                 self.notebook.tab(i, text=f"{icon} {text}")
             else:
                 self.notebook.tab(i, text=text)
+
+    def set_tabs_locked(self, locked):
+        """Bloquea/desbloquea las demás tabs mientras Quick Control tiene
+        actuadores o lecturas activas. Aplica a AMBOS notebooks: las tabs
+        hermanas del Manual Control y las principales (PCR/Electrochemical
+        también usan motor/UDP). La tab Manual Control (índice 2) y la propia
+        Quick Control (índice 0) quedan siempre habilitadas."""
+        state = "disabled" if locked else "normal"
+        try:
+            for i, _ in enumerate(main_tabs_texts):
+                if i != 2:  # Manual Control aloja a Quick Control
+                    self.main_notebook.tab(i, state=state)
+            for i, _ in enumerate(tab_texts):
+                if i != 0:  # Quick Control
+                    self.notebook.tab(i, state=state)
+        except Exception as e:
+            print(f"Error locking tabs: {e}")
 
     def on_main_tab_changed(self, event):
         selected_index = self.main_notebook.index(self.main_notebook.select())

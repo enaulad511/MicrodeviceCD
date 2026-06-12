@@ -125,7 +125,7 @@ class ControlFluorescenteFrame(ttk.Frame):
             )
             self.pin.set_output(initial_high=False)     # pyrefly: ignore
         else:
-            print(f"Pin {self.led_gpio} ya existe.")
+            print(f"Pin {self.led_gpio} already exists.")
 
     def _on_destroy(self, event=None):
         """Apaga y libera recursos al destruir el frame."""
@@ -139,7 +139,7 @@ class ControlFluorescenteFrame(ttk.Frame):
             if self.pin is not None:
                 self.pin.close()
         except Exception as e:
-            print(f"Error al cerrar el GPIO: {e}")
+            print(f"Error closing GPIO: {e}")
             
         self.pin = None
 
@@ -150,25 +150,25 @@ class ControlFluorescenteFrame(ttk.Frame):
         self._ensure_pin()
 
     def callback_on(self):
-        print("Encender LED Fluorescente")
+        print("Fluorescent LED ON")
         self._cleanup_jobs()
         self.init_GPIO()
         self.pin.write(True)        # pyrefly: ignore
-        print("Encendido")
+        print("ON")
         self.pin.close()       # pyrefly: ignore
         self.pin = None
 
     def callback_off(self):
-        print("Apagar LED Fluorescente")
+        print("Fluorescent LED OFF")
         self._cleanup_jobs()
         self.init_GPIO()
         self.pin.write(False)       # pyrefly: ignore
-        print("Apagado")
+        print("OFF")
         self.pin.close()       # pyrefly: ignore
         self.pin = None
 
     def callback_on_time(self):
-        print("Encender LED Fluorescente por tiempo")
+        print("Fluorescent LED timed ON")
         ms = self._read_int_entry(self.entries[0], default=500)  # default 500 ms
         if ms < 0:
             ms = 0
@@ -178,7 +178,7 @@ class ControlFluorescenteFrame(ttk.Frame):
 
         # Encender inmediatamente
         self.pin.write(True)        # pyrefly: ignore
-        print(f"Encendido temporizado: {ms} ms")
+        print(f"Timed ON: {ms} ms")
 
         # Agendar apagado
         self._on_time_job = self.after(ms, self._on_time_finish)        # pyrefly: ignore

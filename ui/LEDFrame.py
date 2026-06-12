@@ -144,7 +144,7 @@ class ControleLEDFrame(ttk.Frame):
         if self.pin is not None:
             self._cleanup_jobs()
         else:
-            print(f"Creando pin GPIO {led_heatin_pin}")
+            print(f"Creating GPIO pin {led_heatin_pin}")
             self.pin = GPIOPin(  # pyrefly: ignore
                 led_heatin_pin,
                 chip=self.chip,
@@ -197,23 +197,23 @@ class ControleLEDFrame(ttk.Frame):
             self.pin.write(False)  # pyrefly: ignore
             self.pin.close()  # pyrefly: ignore
         except Exception as e:
-            print(f"Error al cerrar el GPIO heating led: {e}")
+            print(f"Error closing heating LED GPIO: {e}")
 
     # ----------------- Callbacks públicos -----------------
     def callback_on(self):
         self.init_GPIO()
         self._cleanup_jobs()
         self.pin.write(True)  # pyrefly: ignore
-        print("Encender LED")
+        print("LED ON")
 
     def callback_off(self):
         if self.pin is None:
-            print("No se ha inicializado el GPIO")
+            print("GPIO not initialized")
             return
         # Parar cualquier programación y apagar
         self._cleanup_jobs()
         self.pin.write(False)
-        print("Apagar LED")
+        print("LED OFF")
         self.pin.close()  # pyrefly: ignore
         self.pin = None
 
@@ -225,7 +225,7 @@ class ControleLEDFrame(ttk.Frame):
             ms = 0
         self._cleanup_jobs()
         self.pin.write(True)  # pyrefly: ignore
-        print(f"Encender LED por tiempo: {ms} ms")
+        print(f"LED ON for {ms} ms")
 
         # Agenda apagado
         self._on_time_job = self.after(ms, self._on_time_finish)  # pyrefly: ignore
@@ -233,9 +233,9 @@ class ControleLEDFrame(ttk.Frame):
     def _on_time_finish(self):
         self.pin.write(False)  # pyrefly: ignore
         self._on_time_job = None
-        print("Tiempo finalizado: LED apagado")
+        print("Time finished: LED OFF")
         self.pin.close()  # pyrefly: ignore
         self.pin = None
 
     def callback_pattern(self):
-        print("Iniciando patrón")
+        print("Starting pattern")
