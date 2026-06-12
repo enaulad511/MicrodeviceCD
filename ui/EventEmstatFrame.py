@@ -122,9 +122,9 @@ class EventPlotter(ttk.Frame):
         # Watchdog de inactividad total (s) para cerrar si nadie manda terminal.
         # Bajo el idle de 16s del Pico, con margen sobre huecos legítimos entre paquetes.
         self.watchdog_timeout = 10.0
-        self._last_rx = None        # ts del último mensaje EMSTAT (cualquier transporte)
-        self._run_started = False   # gate anti-rezago: visto emstat_start/data
-        self._terminated = False    # primer terminal gana (cualquier transporte)
+        self._last_rx = None  # ts del último mensaje EMSTAT (cualquier transporte)
+        self._run_started = False  # gate anti-rezago: visto emstat_start/data
+        self._terminated = False  # primer terminal gana (cualquier transporte)
         self._coverage_printed = False
         self.running = False
         self.flag_recording = False
@@ -183,6 +183,7 @@ class EventPlotter(ttk.Frame):
             controls2,
             text="Keep runs",
             variable=self.keep_data_var,
+            style="Custom.TCheckbutton",
         )
         self.analysis_window = None
         self.lbl_status = ttk.Label(self, text="State: stopped.", anchor="w")
@@ -505,8 +506,7 @@ class EventPlotter(ttk.Frame):
         extra_keys = [
             k
             for k in ("freq_Hz", "E_V", "t_s", "Z_mod")
-            if k not in (self.x_key, self.y_key)
-            and any(k in ev for ev in self.total_data)
+            if k not in (self.x_key, self.y_key) and any(k in ev for ev in self.total_data)
         ]
         try:
             with open(filename, "w") as f:
@@ -574,7 +574,7 @@ class EventPlotter(ttk.Frame):
             self._set_status("No data parsed from file.")
             return
         label_base = os.path.splitext(os.path.basename(path))[0]
-        for (run, cycle) in sorted(cycles_x.keys()):
+        for run, cycle in sorted(cycles_x.keys()):
             (line,) = self.ax.plot(
                 cycles_x[(run, cycle)],
                 cycles_y[(run, cycle)],
@@ -589,9 +589,7 @@ class EventPlotter(ttk.Frame):
         self.ax.relim()
         self.ax.autoscale_view()
         self._update_legends()
-        self._set_status(
-            f"Loaded {len(cycles_x)} trace(s) from {os.path.basename(path)}"
-        )
+        self._set_status(f"Loaded {len(cycles_x)} trace(s) from {os.path.basename(path)}")
 
     def update_val_experiment(
         self,
@@ -635,6 +633,7 @@ class EventPlotter(ttk.Frame):
             except Exception:
                 pass
         from ui.AnalysisWindow import AnalysisWindow
+
         self.analysis_window = AnalysisWindow(self, plotter=self)
 
     def _on_analysis_window_closed(self):
@@ -797,9 +796,7 @@ class EventPlotter(ttk.Frame):
                 ):
                     self._terminated = True
                     print("WATCHDOG: el experimento nunca arranco; cierro corrida")
-                    self._set_status(
-                        "Watchdog: Pico did not respond (lost command?); retry."
-                    )
+                    self._set_status("Watchdog: Pico did not respond (lost command?); retry.")
                     self.stop_event.set()
                     break
                 time.sleep(0.01)
@@ -1044,7 +1041,7 @@ class EventPlotter(ttk.Frame):
 
         # Reemplaza SOLO la porción de esta corrida en total_data (para Save) — con
         # retención ON conserva las corridas anteriores ya almacenadas.
-        self.total_data[self._run_td_start:] = ordered
+        self.total_data[self._run_td_start :] = ordered
 
         # Limpia/reconstruye SOLO las líneas de esta corrida (claves >= offset); las
         # corridas anteriores (claves < offset) quedan intactas en el gráfico.
@@ -1195,9 +1192,7 @@ class EventPlotter(ttk.Frame):
         # la leyenda a tamaño normal colapsa los ejes de la figura chica (warning
         # "axes sizes collapsed to zero" del constrained layout).
         ncol = 2 if len(labels) > 6 else 1
-        self.ax.legend(
-            handles, labels, loc="best", frameon=True, fontsize="small", ncol=ncol
-        )
+        self.ax.legend(handles, labels, loc="best", frameon=True, fontsize="small", ncol=ncol)
         self.canvas.draw_idle()
 
     def _build_style_cycle(self):

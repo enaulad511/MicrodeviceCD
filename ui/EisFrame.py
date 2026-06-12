@@ -1,4 +1,8 @@
 # -*- coding: utf-8 -*-
+
+__author__ = "Edisson A. Naula"
+__date__ = "$ 03/06/2026 at 12:00 p.m. $"
+
 import math
 
 import ttkbootstrap as ttk
@@ -9,9 +13,6 @@ from templates.utils import convert_si_integer_full
 from ui.EventEmstatFrame import EventPlotter
 from ui.KeyboardFrame import NumericKeyboard
 from ui.ShowMethodScript import ShowMethodScript
-
-__author__ = "Edisson A. Naula"
-__date__ = "$ 03/06/2026 at 12:00 p.m. $"
 
 # Tipos de barrido (scan type) y de frecuencia. Fase 2: todas las combinaciones
 # funcionan EXCEPTO Time Scan + Scan (excluida por duracion, ver doc seccion 7.1).
@@ -316,9 +317,9 @@ class EISFrame(ttk.Frame):
         ttk.Label(self.frame_freq_scan, text="val/dec:", style="Custom.TLabel").grid(
             row=3, column=0, padx=5, pady=4, sticky="e"
         )
-        ttk.Label(
-            self.frame_freq_scan, textvariable=self.var_valdec, style="Custom.TLabel"
-        ).grid(row=3, column=1, padx=5, pady=4, sticky="w")
+        ttk.Label(self.frame_freq_scan, textvariable=self.var_valdec, style="Custom.TLabel").grid(
+            row=3, column=1, padx=5, pady=4, sticky="w"
+        )
 
         # Fixed (inactivo Fase 1)
         self.frame_freq_fixed = ttk.LabelFrame(self.freq_container, text="Frequency: Fixed")
@@ -330,9 +331,7 @@ class EISFrame(ttk.Frame):
         self.on_freq_type_changed()
 
     def _attach_keyboard(self):
-        editable = (
-            self._pre_entries + self._scan_entries + self._freq_entries
-        )
+        editable = self._pre_entries + self._scan_entries + self._freq_entries
         self.keyboard.attach(editable)
 
     # ----------------------------------------------------------------
@@ -464,9 +463,7 @@ class EISFrame(ttk.Frame):
                     # add_var aplica el paso CON signo; el breakloop compara contra
                     # E_end +- medio paso (tolerancia de acumulacion flotante).
                     "E_step": convert_si_integer_full(direction * e_step),
-                    "E_break": convert_si_integer_full(
-                        round(e_end + direction * e_step / 2, 9)
-                    ),
+                    "E_break": convert_si_integer_full(round(e_end + direction * e_step / 2, 9)),
                     "E_dir": direction,
                 }
             )
@@ -489,9 +486,7 @@ class EISFrame(ttk.Frame):
         payload["f_max"] = convert_si_integer_full(f_hi)
         payload["f_min"] = convert_si_integer_full(f_lo)
         payload["n_freq"] = n_freq
-        payload["max_time_s"] = self._estimate_max_time_s(
-            scan_type, f_hi, f_lo, n_freq, n_spectra
-        )
+        payload["max_time_s"] = self._estimate_max_time_s(scan_type, f_hi, f_lo, n_freq, n_spectra)
         # Idle por corrida: el EmStat emite UN paquete por punto AL TERMINARLO, asi
         # que el hueco maximo entre paquetes es el punto mas lento (el de f_min) --
         # o t_interval en Time Scan. Con el idle fijo del Pico (16 s) cualquier
@@ -534,10 +529,7 @@ class EISFrame(ttk.Frame):
     def _estimate_max_time_s(self, scan_type, f_hi, f_lo, n_freq, n_spectra):
         """Tope dinamico para el firmware (v1.8 usa max(max_time_s, 10 min)):
         la duracion estimada con margen de seguridad."""
-        return int(
-            self._estimate_duration_s(scan_type, f_hi, f_lo, n_freq, n_spectra) * 1.5
-            + 60
-        )
+        return int(self._estimate_duration_s(scan_type, f_hi, f_lo, n_freq, n_spectra) * 1.5 + 60)
 
     def _recompute_estimate(self, *args):
         """Refresca el indicador de duracion estimada (en vivo, via trace_add y al
@@ -568,9 +560,9 @@ class EISFrame(ttk.Frame):
                     raise ValueError
                 n_spectra = round(abs(e_end - e_begin) / e_step) + 1
             elif scan_type == 3:
-                if float(self.var_tinterval.get()) < 1 or float(
-                    self.var_trun.get()
-                ) < float(self.var_tinterval.get()):
+                if float(self.var_tinterval.get()) < 1 or float(self.var_trun.get()) < float(
+                    self.var_tinterval.get()
+                ):
                     raise ValueError
             est = self._estimate_duration_s(scan_type, f_hi, f_lo, n_freq, n_spectra)
             self.var_est_time.set("~" + self._fmt_duration(est))
@@ -664,9 +656,7 @@ class EISFrame(ttk.Frame):
         except ValueError:
             self._set_status("Error: check input values.")
             return
-        x_key, y_key, title, x_label, y_label, parser_kwargs, cycle_legend = (
-            self._plot_config()
-        )
+        x_key, y_key, title, x_label, y_label, parser_kwargs, cycle_legend = self._plot_config()
         self.frame_entries.grid_forget()
         ip_sender = self.callback_ip() if self.callback_ip else "localhost"
         # Watchdog de inactividad del plotter: derivado del idle de ESTA corrida

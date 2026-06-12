@@ -185,7 +185,7 @@ class QuickControlFrame(ttk.Frame):
 
     def _build_led_section(self, parent):
         frame = ttk.LabelFrame(parent, text="LEDs")
-        frame.grid(row=1, column=1, padx=10, pady=6, sticky="nswe")
+        frame.grid(row=1, column=1, padx=(5, 20), pady=6, sticky="nswe")
         frame.configure(style="Custom.TLabelframe")
         frame.columnconfigure(0, weight=1)
 
@@ -195,8 +195,9 @@ class QuickControlFrame(ttk.Frame):
             variable=self.led_heat_var,
             bootstyle="round-toggle",  # pyrefly: ignore
             command=lambda: self._toggle_led("heat"),
+            style="Custom.TCheckbutton",
         )
-        self.chk_led_heat.grid(row=0, column=0, padx=10, pady=10, sticky="w")
+        self.chk_led_heat.grid(row=0, column=0, padx=3, pady=10, sticky="w")
 
         self.chk_led_fluor = ttk.Checkbutton(
             frame,
@@ -204,12 +205,13 @@ class QuickControlFrame(ttk.Frame):
             variable=self.led_fluor_var,
             bootstyle="round-toggle",  # pyrefly: ignore
             command=lambda: self._toggle_led("fluor"),
+            style="Custom.TCheckbutton",
         )
-        self.chk_led_fluor.grid(row=1, column=0, padx=10, pady=10, sticky="w")
+        self.chk_led_fluor.grid(row=1, column=0, padx=3, pady=10, sticky="w")
 
     def _build_reading_section(self, parent, entry_widgets):
         frame = ttk.LabelFrame(parent, text="Readings")
-        frame.grid(row=2, column=0, columnspan=2, padx=10, pady=6, sticky="nswe")
+        frame.grid(row=2, column=0, columnspan=2, padx=(3, 20), pady=6, sticky="nswe")
         frame.configure(style="Custom.TLabelframe")
         frame.columnconfigure((0, 1, 2, 3, 4, 5), weight=1)
 
@@ -219,6 +221,7 @@ class QuickControlFrame(ttk.Frame):
             text="Temperature",
             variable=self.sig_temp_var,
             command=self._on_sig_temp,
+            style="Custom.TCheckbutton",
         )
         self.chk_sig_temp.grid(row=0, column=0, padx=5, pady=5, sticky="w")
         self.chk_sig_fluor = ttk.Checkbutton(
@@ -226,6 +229,7 @@ class QuickControlFrame(ttk.Frame):
             text="Fluorescence",
             variable=self.sig_fluor_var,
             command=self._on_sig_fluor,
+            style="Custom.TCheckbutton",
         )
         self.chk_sig_fluor.grid(row=0, column=1, padx=5, pady=5, sticky="w")
 
@@ -238,7 +242,7 @@ class QuickControlFrame(ttk.Frame):
         entry_widgets.append(self.interval_entry)
 
         self.chk_keep = ttk.Checkbutton(
-            frame, text="Keep data", variable=self.keep_data_var
+            frame, text="Keep data", style="Custom.TCheckbutton", variable=self.keep_data_var
         )
         self.chk_keep.grid(row=0, column=4, padx=5, pady=5, sticky="w")
 
@@ -692,9 +696,7 @@ class QuickControlFrame(ttk.Frame):
         os.makedirs("files", exist_ok=True)
         signal = self.runs[-1]["signal"]
         suffix = self._build_filename_suffix(self.runs[-1].get("meta", {}))
-        initialfile = (
-            f"unified_{signal}_{time.strftime('%Y%m%d_%H%M%S')}{suffix}.csv"
-        )
+        initialfile = f"unified_{signal}_{time.strftime('%Y%m%d_%H%M%S')}{suffix}.csv"
         filename = filedialog.asksaveasfilename(
             parent=self,
             title="Save data",
@@ -735,9 +737,7 @@ class QuickControlFrame(ttk.Frame):
             active.append("reading")
         locked = bool(active)
         if locked:
-            self.lbl_lock.configure(
-                text=f"🔒 Tabs locked while: {', '.join(active)}."
-            )
+            self.lbl_lock.configure(text=f"🔒 Tabs locked while: {', '.join(active)}.")
         else:
             self.lbl_lock.configure(text="")
         if self.lock_tabs_callback is not None:

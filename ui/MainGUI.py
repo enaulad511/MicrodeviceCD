@@ -129,7 +129,7 @@ class MainGUI(ttk.Window):
         # ------------------Manual Control tabs-------------------
         self.notebook = ttk.Notebook(self.tab_manual_control)
         self.notebook.configure(style="Custom.TNotebook")
-        self.notebook.grid(row=0, column=0, sticky="nsew")
+        self.notebook.grid(row=0, column=0, sticky="nsew", pady=10)
         self.notebook.columnconfigure(0, weight=1)
         self.notebook.rowconfigure(0, weight=1)
         self.callbacks_manual_control = {
