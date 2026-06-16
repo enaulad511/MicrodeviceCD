@@ -33,6 +33,9 @@ CMakeLists.txt.user
 .env
 pyrefly.toml
 
+# --- Recetas de usuario (proyectos PCR) ---
+resources/pcr_projects.json
+
 # --- Opcional: Pruebas ---
 # Descomenta la siguiente línea si NO quieres subir tus archivos de test
 *_test.py

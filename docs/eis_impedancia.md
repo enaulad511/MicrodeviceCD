@@ -301,6 +301,13 @@ dependen de la corriente esperada de la celda; contradice la decisión de autora
 correctos, superpuestos y con leyenda por potencial; tras re-flashear con el fix del
 `'+'`, la corrida cierra con `emstat_end` ✓.
 
+**idle_s validado con cola de baja frecuencia** (2026-06-12): Default + Scan
+200 kHz→0.5 Hz, 30 puntos. Con el firmware viejo (idle fijo 16 s) moría por
+`emstat_timeout` justo en el punto de 0.5 Hz (29/30); con v1.8 re-flasheado (idle_s
+del payload) completa ✓. Duración real ~4 min ≈ estimado del indicador — el modelo
+`_point_s` queda calibrado razonablemente (los puntos reales son más rápidos que el
+modelo: t(0.5 Hz) real < 20 s, el ×1.5 de margen sobra).
+
 - [x] **Fin anticipado en E_dc Scan**: NO ocurre — los 9 espectros completaron (tras
       cada `*` viene directo el siguiente bloque, sin blank intercalada).
 - [x] **Fin de corrida en E_dc Scan** — RESUELTO con el TAIL de la 2ª corrida. El
@@ -388,6 +395,102 @@ cambios:
    fin con blank tras `'*'` **o** `'+'` (fin de loop genérico, emitido por el script
    anidado del E_dc Scan). Ver hallazgo en §7.5. Sin cambio para cv/sqwv (nunca
    emiten `'+'`).
+
+---
+
+## 8. Ventana de análisis EIS (`ui/AnalysisWindow.py`)
+
+`AnalysisWindow` pasó de ser una ventana única (análisis de picos CV/SWV) a un **shell
+`Toplevel` con un `ttk.Notebook` por método**: pestaña **"Peaks (CV/SWV)"**
+(`PeakAnalysisFrame`, el contenido anterior refactorizado a un `Frame` — el antiguo menú
+File se reemplazó por botones Load/Import/Export en su toolbar; los atajos `Ctrl+L`/`Ctrl+I`
+se mantienen, ahora cableados en el shell; además una **lectura por hover** (`_on_hover`)
+muestra el `(x, y)` del punto medido más cercano de la curva bajo el cursor en el overlay,
+con snap en píxeles para no sesgar por las escalas dispares de los ejes) y pestaña
+**"EIS"** (`EISAnalysisFrame`, nueva). `EventPlotter.open_analysis_window` abre la misma
+ventana; la pestaña activa por defecto la decide `plotter.method` (EIS → pestaña EIS).
+
+**Paridad de la pestaña Peaks con EIS.** El frame de Peaks adoptó dos patrones que
+nacieron en EIS:
+
+- **Reconstrucción del canvas** (mismo que §8.2): `_refresh_overlay` y `clear_all`
+  recrean Figure + `FigureCanvasTkAgg` + toolbar desde cero (`_reset_plot_canvas` →
+  `_create_plot_canvas`) en vez de `ax.clear()`/`fig.clear()`, para no arrastrar estado
+  residual en el canvas Tk vivo. Efecto colateral intencional: las tendencias
+  (`ax_min`/`ax_max`) quedan en blanco tras un refresco de overlay (cambio de
+  filtro/visibilidad/nombre) hasta el siguiente **Compute**, que las recalcula — es lo
+  correcto, dependen del filtro/datos que pudieron cambiar.
+- **Renombrar (doble clic)**: editor `Entry` inline sobre la columna `#0`, igual que en
+  EIS (Enter/foco-fuera confirma, Esc cancela, vacío revierte). Aquí funciona en **ambas
+  tablas**: el árbol izquierdo *Experiments → Cycles* (`tree_curves` → `_tree_ref`) y la
+  **tabla de resultados** (`tree_res` → `_res_ref`, poblado en `compute_extrema`). Las
+  filas agregadas `⟨max⟩`/`⟨min⟩` no están en `_res_ref`, así que no son editables. El
+  editor es genérico (detecta el árbol vía `event.widget`); al confirmar renombra
+  `exp.name`/`cycle.name` (fluye a la leyenda `exp/cycle` del overlay), refresca el árbol
+  y, si la tabla de resultados tiene contenido, re-ejecuta `compute_extrema` para que el
+  nombre nuevo aparezca en todas sus filas. Es **solo de sesión**.
+
+### 8.1 Datos (carga / siembra)
+
+- **Modelo rico por espectro** (`EISSpectrum`): arrays nombrados (`freq_Hz`, `Z_real`,
+  `Z_imag`, `Z_mod`, `E_V`, `t_s`) + **derivados** `Z_mod` (si falta) y `phase_deg`
+  (`atan2(Z_imag, Z_real)`). Como el parser guarda `Z_imag` ya negado, la fase sale con
+  el signo de PSTrace (positiva en zona capacitiva). `EISExperiment` = un archivo/corrida
+  con N espectros.
+- **Siembra desde `total_data`** de la corrida en memoria al abrir Analyze desde un
+  plotter EIS (datos ricos: freq+Z completos → Bode disponible al instante).
+- **Load CSV** lee los CSV de `save_data` **por NOMBRE de header** (no por posición como
+  el de Peaks): mapea `Z_real`/`Z_imag`/`freq_Hz`/`Z_mod`/`E_V`/`t_s` + `cycle`/`run` y
+  agrupa por `(run, cycle)` en espectros (etiqueta `E=…V` si hay potencial embebido).
+- **Renombrar (doble clic en el árbol)**: el nombre auto-deducido de un experimento o
+  espectro se edita con un `Entry` inline sobre la celda (Enter/foco-fuera confirma, Esc
+  cancela, vacío revierte; duplicados permitidos). El `Entry` se ensancha hasta el borde
+  derecho del árbol (solapa la columna *State*, mínimo 240 px) para ver el nombre completo
+  al escribir. El nombre nuevo fluye al árbol, la leyenda del plot y la tabla/Export de
+  resultados. Es **solo de sesión**: recargar el `eis_data_*.csv` crudo re-deduce el nombre
+  (ese archivo no guarda nombres).
+
+### 8.1b Layout (scroll + figura adaptativa)
+
+Igual que la pestaña Peaks, el contenido (árbol + figura + tabla de resultados) vive dentro
+de un `Canvas` con scroll vertical (toolbars arriba y status abajo quedan fijos; rueda de
+ratón cableada). La **altura de la figura es adaptativa** (`_set_fig_height`): ~4″ con 1 fila
+del grid (1-2 plots), ~7″ con 2 filas (3-4 plots) — ajusta también el alto del widget Tk para
+que el `scrollregion` sea correcto. Así cada eje conserva un tamaño legible y el scroll
+aparece cuando el contenido no entra.
+
+### 8.2 Gráficos (checkboxes + grid dinámico)
+
+Cuatro tipos, en una sola figura cuyo grid se reconstruye con los ejes marcados (1→1×1,
+2→1×2, 3/4→2×2). Cada checkbox se **habilita solo si los datos cargados tienen las
+columnas** que necesita (gris si no):
+
+| Plot | Requiere | Ejes |
+|---|---|---|
+| **Nyquist** | `Z_real` + `Z_imag` | x=Z_real, y=−Z_imag |
+| **Bode** | `freq_Hz` + Z completos, >1 freq | doble eje Y: log\|Z\| (sólido) + fase° (punteado) vs log f |
+| **\|Z\| vs E** | `E_V` + `Z_mod`, ≤1 freq | x=E dc, y=\|Z\| |
+| **\|Z\| vs t** | `t_s` + `Z_mod` | x=t, y=\|Z\| |
+
+**Reconstrucción del canvas (no `fig.clear()`).** `_refresh_plots` **recrea la Figure y
+el `FigureCanvasTkAgg` desde cero** en cada redibujo (`_reset_plot_canvas` →
+`_create_plot_canvas`), en vez de reusar la figura con `fig.clear()`. Reusarla dejaba, en
+el canvas Tk **vivo** (no reproducible headless), un **subplot fantasma vacío** al togglear
+un checkbox: estado residual de `constrained_layout` combinado con el eje gemelo `twinx`
+del Bode. Recrear el canvas descarta todo estado previo (motor de layout + ejes gemelos).
+El coste es un parpadeo en el toggle deliberado; los handlers (`_on_pick`, `_on_motion`) y
+el `NavigationToolbar2Tk` se recablean en cada recreación.
+
+### 8.3 Análisis
+
+- **Nyquist — picking manual + cálculo** sobre el **espectro seleccionado en el árbol**,
+  con **snap al punto medido más cercano**: botón *Pick Rs* (intercepto alta-freq), *Pick
+  Rct edge* (`Rct = x_edge − Rs`), *Pick Warburg* (2 clics → `L = |Δ Z_real|` proyectada
+  sobre el eje real + ángulo para confirmar ~45°). Marcadores/líneas guía dibujados sobre
+  la curva; resultados en tabla por espectro y **Export CSV**
+  (`experiment, spectrum, Rs, Rct, warburg_len, warburg_angle`).
+- **Bode — crosshair/lectura manual**: al mover el ratón sobre el eje |Z| se muestra
+  `(freq, |Z|, fase)` del punto más cercano (sin auto-detección de picos).
 
 ---
 

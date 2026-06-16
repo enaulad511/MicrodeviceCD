@@ -1202,7 +1202,7 @@ class EventPlotter(ttk.Frame):
             .by_key()
             .get("color", ["b", "g", "r", "c", "m", "y", "k"])
         )
-        linestyles = ["-", "--", "-.", ":"]
+        linestyles = ["--", "-", "-.", ":"]
         styles = []
         for ls in linestyles:
             for c in colors:
@@ -1219,7 +1219,7 @@ class EventPlotter(ttk.Frame):
         idx = (m - 1) % len(self._style_cycle)
         c, ls = self._style_cycle[idx]
         (line,) = self.ax.plot(
-            [], [], linestyle=ls, linewidth=4.5, color=c, marker="o", markersize=3, label=f"M{m}"
+            [], [], linestyle=ls, linewidth=4.5, color=c, marker="+", markersize=3, label=f"M{m}"
         )
 
         # Si el color es muy claro, mejora visibilidad del marcador:
