@@ -13,11 +13,11 @@ la temperatura y los canales de electrodo. La fuente original vive fuera de git 
 
 ```
 App Python (este repo) ──TCP:5006──► Wemos D1 mini ──UART_LINK──► Pico 2 ──UART──► EmStat
-   ui/EventEmstatFrame.py            (WemosD1Mini.ino)      (emstat_wifi_v1.8.py)     celda
+   ui/EventEmstatFrame.py            (WemosD1Mini.ino)      (emstat_wifi_v1.9.py)     celda
                           ◄──UDP:5005 broadcast──┘ (bifurca cada línea EMSTAT a TCP+UDP)
 ```
 
-- El **Pico 2** (`emstat_wifi_v1.8.py`) arma el script MethodSCRIPT, lo manda al EmStat,
+- El **Pico 2** (`emstat_wifi_v1.9.py`) arma el script MethodSCRIPT, lo manda al EmStat,
   lee la respuesta línea a línea y la reenvía al Wemos como `EMSTAT:<json>\n` por UART.
   También difunde temperatura como `UDP:<...>\n`.
 - El **Wemos** recibe esas líneas por UART y las **bifurca**: las sirve por **TCP (5006)**
@@ -33,11 +33,12 @@ Diagramas detallados (pines, baudios, flujos de control/datos/abort):
 
 | Archivo | Rol |
 |---|---|
-| `emstat_wifi_v1.8.py` | **Firmware actual del Pico** (`main.py` en la placa, flasheado 2026-06-11): EIS Fase 2 (5 modos, topes `max_ms`/`idle_ms` por corrida, fin normal con `'*'` o `'+'`). Ver [docs/eis_impedancia.md §7](../../docs/eis_impedancia.md). |
+| `emstat_wifi_v1.9.py` | **Firmware actual del Pico** (`main.py` en la placa): v1.8 + rama `"ca"` (Chronoamperometry: escalón de potencial, equilibrio opcional, topes `max_ms`/`idle_ms` por corrida). Ver [docs/ca_cronoamperometria.md](../../docs/ca_cronoamperometria.md). |
+| `emstat_wifi_v1.8.py` | Versión previa (flasheada 2026-06-11): EIS Fase 2 (5 modos, topes `max_ms`/`idle_ms` por corrida, fin normal con `'*'` o `'+'`). Ver [docs/eis_impedancia.md §7](../../docs/eis_impedancia.md). |
 | `emstat_wifi_v1.7.py` | Versión previa: EIS Fase 1 + `seq` para recuperación UDP. |
 | `emstat_wifi_v1.6.py` | Versión previa: abort en caliente + robustez de lectura. |
 | `emstat_wifi_v1.5.py` / `v1.4.py` | Versiones históricas. |
-| `EmstatDrivers.py` | Constructores MethodSCRIPT (cv/sqwv/eis) + clase `EmstatPico` (UART). |
+| `EmstatDrivers.py` | Constructores MethodSCRIPT (cv/sqwv/eis/ca) + clase `EmstatPico` (UART). |
 | `mlx90614.py` | Driver I2C del sensor de temperatura MLX90614. |
 | `protocol/emstat_wifi_v1.6.md` | Doc del protocolo del firmware (fuente de verdad del contrato). Carpeta `protocol/` y no `docs/` porque `.gitignore` excluye cualquier carpeta `docs`. |
 
@@ -99,7 +100,7 @@ Detalle completo: [docs/emstat_swv_y_fiabilidad_uart.md](../../docs/emstat_swv_y
 
 1. Libera el REPL: botón **safe-boot en GP22 a GND** al encender, o **Ctrl-C** durante la
    ventana de arranque (`BOOT_DELAY_S = 5 s`).
-2. Copia `emstat_wifi_v1.8.py` a la placa como `main.py` (junto con `EmstatDrivers.py`,
+2. Copia `emstat_wifi_v1.9.py` a la placa como `main.py` (junto con `EmstatDrivers.py`,
    `mlx90614.py`, `mcp23017.py`).
 3. Reinicia. El LED parpadea lento (`LED_IDLE`) si el EmStat responde; rápido si no.
 

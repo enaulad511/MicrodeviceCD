@@ -8,6 +8,7 @@ import socket
 import threading
 import time
 from collections import deque
+from typing import Callable
 
 import matplotlib
 from matplotlib.figure import Figure
@@ -68,6 +69,20 @@ class EventPlotter(ttk.Frame):
         self.buffer_size = buffer_size
         self.callback_motor = None
         self.thread_motor = None
+        # Hook opcional disparado UNA vez al llegar el primer emstat_data de la corrida
+        # (inicio del barrido). Lo usa SWV como red de seguridad para cortar el motor
+        # si el Timer de pre-tratamiento fallara. Se fija en update_val_experiment y se
+        # anula tras dispararse (one-shot por corrida).
+        self.on_first_data: Callable[[], None] | None = None
+        # Indicador de fase del pre-tratamiento (SWV): lista [[nombre, dur_s], ...] de las
+        # fases presentes (condition/deposition/equilibration). Mientras el pre-tratamiento
+        # corre, el plot no cambia (esos puntos no se grafican), así que mostramos la fase y
+        # un contador en la etiqueta de estado para no parecer congelado. Se fija en
+        # update_val_experiment; el contador se ancla en emstat_start (_acq_t0) y la
+        # transición a barrido la confirma el primer paquete 'sweep' (_sweep_t0).
+        self.pretreatment_phases: list | None = None
+        self._acq_t0: float | None = None
+        self._sweep_t0: float | None = None
         self.max_points = max_points
         self.update_interval_ms = update_interval_ms
         self.prefix_legend = "M-"
@@ -304,6 +319,8 @@ class EventPlotter(ttk.Frame):
         self._run_started = False
         self._terminated = False
         self._coverage_printed = False
+        self._acq_t0 = None  # ancla del contador de fase (se fija en emstat_start)
+        self._sweep_t0 = None  # marca de inicio del barrido (primer paquete 'sweep')
         self._plot_source = self.transport_var.get().lower()  # fija el transporte a graficar
         with self.q_udp_lines.mutex:
             self.q_udp_lines.queue.clear()
@@ -502,10 +519,11 @@ class EventPlotter(ttk.Frame):
         if not filename.lower().endswith(".csv"):
             filename += ".csv"
         # Columnas extra TRAILING (Load solo lee las 5 primeras, así que no rompen
-        # la recarga): campos EIS presentes en los eventos que no sean ya x/y.
+        # la recarga): campos EIS presentes en los eventos que no sean ya x/y, mas la
+        # fase SWV ("pretreatment"/"sweep") para distinguir el pre-tratamiento conservado.
         extra_keys = [
             k
-            for k in ("freq_Hz", "E_V", "t_s", "Z_mod")
+            for k in ("freq_Hz", "E_V", "t_s", "Z_mod", "phase")
             if k not in (self.x_key, self.y_key) and any(k in ev for ev in self.total_data)
         ]
         try:
@@ -601,6 +619,8 @@ class EventPlotter(ttk.Frame):
         filename_meta=None,
         parser_kwargs=None,
         cycle_legend=None,
+        on_first_data=None,
+        pretreatment_phases=None,
     ):
         if self.flag_recording:
             print("not posible to update payload while running experiment")
@@ -610,6 +630,10 @@ class EventPlotter(ttk.Frame):
         self.payload_exp = payload
         self.ip_sender = ip_sender
         self.callback_motor = callback_spin_motor
+        # Se reasignan SIEMPRE (incluido None) para no arrastrar el hook / las fases de una
+        # corrida anterior a una nueva sin motor / sin pre-tratamiento.
+        self.on_first_data = on_first_data
+        self.pretreatment_phases = pretreatment_phases
         # Se reasignan SIEMPRE (no solo si vienen): el mismo plotter alterna modos
         # entre corridas (EIS) y un valor viejo contaminaría la corrida nueva.
         self.parser_kwargs = dict(parser_kwargs) if parser_kwargs else {}
@@ -872,6 +896,8 @@ class EventPlotter(ttk.Frame):
 
         if mtype == "emstat_start":
             self._run_started = True
+            if self._acq_t0 is None:
+                self._acq_t0 = time.time()  # ancla del contador de fase del pre-tratamiento
             return
 
         if mtype == "script_dbg":
@@ -901,6 +927,24 @@ class EventPlotter(ttk.Frame):
                 self._handle_methodscript_error(event.get("raw", raw), source)
                 return
             if etype == "data":
+                if self._acq_t0 is None:
+                    self._acq_t0 = time.time()  # fallback si se perdió emstat_start
+                # Inicio real del barrido = primer paquete cuya fase != "pretreatment".
+                # Marca _sweep_t0 (corta el contador de fase) y dispara la red de
+                # seguridad del motor (el pre-tratamiento TAMBIEN emite datos, así que el
+                # 1er emstat_data NO es el barrido). One-shot, desde cualquier transporte;
+                # los handlers solo deben tocar cosas thread-safe.
+                if self._sweep_t0 is None and event.get("phase") != "pretreatment":
+                    self._sweep_t0 = time.time()
+                    if self.pretreatment_phases:
+                        self._set_status("Sweep — acquiring…")
+                    if self.on_first_data is not None:
+                        cb = self.on_first_data
+                        self.on_first_data = None
+                        try:
+                            cb()
+                        except Exception as e:
+                            print(f"on_first_data hook error: {e}")
                 # Fase 2: guarda el evento por seq (ambos transportes; el primero que
                 # llega gana). Al cerrar se reconstruye la unión ordenada -> rellena lo
                 # que el primario perdió con lo que trajo el otro.
@@ -909,24 +953,28 @@ class EventPlotter(ttk.Frame):
                     event["source"] = source
                     self.merged_by_seq.setdefault(seq, event)
                 if selected:  # el transporte elegido alimenta la gráfica en vivo
-                    # Clave de línea desplazada por corrida (retención): cycle crudo se
-                    # conserva en el evento; run etiqueta la corrida para leyenda/CSV.
-                    cyc = event.get("cycle", 0)
-                    m = self.plot_run_offset + cyc
                     event["run"] = self.run_index
-                    self.key_meta.setdefault(m, (self.run_index, cyc))
-                    self._capture_cycle_label(m, event)
+                    # El pre-tratamiento SWV (phase="pretreatment") se CONSERVA en
+                    # total_data (CSV) pero NO se grafica: solo aporta ruido (clusters a
+                    # E constante). Solo los puntos del barrido alimentan la gráfica.
                     self.total_data.append(event)
-                    try:
-                        self.q_points.put_nowait(
-                            (
-                                event.get(self.x_key, 0.0),
-                                event.get(self.y_key, 0.0),
-                                m,
+                    if event.get("phase") != "pretreatment":
+                        # Clave de línea desplazada por corrida (retención): cycle crudo se
+                        # conserva en el evento; run etiqueta la corrida para leyenda/CSV.
+                        cyc = event.get("cycle", 0)
+                        m = self.plot_run_offset + cyc
+                        self.key_meta.setdefault(m, (self.run_index, cyc))
+                        self._capture_cycle_label(m, event)
+                        try:
+                            self.q_points.put_nowait(
+                                (
+                                    event.get(self.x_key, 0.0),
+                                    event.get(self.y_key, 0.0),
+                                    m,
+                                )
                             )
-                        )
-                    except Exception:
-                        pass
+                        except Exception:
+                            pass
             elif "method" in etype and selected:
                 if etype == "method":
                     name = event.get("method_name", "")
@@ -1057,6 +1105,10 @@ class EventPlotter(ttk.Frame):
             self.cycle_label_values.pop(m, None)
 
         for ev in ordered:
+            # El pre-tratamiento SWV queda en total_data (CSV) pero fuera del plot,
+            # igual que en vivo (ver _handle_emstat_msg).
+            if ev.get("phase") == "pretreatment":
+                continue
             cyc = ev.get("cycle", 0)
             m = self.plot_run_offset + cyc
             self.key_meta.setdefault(m, (self.run_index, cyc))
@@ -1134,9 +1186,31 @@ class EventPlotter(ttk.Frame):
 
             self._update_legends()
 
+        # Indicador de fase del pre-tratamiento (el plot no cambia ahí; evita parecer
+        # congelado). Se ejecuta en el mismo loop UI, sin timer aparte.
+        self._refresh_phase_status()
+
         # Reprogramar si seguimos corriendo
         if self.running:
             self._schedule_update()
+
+    def _refresh_phase_status(self):
+        """Mientras corre el pre-tratamiento SWV, muestra la fase actual y un contador en
+        la etiqueta de estado (p.ej. 'Pre-treatment — Deposition  34/60 s'). Time-based:
+        usa las duraciones de self.pretreatment_phases ancladas en _acq_t0 (emstat_start).
+        Se apaga al llegar el primer paquete de barrido (_sweep_t0) — esa transición es
+        data-driven, así que el desfase de latencia solo afecta a las cotas intermedias."""
+        if not self.pretreatment_phases or self._acq_t0 is None or self._sweep_t0 is not None:
+            return
+        elapsed = time.time() - self._acq_t0
+        acc = 0.0
+        for name, dur in self.pretreatment_phases:
+            if elapsed < acc + dur:
+                self._set_status(f"Pre-treatment — {name}  {elapsed - acc:.0f}/{dur:.0f} s")
+                return
+            acc += dur
+        # Pasada la duración estimada del pre-tratamiento pero aún sin paquete de barrido.
+        self._set_status("Pre-treatment done — waiting for sweep…")
 
     # ---------------------------
     # Utilidades de plotting

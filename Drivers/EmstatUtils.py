@@ -327,6 +327,75 @@ def construct_eis_script(
     return script
 
 
+def construct_ca_script(
+    t_equilibration,
+    E_dc,
+    t_interval,
+    t_run_main,
+    max_bandwith,
+    min_da,
+    max_da,
+    range_ba,
+    auto_ba1,
+    auto_ba2,
+):
+    """CA (Chronoamperometry). Genera el MethodSCRIPT de un escalón de potencial a
+    ``E_dc`` constante muestreado cada ``t_interval`` durante ``t_run``.
+
+    Reusa ``construct_header_experiment`` igual que CV (mismo modo 2, ``da`` fijado a
+    ``min_da``/``max_da`` que el caller pone en E_dc porque el potencial es constante).
+
+    Loops (verificado contra exports PSTrace, ver docs/ca_cronoamperometria.md):
+      - Equilibrio (opcional, si ``t_equilibration`` != ""): un ``meas_loop_ca`` a
+        ``E_dc`` con intervalo FIJO ``200m`` y duración ``t_equilibration`` exacta
+        (convención compartida con CV/SQWV). Es solo acondicionamiento.
+      - Principal: ``meas_loop_ca`` a ``E_dc`` con el ``t_interval`` del usuario y
+        duración ``t_run_main`` = ``t_run + t_interval`` (un intervalo extra para que
+        el loop semiabierto capture el punto en ``t = t_run``; el caller ya hizo la
+        suma y la convirtió a SI).
+
+    Cada paquete agrega ``e``/``i`` (potencial/corriente); NO hay campo de tiempo en
+    el dato: el eje ``t`` se sintetiza en el host (``índice × t_interval``, parser
+    "ca"). El equilibrio se excluye del plot en vivo detectando el marcador ``*`` de
+    fin de su ``meas_loop``.
+
+    IMPORTANTE: esta función vive duplicada byte a byte en DiscPCB/EmstatDrivers.py
+    (Pico). Cualquier cambio aquí debe replicarse allá y flashearse.
+    """
+    script = construct_header_experiment(
+        max_bandwith,
+        min_da,
+        max_da,
+        range_ba,
+        auto_ba1,
+        auto_ba2,
+        i_forward=False,
+        i_reverse=False,
+    )
+    script += f"set_e {E_dc}\ncell_on\n"
+    if t_equilibration != "":
+        script += (
+            f"meas_loop_ca e i {E_dc} 200m {t_equilibration}\n"
+            "  pck_start\n"
+            "    pck_add e\n"
+            "    pck_add i\n"
+            "  pck_end\n"
+            "endloop\n"
+        )
+    script += (
+        f"meas_loop_ca e i {E_dc} {t_interval} {t_run_main}\n"
+        "  pck_start\n"
+        "    pck_add e\n"
+        "    pck_add i\n"
+        "  pck_end\n"
+        "endloop\n"
+        "on_finished:\n"
+        "  cell_off\n"
+        "\n"
+    )
+    return script
+
+
 class EmstatStreamParser:
     """
     Parser general de streams EmStat (CV, SWV, EIS, etc.)
@@ -337,6 +406,10 @@ class EmstatStreamParser:
 
     FIELD_MAP = {
         "cv": {"da": ("E_V", 1e-6), "ba": ("I_A", 1e-12)},
+        # CA (cronoamperometria): mismos paquetes que CV (da=potencial, ba=corriente).
+        # El eje de tiempo NO viaja en el dato; se sintetiza en el host (ver
+        # ca_t_interval/_handle_packet): t_s = indice_del_loop_principal * t_interval.
+        "ca": {"da": ("E_V", 1e-6), "ba": ("I_A", 1e-12)},
         "sqwv": {
             "da": ("E_V", 1e-6),
             "ba": ("I_A", 1e-12),
@@ -395,7 +468,13 @@ class EmstatStreamParser:
         0x14: "DUAL_EIS",  # Dual EIS
     }
 
-    def __init__(self, experiment: str, eis_group_by_potential: bool = False):
+    def __init__(
+        self,
+        experiment: str,
+        eis_group_by_potential: bool = False,
+        ca_t_interval: float | None = None,
+        ca_has_equil: bool = False,
+    ):
         if experiment not in self.FIELD_MAP:
             raise ValueError(f"Unsupported experiment: {experiment}")
 
@@ -405,6 +484,16 @@ class EmstatStreamParser:
         # potencial. Apagado en los demás modos (en Mott-Schottky cada punto trae un
         # potencial distinto y partiría la traza única en N líneas de 1 punto).
         self.eis_group_by_potential = eis_group_by_potential
+
+        # CA: el eje de tiempo se sintetiza aquí (no hay campo de tiempo en el dato).
+        # t_s = indice_del_loop_principal * ca_t_interval. El loop de equilibrio
+        # (opcional, intervalo 200m) se EXCLUYE del plot: se detecta su fin por el
+        # marcador '*' del meas_loop (más robusto que contar paquetes, inmune a la
+        # pérdida de un dato). ca_has_equil=False => no hay equilibrio, el principal
+        # arranca desde el primer paquete.
+        self.ca_t_interval = ca_t_interval
+        self._ca_main_started = not ca_has_equil
+        self._ca_index = 0
 
         # Contexto dinámico
         self.context = {"cycle": 0, "direction": +1, "method_id": None}
@@ -455,6 +544,11 @@ class EmstatStreamParser:
 
         if kind == "end_block":
             self.finished = True
+            # CA con equilibrio: el primer '*' marca el fin del meas_loop de
+            # equilibrio; a partir de aquí los paquetes son del loop principal y
+            # cuentan para t_s (ver _handle_packet).
+            if self.experiment == "ca" and not self._ca_main_started:
+                self._ca_main_started = True
             return {"type": "method_end"}
         
         if kind == "syntax_error":
@@ -518,6 +612,27 @@ class EmstatStreamParser:
         # (Los paquetes del barrido E_dc Scan traen da + dc/cc/cd: pasan el filtro.)
         if self.experiment == "eis" and "Z_real" not in decoded and "Z_imag" not in decoded:
             decoded["type"] = "unknown"
+
+        # CA: síntesis del eje de tiempo. Los paquetes del loop de equilibrio (antes
+        # del primer '*') se marcan como no-dato (acondicionamiento, fuera del plot).
+        # Los del loop principal reciben t_s = índice * t_interval (t=0 en el escalón).
+        if self.experiment == "ca":
+            if not self._ca_main_started:
+                decoded["type"] = "unknown"
+            else:
+                ti = self.ca_t_interval or 0.0
+                decoded["t_s"] = self._ca_index * ti
+                self._ca_index += 1
+
+        # SWV: etiqueta de fase. El pre-tratamiento (condition/deposition/equilibration)
+        # son meas_loop_ca que emiten solo e/i; el barrido SWV emite ADEMAS
+        # i_forward/i_reverse (ba_1/ba_2 -> I_A_F/I_A_R). Marcamos "sweep" cuando hay
+        # corriente forward/reverse, "pretreatment" en caso contrario. Se mantiene
+        # type="data" (a diferencia de EIS/CA, que descartan): el host conserva el
+        # pre-tratamiento en el CSV pero NO lo grafica (ver EventPlotter).
+        if self.experiment == "sqwv":
+            is_sweep = "I_A_F" in decoded or "I_A_R" in decoded
+            decoded["phase"] = "sweep" if is_sweep else "pretreatment"
 
         # EIS E_dc Scan + freq Scan: el "cycle" pasa a ser el índice de espectro,
         # detectado por cambio del potencial embebido en el paquete (robusto ante

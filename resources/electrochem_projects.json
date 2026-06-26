@@ -1,0 +1,115 @@
+{
+    "cv": {
+        "Default": {
+            "t_equil": "0",
+            "E_begin": "0.0",
+            "E_vertex1": "-0.4",
+            "E_vertex2": "0.7",
+            "E_step": "0.01",
+            "scan_rate": "0.04",
+            "n_scans": "4",
+            "max_bw": "2937500e-9",
+            "min_pot": "-0.4",
+            "max_pot": "0.7",
+            "current_range": "4.7e-8",
+            "motor_enable": "False",
+            "motor_angle": "10",
+            "motor_speed": "7"
+        },
+        "RegularCVFerro": {
+            "t_equil": "0",
+            "E_begin": "0.0",
+            "E_vertex1": "-1",
+            "E_vertex2": "1",
+            "E_step": "0.01",
+            "scan_rate": "0.04",
+            "n_scans": "4",
+            "max_bw": "2937500e-9",
+            "min_pot": "-1",
+            "max_pot": "1",
+            "current_range": "4.7e-8",
+            "motor_enable": "False",
+            "motor_angle": "10",
+            "motor_speed": "7"
+        },
+        "_last_used": "RegularCVFerro"
+    },
+    "sqwv": {
+        "Default": {
+            "t_equil": "0",
+            "E_begin": "-0.5",
+            "E_end": "0.5",
+            "E_step": "0.01",
+            "amplitude": "0.1",
+            "freq": "20",
+            "max_bw": "234021e-3",
+            "min_da": "-0.6",
+            "max_da": "0.6",
+            "E_con": "0",
+            "t_con": "0",
+            "E_dep": "0",
+            "t_dep": "0",
+            "measure": "False",
+            "current_range": "4.7e-8"
+        },
+        "_last_run": {
+            "t_equil": "10",
+            "E_begin": "-0.5",
+            "E_end": "0.5",
+            "E_step": "0.01",
+            "amplitude": "0.1",
+            "freq": "20",
+            "max_bw": "234021e-3",
+            "min_da": "-0.6",
+            "max_da": "0.6",
+            "E_con": "0.5",
+            "t_con": "5",
+            "E_dep": "0.5",
+            "t_dep": "010",
+            "measure": "False",
+            "current_range": "4.7e-8"
+        }
+    },
+    "ca": {
+        "Default": {
+            "t_equil": "0",
+            "E_dc": "0.5",
+            "t_interval": "0.1",
+            "t_run": "10",
+            "max_bw": "58505e-3",
+            "current_range": "4.7e-8"
+        },
+        "_last_run": {
+            "t_equil": "0",
+            "E_dc": "0.5",
+            "t_interval": "0.1",
+            "t_run": "10",
+            "max_bw": "58505e-3",
+            "current_range": "4.7e-8"
+        }
+    },
+    "eis": {
+        "Default": {
+            "E_con1": "0",
+            "t_con1": "0",
+            "E_con2": "0",
+            "t_con2": "0",
+            "E_dc": "0.2",
+            "E_ac": "0.01",
+            "E_begin": "-0.5",
+            "E_step": "0.05",
+            "E_end": "0.5",
+            "E_ac_edc": "0.01",
+            "E_dc_time": "0.2",
+            "t_run": "60",
+            "t_interval": "1",
+            "E_ac_time": "0.01",
+            "f_max": "100000",
+            "f_min": "100",
+            "n_freq": "11",
+            "freq_fixed": "1000",
+            "scan_type": "Default",
+            "freq_type": "Scan"
+        }
+    }
+}

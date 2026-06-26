@@ -337,6 +337,75 @@ def construct_eis_script(
     return script
 
 
+def construct_ca_script(
+    t_equilibration,
+    E_dc,
+    t_interval,
+    t_run_main,
+    max_bandwith,
+    min_da,
+    max_da,
+    range_ba,
+    auto_ba1,
+    auto_ba2,
+):
+    """CA (Chronoamperometry). Genera el MethodSCRIPT de un escalón de potencial a
+    ``E_dc`` constante muestreado cada ``t_interval`` durante ``t_run``.
+
+    Reusa ``construct_header_experiment`` igual que CV (mismo modo 2, ``da`` fijado a
+    ``min_da``/``max_da`` que el caller pone en E_dc porque el potencial es constante).
+
+    Loops (verificado contra exports PSTrace, ver docs/ca_cronoamperometria.md):
+      - Equilibrio (opcional, si ``t_equilibration`` != ""): un ``meas_loop_ca`` a
+        ``E_dc`` con intervalo FIJO ``200m`` y duración ``t_equilibration`` exacta
+        (convención compartida con CV/SQWV). Es solo acondicionamiento.
+      - Principal: ``meas_loop_ca`` a ``E_dc`` con el ``t_interval`` del usuario y
+        duración ``t_run_main`` = ``t_run + t_interval`` (un intervalo extra para que
+        el loop semiabierto capture el punto en ``t = t_run``; el caller ya hizo la
+        suma y la convirtió a SI).
+
+    Cada paquete agrega ``e``/``i`` (potencial/corriente); NO hay campo de tiempo en
+    el dato: el eje ``t`` se sintetiza en el host (``índice × t_interval``, parser
+    "ca"). El equilibrio se excluye del plot en vivo detectando el marcador ``*`` de
+    fin de su ``meas_loop``.
+
+    IMPORTANTE: esta función vive duplicada byte a byte en Drivers/EmstatUtils.py
+    (host). Cualquier cambio aquí debe replicarse allá.
+    """
+    script = construct_header_experiment(
+        max_bandwith,
+        min_da,
+        max_da,
+        range_ba,
+        auto_ba1,
+        auto_ba2,
+        i_forward=False,
+        i_reverse=False,
+    )
+    script += f"set_e {E_dc}\ncell_on\n"
+    if t_equilibration != "":
+        script += (
+            f"meas_loop_ca e i {E_dc} 200m {t_equilibration}\n"
+            "  pck_start\n"
+            "    pck_add e\n"
+            "    pck_add i\n"
+            "  pck_end\n"
+            "endloop\n"
+        )
+    script += (
+        f"meas_loop_ca e i {E_dc} {t_interval} {t_run_main}\n"
+        "  pck_start\n"
+        "    pck_add e\n"
+        "    pck_add i\n"
+        "  pck_end\n"
+        "endloop\n"
+        "on_finished:\n"
+        "  cell_off\n"
+        "\n"
+    )
+    return script
+
+
 _emstat_running = False
 _emstat_lock = _thread.allocate_lock()
 
@@ -504,6 +573,19 @@ class EmstatPico:
                 E_dir=parameters.get("E_dir", 1),
                 t_run=parameters.get("t_run", 0),
                 t_interval=parameters.get("t_interval", 0),
+            )
+        elif method == "ca":
+            script = construct_ca_script(
+                parameters.get("t_equilibration", ""),
+                parameters.get("E_dc", "0"),
+                parameters.get("t_interval", "100m"),
+                parameters.get("t_run_main", "10100m"),
+                parameters.get("max_bandwith", "58505m"),
+                parameters.get("min_da", "0"),
+                parameters.get("max_da", "0"),
+                parameters.get("range_ba", "470u"),
+                parameters.get("auto_ba1", "470u"),
+                parameters.get("auto_ba2", "470u"),
             )
         else:
             return "Error method not recognized"

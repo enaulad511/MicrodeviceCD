@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
+import threading
+
 from Drivers.EmstatUtils import construc_individual_script_sqwv
-from templates.utils import convert_si_integer_full
+from templates.utils import convert_si_integer_full, read_settings_from_file
+from ui.ElectrochemProjectBar import ElectrochemProjectBarMixin
 from ui.EventEmstatFrame import EventPlotter
 from ui.ShowMethodScript import ShowMethodScript
 
@@ -63,6 +66,9 @@ CURRENT_RANGES = {
     "500 uA": 918e-6,  # 918 µA
     "1 mA": 1.0e-3,  # 1 mA
 }
+
+# Serializa el arranque del hilo del motor (mismo patron que ui/CvFrame.py).
+thread_lock = threading.Lock()
 
 
 class ShowProfileFrame(ttk.Toplevel):
@@ -367,7 +373,42 @@ def create_widgets_swv(parent, callbacks, n_cols=2):
         ).grid(row=0, column=col, padx=5, pady=5, sticky="nswe")
     frame_selectors.columnconfigure(tuple(range(len(CURRENT_RANGES))), weight=1)
 
-    return entries, measure_var, current_range_var, entries_pre
+    # -----------------------------Motor Settings-------------------------------------
+    # Espejo de ui/CvFrame.py: oscilador (±angle) durante el PRE-TRATAMIENTO. A
+    # diferencia de CV (motor toda la corrida), aqui el motor solo se mueve en
+    # condition + deposition y se detiene en la equilibracion/barrido (ver send_script).
+    entries_motor: list = []
+    frame_motor_settings = ttk.LabelFrame(frame, text="Motor Settings")
+    frame_motor_settings.grid(row=3, column=0, padx=(5, 20), pady=10, sticky="nswe")
+    frame_motor_settings.columnconfigure((0, 1), weight=1)
+    frame_motor_settings.configure(style="Custom.TLabelframe")
+    enable_motor = ttk.BooleanVar(value=False)
+    ttk.Checkbutton(
+        frame_motor_settings,
+        text="Enable Motor (pre-treatment only)",
+        variable=enable_motor,
+        style="Custom.TCheckbutton",
+    ).grid(row=0, column=0, columnspan=2, padx=5, pady=5, sticky="n")
+    entries_motor.append(enable_motor)
+
+    ttk.Label(frame_motor_settings, text="Angle (°, max 30):", style="Custom.TLabel").grid(
+        row=1, column=0, padx=5, pady=5, sticky="w"
+    )
+    svar_angle = ttk.StringVar(value="10")
+    angle_entry = ttk.Entry(frame_motor_settings, font=font_entry, textvariable=svar_angle, width=5)
+    angle_entry.grid(row=1, column=1, padx=5, pady=5, sticky="w")
+    entries_motor.append(svar_angle)
+
+    ttk.Label(frame_motor_settings, text="Speed (%):", style="Custom.TLabel").grid(
+        row=2, column=0, padx=5, pady=5, sticky="w"
+    )
+    svar_speed = ttk.StringVar(value="7")
+    speed_entry = ttk.Entry(frame_motor_settings, font=font_entry, textvariable=svar_speed, width=5)
+    speed_entry.grid(row=2, column=1, padx=5, pady=5, sticky="w")
+    entries_motor.append(svar_speed)
+
+    motor_entry_widgets = [angle_entry, speed_entry]
+    return entries, measure_var, current_range_var, entries_pre, entries_motor, motor_entry_widgets
 
 
 def create_buttons_sqwv(parent, callbacks):
@@ -402,7 +443,9 @@ def create_buttons_sqwv(parent, callbacks):
     ).grid(row=0, column=3, pady=10, sticky="n")
 
 
-class SWVFrame(ttk.Frame):
+class SWVFrame(ElectrochemProjectBarMixin, ttk.Frame):
+    project_method = "sqwv"
+
     def __init__(
         self,
         parent,
@@ -419,13 +462,23 @@ class SWVFrame(ttk.Frame):
         self.frame_w_scroll = frame_with_scroll
         self.ShowMethodScrit = None
         self.ShowProfile: ShowProfileFrame | None = None
+        # Estado del motor (oscilador durante el pre-tratamiento). Espejo de CvFrame,
+        # mas un Timer que corta el motor al terminar condition+deposition.
+        self.thread_motor: threading.Thread | None = None
+        self.stop_event: threading.Event | None = None
+        self.pretreat_timer: threading.Timer | None = None
+        self._pretreat_duration = 0.0
 
         content_frame = ttk.Frame(self)
         content_frame.grid(row=0, column=0, sticky="nsew")
         content_frame.columnconfigure(0, weight=1)
 
+        # Barra de proyecto (row 0, encima de las entradas).
+        self.frame_project = self.build_project_bar(content_frame)
+        self.frame_project.grid(row=0, column=0, sticky="nswe", padx=10, pady=(5, 0))
+
         self.frame_entries = ttk.Frame(content_frame)
-        self.frame_entries.grid(row=0, column=0, sticky="nsew")
+        self.frame_entries.grid(row=1, column=0, sticky="nsew")
         self.frame_entries.columnconfigure(0, weight=1)
         callbacks = {
             "callback_generate_profile": self.callback_generate_profile,
@@ -433,13 +486,18 @@ class SWVFrame(ttk.Frame):
             "callback_send": self.send_script,
             "callback_show_inputs": self.show_inputs_frame,
         }
-        self.entries, self.measure_var, self.current_range, self.entries_pre = create_widgets_swv(
-            self.frame_entries, callbacks
-        )
+        (
+            self.entries,
+            self.measure_var,
+            self.current_range,
+            self.entries_pre,
+            self.entries_motor,
+            motor_entry_widgets,
+        ) = create_widgets_swv(self.frame_entries, callbacks)
         self.keyboard = NumericKeyboard(self, scroll_host=self.frame_w_scroll)
-        self.keyboard.attach(list(self.entries) + list(self.entries_pre))
+        self.keyboard.attach(list(self.entries) + list(self.entries_pre) + motor_entry_widgets)
         self.frame_buttons = ttk.Frame(content_frame)
-        self.frame_buttons.grid(row=1, column=0, sticky="nsew")
+        self.frame_buttons.grid(row=2, column=0, sticky="nsew")
         self.frame_buttons.columnconfigure(0, weight=1)
         create_buttons_sqwv(self.frame_buttons, callbacks)
 
@@ -457,12 +515,53 @@ class SWVFrame(ttk.Frame):
             max_points=5000,
             update_interval_ms=80,
             payload=self.payload,
+            on_end_expriment=self.on_end_experiment,
         )
         self.udp_plotter.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
         self.frame_plotter.grid_forget()
 
+        # Auto-carga del proyecto inicial (cascada _last_used -> _last_run -> Default).
+        self.load_initial_project()
+
     def show_inputs_frame(self):
-        self.frame_entries.grid(row=0, column=0, sticky="nsew")
+        self.frame_project.grid(row=0, column=0, sticky="nswe", padx=10, pady=(5, 0))
+        self.frame_entries.grid(row=1, column=0, sticky="nsew")
+
+    # ----- Hooks de proyecto (ver ui/ElectrochemProjectBar.py) -----
+    def collect_values(self):
+        """Estado completo del formulario SWV -> dict de claves canónicas."""
+        ek = [
+            "t_equil", "E_begin", "E_end", "E_step", "amplitude", "freq",
+            "max_bw", "min_da", "max_da",
+        ]
+        pre = ["E_con", "t_con", "E_dep", "t_dep"]
+        values = {k: self.entries[i].get() for i, k in enumerate(ek)}
+        values.update({k: self.entries_pre[i].get() for i, k in enumerate(pre)})
+        values["measure"] = str(bool(self.measure_var.get()))
+        values["current_range"] = self.current_range.get()
+        values["motor_enable"] = str(bool(self.entries_motor[0].get()))
+        values["motor_angle"] = self.entries_motor[1].get()
+        values["motor_speed"] = self.entries_motor[2].get()
+        return values
+
+    def apply_values(self, values):
+        """Vuelca un proyecto SWV en los widgets."""
+        ek = [
+            "t_equil", "E_begin", "E_end", "E_step", "amplitude", "freq",
+            "max_bw", "min_da", "max_da",
+        ]
+        pre = ["E_con", "t_con", "E_dep", "t_dep"]
+        for i, k in enumerate(ek):
+            self.entries[i].delete(0, "end")
+            self.entries[i].insert(0, str(values.get(k, "")))
+        for i, k in enumerate(pre):
+            self.entries_pre[i].delete(0, "end")
+            self.entries_pre[i].insert(0, str(values.get(k, "")))
+        self.measure_var.set(str(values.get("measure", "False")) == "True")
+        self.current_range.set(str(values.get("current_range", "4.7e-8")))
+        self.entries_motor[0].set(str(values.get("motor_enable", "False")) == "True")
+        self.entries_motor[1].set(str(values.get("motor_angle", "10")))
+        self.entries_motor[2].set(str(values.get("motor_speed", "7")))
 
     def callback_generate_profile(self):
         try:
@@ -580,17 +679,141 @@ class SWVFrame(ttk.Frame):
         return script.strip()
 
     def send_script(self):
+        # Snapshot de lo que se va a correr -> _last_run.
+        self.snapshot_current_run()
+        self.frame_project.grid_forget()
         self.frame_entries.grid_forget()
         self.generate_payload()
         ip_sender = self.callback_ip() if self.callback_ip else "localhost"
+
+        # Motor durante el PRE-TRATAMIENTO (condition + deposition). Arranca con la
+        # corrida (momento de envio, como CV) y se corta con un Timer al cumplir
+        # t_con + t_dep. El pre-tratamiento SI emite datos, pero la frontera
+        # deposition/equilibracion no tiene marcador directo, asi que se deduce por
+        # tiempo; el motor NO debe oscilar en la equilibracion ni en el barrido.
+        sent_callback = None
+        on_first_data = None
+        enable_motor = bool(self.entries_motor[0].get())
+        try:
+            t_con = float(self.entries_pre[1].get())
+            t_dep = float(self.entries_pre[3].get())
+        except ValueError:
+            t_con = t_dep = 0.0
+        self._pretreat_duration = max(t_con, 0.0) + max(t_dep, 0.0)
+        if enable_motor and self._pretreat_duration > 0:
+            sent_callback = self.start_spin_motor_angle
+            # Red de seguridad (Q3): si el Timer no cortara, el primer paquete de BARRIDO
+            # (phase != pretreatment, ya pasada la equilibracion) tambien detiene el motor.
+            on_first_data = self._stop_motor_on_first_data
+            filename_meta = {"ang": self.entries_motor[1].get(), "spd": self.entries_motor[2].get()}
+        else:
+            filename_meta = {"motor": "off"}
+
+        # Indicador de fase en vivo: el pre-tratamiento no grafica, asi que pasamos las
+        # fases presentes (mismas condiciones de presencia que el builder del script) con
+        # su duracion para que EventPlotter muestre "Pre-treatment — <fase> n/dur s".
+        try:
+            t_equil = float(self.entries[0].get())
+        except ValueError:
+            t_equil = 0.0
+        e_con = self.entries_pre[0].get().strip()
+        e_dep = self.entries_pre[2].get().strip()
+        pretreatment_phases = []
+        if t_con > 0 and e_con != "":
+            pretreatment_phases.append(["Condition", t_con])
+        if t_dep > 0 and e_dep != "":
+            pretreatment_phases.append(["Deposition", t_dep])
+        if t_equil > 0:
+            pretreatment_phases.append(["Equilibration", t_equil])
+
         self.udp_plotter.update_val_experiment(
             x_key="E_V",
             y_key="I_A",
             payload=self.payload,
             ip_sender=ip_sender,
-            callback_spin_motor=None
+            callback_spin_motor=sent_callback,
+            filename_meta=filename_meta,
+            on_first_data=on_first_data,
+            pretreatment_phases=pretreatment_phases or None,
         )
         self.frame_plotter.grid(row=4, column=0, padx=10, pady=10, sticky="nsew")
+
+    def start_spin_motor_angle(self):
+        """Arranca el oscilador (±angle) para el pre-tratamiento y arma el Timer que lo
+        detiene al cumplir condition+deposition. Espejo de CvFrame.start_spin_motor_angle
+        mas el Timer; lo invoca EventPlotter.start() via callback_spin_motor."""
+        settings: dict = read_settings_from_file()
+        max_rpm = settings.get("max_rpm", 700)
+        print("Iniciar modo oscilador (pre-tratamiento SWV)")
+        angle = float(self.entries_motor[1].get())
+        speed_percentage = float(self.entries_motor[2].get())
+        print(
+            f"Ángulo: {angle}°, Velocidad: {speed_percentage:2f}%, "
+            f"ventana pre-tratamiento: {self._pretreat_duration:.1f}s"
+        )
+        if angle > 45:
+            print("El ángulo máximo es 45°")
+            return
+        with thread_lock:
+            if self.thread_motor and self.thread_motor.is_alive():
+                print("Ya hay un hilo activo, no se puede iniciar otro.")
+                return
+            self.stop_event = threading.Event() if self.stop_event is None else self.stop_event
+            from Drivers.DriverStepperSys import spinMotorAngleDriver
+
+            thread_motor = threading.Thread(
+                target=spinMotorAngleDriver,
+                args=(
+                    angle,
+                    speed_percentage * max_rpm / 100,
+                    max_rpm,
+                    None,
+                    True,
+                    self.stop_event,
+                    None,
+                ),
+            )
+            thread_motor.start()
+            # Timer que corta el motor en la frontera deposition/equilibracion. El driver
+            # sondea stop_event ~cada 20 ms (DriverStepperSys.py), asi que el corte es pronto.
+            self.pretreat_timer = threading.Timer(self._pretreat_duration, self.stop_event.set)
+            self.pretreat_timer.daemon = True
+            self.pretreat_timer.start()
+            print(f"Oscilador iniciado; se detendra en {self._pretreat_duration:.1f}s")
+            self.thread_motor = thread_motor
+            return thread_motor
+
+    def _stop_motor_on_first_data(self):
+        """Red de seguridad: el primer paquete de datos marca el inicio del barrido (ya
+        pasado el pre-tratamiento). Si el Timer no corto antes, detiene el motor. Corre
+        en el hilo procesador del EventPlotter; solo toca stop_event (thread-safe)."""
+        if self.stop_event is not None:
+            self.stop_event.set()
+
+    def on_end_experiment(self, thread_motor=None):
+        """Limpieza al terminar la corrida (terminal del firmware, Stop, o error). Cancela
+        el Timer de pre-tratamiento, detiene el motor y hace join para liberar UART/GPIO
+        antes de la siguiente corrida. Lo invoca EventPlotter.stop()."""
+        if self.pretreat_timer is not None:
+            try:
+                self.pretreat_timer.cancel()
+            except Exception:
+                pass
+            self.pretreat_timer = None
+        if self.stop_event is not None:
+            self.stop_event.set()
+        th = thread_motor if thread_motor is not None else self.thread_motor
+        if th is not None:
+            try:
+                if th.is_alive():
+                    th.join(timeout=3.0)
+                if th.is_alive():
+                    print("Warning: motor thread did not finish within 3s.")
+            except Exception as e:
+                print(f"Error joining motor thread: {e}")
+        self.thread_motor = None
+        self.stop_event = None
+        print("Experimento SWV finalizado. Motor detenido.")
 
 
 if __name__ == "__main__":

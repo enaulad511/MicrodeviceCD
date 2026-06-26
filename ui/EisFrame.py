@@ -10,6 +10,7 @@ import ttkbootstrap as ttk
 from Drivers.EmstatUtils import construct_eis_script
 from templates.constants import font_entry, font_text_combobox
 from templates.utils import convert_si_integer_full
+from ui.ElectrochemProjectBar import ElectrochemProjectBarMixin
 from ui.EventEmstatFrame import EventPlotter
 from ui.KeyboardFrame import NumericKeyboard
 from ui.ShowMethodScript import ShowMethodScript
@@ -40,7 +41,7 @@ DEF_E_CON = "0"
 DEF_T_CON = "0"
 
 
-class EISFrame(ttk.Frame):
+class EISFrame(ElectrochemProjectBarMixin, ttk.Frame):
     """Frame de Espectroscopia de Impedancia Electroquimica (EIS).
 
     Estructura analoga a CvFrame/SqwVFrame: entradas -> payload -> EventPlotter
@@ -52,6 +53,8 @@ class EISFrame(ttk.Frame):
     + freq Scan, este ultimo con una curva por potencial), |Z| vs E (E_dc Scan +
     Fixed) y |Z| vs t (Time Scan). Ver docs/eis_impedancia.md seccion 7.
     """
+
+    project_method = "eis"
 
     def __init__(
         self,
@@ -123,8 +126,12 @@ class EISFrame(ttk.Frame):
         content_frame.grid(row=0, column=0, sticky="nsew")
         content_frame.columnconfigure(0, weight=1)
 
+        # Barra de proyecto (row 0, encima de las entradas).
+        self.frame_project = self.build_project_bar(content_frame)
+        self.frame_project.grid(row=0, column=0, sticky="nswe", padx=(5, 20), pady=(5, 0))
+
         self.frame_entries = ttk.Frame(content_frame)
-        self.frame_entries.grid(row=0, column=0, sticky="nsew")
+        self.frame_entries.grid(row=1, column=0, sticky="nsew")
         self.frame_entries.columnconfigure(0, weight=1)
 
         self.lbl_status = ttk.Label(self.frame_entries, text="", anchor="w")
@@ -139,7 +146,7 @@ class EISFrame(ttk.Frame):
 
         # Botones
         self.frame_buttons = ttk.Frame(content_frame)
-        self.frame_buttons.grid(row=1, column=0, sticky="nsew", pady=(6, 0))
+        self.frame_buttons.grid(row=2, column=0, sticky="nsew", pady=(6, 0))
         self.frame_buttons.columnconfigure((0, 1, 2), weight=1)
         ttk.Button(
             self.frame_buttons,
@@ -193,6 +200,9 @@ class EISFrame(ttk.Frame):
 
         self._recompute_val_dec()
         self._recompute_estimate()
+
+        # Auto-carga del proyecto inicial (cascada _last_used -> _last_run -> Default).
+        self.load_initial_project()
 
     # ----------------------------------------------------------------
     # Construccion de widgets
@@ -656,7 +666,10 @@ class EISFrame(ttk.Frame):
         except ValueError:
             self._set_status("Error: check input values.")
             return
+        # Snapshot de lo que se va a correr -> _last_run (decisión Q7).
+        self.snapshot_current_run()
         x_key, y_key, title, x_label, y_label, parser_kwargs, cycle_legend = self._plot_config()
+        self.frame_project.grid_forget()
         self.frame_entries.grid_forget()
         ip_sender = self.callback_ip() if self.callback_ip else "localhost"
         # Watchdog de inactividad del plotter: derivado del idle de ESTA corrida
@@ -683,8 +696,74 @@ class EISFrame(ttk.Frame):
     def show_inputs_frame(self):
         if self.frame_w_scroll:
             self.frame_w_scroll.yview_moveto(0)
-        self.frame_entries.grid(row=0, column=0, sticky="nsew")
+        self.frame_project.grid(row=0, column=0, sticky="nswe", padx=(5, 20), pady=(5, 0))
+        self.frame_entries.grid(row=1, column=0, sticky="nsew")
         # self.frame_plotter.grid_forget()
+
+    # ----- Hooks de proyecto (ver ui/ElectrochemProjectBar.py) -----
+    def collect_values(self):
+        """Estado completo del formulario EIS -> dict de claves canónicas.
+
+        Guarda TODAS las variables (lossless, sin importar el modo activo) y los
+        dos comboboxes como cadenas legibles (decisión Q10).
+        """
+        return {
+            "E_con1": self.var_econ1.get(),
+            "t_con1": self.var_tcon1.get(),
+            "E_con2": self.var_econ2.get(),
+            "t_con2": self.var_tcon2.get(),
+            "E_dc": self.var_edc.get(),
+            "E_ac": self.var_eac.get(),
+            "E_begin": self.var_ebegin.get(),
+            "E_step": self.var_estep.get(),
+            "E_end": self.var_eend.get(),
+            "E_ac_edc": self.var_eac_edc.get(),
+            "E_dc_time": self.var_edc_time.get(),
+            "t_run": self.var_trun.get(),
+            "t_interval": self.var_tinterval.get(),
+            "E_ac_time": self.var_eac_time.get(),
+            "f_max": self.var_fmax.get(),
+            "f_min": self.var_fmin.get(),
+            "n_freq": self.var_nfreq.get(),
+            "freq_fixed": self.var_freq_fixed.get(),
+            "scan_type": self.scan_selector.get(),
+            "freq_type": self.freq_selector.get(),
+        }
+
+    def apply_values(self, values):
+        """Vuelca un proyecto EIS: vars -> comboboxes -> handlers -> recompute.
+
+        Orden importante (decisión Q10): primero las StringVars (sus traces
+        recalculan val/dec y la duración), luego los comboboxes por etiqueta, y
+        por último los handlers de cambio para mostrar el grupo correcto.
+        """
+        self.var_econ1.set(str(values.get("E_con1", "")))
+        self.var_tcon1.set(str(values.get("t_con1", "")))
+        self.var_econ2.set(str(values.get("E_con2", "")))
+        self.var_tcon2.set(str(values.get("t_con2", "")))
+        self.var_edc.set(str(values.get("E_dc", "")))
+        self.var_eac.set(str(values.get("E_ac", "")))
+        self.var_ebegin.set(str(values.get("E_begin", "")))
+        self.var_estep.set(str(values.get("E_step", "")))
+        self.var_eend.set(str(values.get("E_end", "")))
+        self.var_eac_edc.set(str(values.get("E_ac_edc", "")))
+        self.var_edc_time.set(str(values.get("E_dc_time", "")))
+        self.var_trun.set(str(values.get("t_run", "")))
+        self.var_tinterval.set(str(values.get("t_interval", "")))
+        self.var_eac_time.set(str(values.get("E_ac_time", "")))
+        self.var_fmax.set(str(values.get("f_max", "")))
+        self.var_fmin.set(str(values.get("f_min", "")))
+        self.var_nfreq.set(str(values.get("n_freq", "")))
+        self.var_freq_fixed.set(str(values.get("freq_fixed", "")))
+
+        scan = str(values.get("scan_type", SCAN_TYPES[0]))
+        freq = str(values.get("freq_type", FREQ_TYPES[0]))
+        self.scan_selector.current(SCAN_TYPES.index(scan) if scan in SCAN_TYPES else 0)
+        self.freq_selector.current(FREQ_TYPES.index(freq) if freq in FREQ_TYPES else 0)
+        self.on_scan_type_changed()
+        self.on_freq_type_changed()
+        self._recompute_val_dec()
+        self._recompute_estimate()
 
     def on_end_experiment(self, thread_motor=None):
         self.show_inputs_frame()

@@ -4,6 +4,7 @@ import threading
 
 from Drivers.EmstatUtils import construc_nscans_script_cv
 from templates.utils import convert_si_integer_full, read_settings_from_file
+from ui.ElectrochemProjectBar import ElectrochemProjectBarMixin
 from ui.EventEmstatFrame import EventPlotter
 from ui.ShowMethodScript import ShowMethodScript
 
@@ -28,10 +29,6 @@ DEFAUL_VALUES_CV = [
     "2937500e-9",
     "-0.4",
     "0.7",
-    "47e-9",
-    "47e-9",
-    "47e-9",
-    "47e-9",
 ]
 LABELS = [
     "t equil. (s):",
@@ -44,10 +41,6 @@ LABELS = [
     "Max BW:",
     "Min Pot:",
     "Max Pot:",
-    "Range Current:",
-    "Max Current:",
-    "Auto Current 1:",
-    "Auto Current 2:",
 ]
 CURRENT_RANGES = {
     "100 nA": 4.7e-8,  # 47 nA
@@ -276,7 +269,9 @@ def create_buttons_cv(parent, callbacks):
     ).grid(row=0, column=3, pady=5, sticky="n")
 
 
-class CVFrame(ttk.Frame):
+class CVFrame(ElectrochemProjectBarMixin, ttk.Frame):
+    project_method = "cv"
+
     def __init__(
         self,
         parent,
@@ -318,8 +313,13 @@ class CVFrame(ttk.Frame):
             "callback_send_script": self.callback_send_script,
             "callback_show_inputs": self.show_inputs_frame,
         }
+        # Barra de proyecto (row 0, encima de las entradas). Se oculta junto con
+        # las entradas durante la corrida.
+        self.frame_project = self.build_project_bar(content_frame)
+        self.frame_project.grid(row=0, column=0, sticky="nswe", padx=(5, 20), pady=(5, 0))
+
         self.frame_entries = ttk.Frame(content_frame)
-        self.frame_entries.grid(row=0, column=0, sticky="nsew")
+        self.frame_entries.grid(row=1, column=0, sticky="nsew")
         self.frame_entries.columnconfigure(0, weight=1)
         self.entries, self.current_range, self.entries_motor, motor_entry_widgets = (
             create_widgets_cv(self.frame_entries)
@@ -328,7 +328,7 @@ class CVFrame(ttk.Frame):
         self.keyboard.attach(list(self.entries) + motor_entry_widgets)
 
         self.frame_buttons = ttk.Frame(content_frame)
-        self.frame_buttons.grid(row=1, column=0, sticky="nsew", padx=(5, 25))
+        self.frame_buttons.grid(row=2, column=0, sticky="nsew", padx=(5, 25))
         self.frame_buttons.columnconfigure(0, weight=1)
         create_buttons_cv(self.frame_buttons, callbacks)
 
@@ -354,13 +354,45 @@ class CVFrame(ttk.Frame):
         self.udp_plotter.grid(row=0, column=0, padx=(5, 15), sticky="nsew")
         self.frame_plotter.grid_forget()
 
+        # Auto-carga del proyecto inicial (cascada _last_used -> _last_run -> Default).
+        self.load_initial_project()
+
     def show_inputs_frame(self, hide=True):
         # set scroll at top
         if self.frame_w_scroll:
             self.frame_w_scroll.yview_moveto(0)
-        self.frame_entries.grid(row=0, column=0, sticky="nsew")
+        self.frame_project.grid(row=0, column=0, sticky="nswe", padx=(5, 20), pady=(5, 0))
+        self.frame_entries.grid(row=1, column=0, sticky="nsew")
         if hide:
             self.frame_plotter.grid_forget()
+
+    # ----- Hooks de proyecto (ver ui/ElectrochemProjectBar.py) -----
+    def collect_values(self):
+        """Estado completo del formulario CV -> dict de claves canónicas."""
+        ek = [
+            "t_equil", "E_begin", "E_vertex1", "E_vertex2", "E_step", "scan_rate",
+            "n_scans", "max_bw", "min_pot", "max_pot",
+        ]
+        values = {k: self.entries[i].get() for i, k in enumerate(ek)}
+        values["current_range"] = self.current_range.get()
+        values["motor_enable"] = str(bool(self.entries_motor[0].get()))
+        values["motor_angle"] = self.entries_motor[1].get()
+        values["motor_speed"] = self.entries_motor[2].get()
+        return values
+
+    def apply_values(self, values):
+        """Vuelca un proyecto CV en los widgets."""
+        ek = [
+            "t_equil", "E_begin", "E_vertex1", "E_vertex2", "E_step", "scan_rate",
+            "n_scans", "max_bw", "min_pot", "max_pot",
+        ]
+        for i, k in enumerate(ek):
+            self.entries[i].delete(0, "end")
+            self.entries[i].insert(0, str(values.get(k, "")))
+        self.current_range.set(str(values.get("current_range", "4.7e-8")))
+        self.entries_motor[0].set(str(values.get("motor_enable", "False")) == "True")
+        self.entries_motor[1].set(str(values.get("motor_angle", "")))
+        self.entries_motor[2].set(str(values.get("motor_speed", "")))
 
     def create_payload_cv(self):
         try:
@@ -426,15 +458,19 @@ class CVFrame(ttk.Frame):
             self.m_band = float(DEFAUL_VALUES_CV[7])
             self.min_da = float(DEFAUL_VALUES_CV[8])
             self.max_da = float(DEFAUL_VALUES_CV[9])
-            self.range_ba = float(DEFAUL_VALUES_CV[10])
-            self.ba1 = float(DEFAUL_VALUES_CV[11])
-            self.ba2 = float(DEFAUL_VALUES_CV[12])
+            # range/auto-current vienen del radio de rango de corriente, no de entradas.
+            self.range_ba = float(self.current_range.get())
+            self.ba1 = float(self.current_range.get())
+            self.ba2 = float(self.current_range.get())
 
     def callback_send_script(self):
         try:
             self.update_data_script()
             self.create_payload_cv()
+            # Snapshot de lo que se va a correr -> _last_run (decisión Q7).
+            self.snapshot_current_run()
             ip_sender = self.callback_ip() if self.callback_ip else "localhost"
+            self.frame_project.grid_forget()
             self.frame_entries.grid_forget()
             sent_callback = None
             enable_motor = self.entries_motor[0].get()
@@ -502,6 +538,10 @@ class CVFrame(ttk.Frame):
         self.ShowProfile = None
 
     def generate_methodscript(self) -> str:
+        # Los .get() casi nunca caen al default (create_payload_cv siempre llena el
+        # payload); aun así, el fallback usa el índice CORRECTO de DEFAUL_VALUES_CV
+        # por clave, y "4.7e-8" para range/auto-current (vienen del radio, no de
+        # una entrada).
         script = construc_nscans_script_cv(
             self.payload.get("t_e", DEFAUL_VALUES_CV[0]),
             self.payload.get("E_b", DEFAUL_VALUES_CV[1]),
@@ -509,13 +549,13 @@ class CVFrame(ttk.Frame):
             self.payload.get("E_2", DEFAUL_VALUES_CV[3]),
             self.payload.get("E_s", DEFAUL_VALUES_CV[4]),
             self.payload.get("sc_r", DEFAUL_VALUES_CV[5]),
-            self.payload.get("m_b", DEFAUL_VALUES_CV[6]),
-            self.payload.get("min_da", DEFAUL_VALUES_CV[7]),
-            self.payload.get("max_da", DEFAUL_VALUES_CV[8]),
-            self.payload.get("range_ba", DEFAUL_VALUES_CV[9]),
-            self.payload.get("ba_1", DEFAUL_VALUES_CV[10]),
-            self.payload.get("ba_2", DEFAUL_VALUES_CV[11]),
-            self.payload.get("n_sc", DEFAUL_VALUES_CV[12]),
+            self.payload.get("m_b", DEFAUL_VALUES_CV[7]),
+            self.payload.get("min_da", DEFAUL_VALUES_CV[8]),
+            self.payload.get("max_da", DEFAUL_VALUES_CV[9]),
+            self.payload.get("range_ba", "4.7e-8"),
+            self.payload.get("ba_1", "4.7e-8"),
+            self.payload.get("ba_2", "4.7e-8"),
+            self.payload.get("n_sc", DEFAUL_VALUES_CV[6]),
         )
         return script
 

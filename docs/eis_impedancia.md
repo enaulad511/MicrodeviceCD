@@ -487,10 +487,37 @@ el `NavigationToolbar2Tk` se recablean en cada recreación.
   con **snap al punto medido más cercano**: botón *Pick Rs* (intercepto alta-freq), *Pick
   Rct edge* (`Rct = x_edge − Rs`), *Pick Warburg* (2 clics → `L = |Δ Z_real|` proyectada
   sobre el eje real + ángulo para confirmar ~45°). Marcadores/líneas guía dibujados sobre
-  la curva; resultados en tabla por espectro y **Export CSV**
-  (`experiment, spectrum, Rs, Rct, warburg_len, warburg_angle`).
+  la curva; resultados en tabla por espectro.
 - **Bode — crosshair/lectura manual**: al mover el ratón sobre el eje |Z| se muestra
   `(freq, |Z|, fase)` del punto más cercano (sin auto-detección de picos).
+
+### 8.4 Export / Import (paridad con Peaks)
+
+Espeja el patrón de dos archivos de la pestaña Peaks (`export_results` →
+`<base>.csv` + `<base>_curves.csv`; `import_analysis`). El botón **Export** abre **un
+solo** diálogo (`eis_analysis_*.csv` por defecto) y deriva los nombres:
+
+- **`<base>_spectra.csv` — SIEMPRE** (gate = "¿hay espectros?", no "¿hay mediciones?").
+  Datos punto-a-punto de **todos** los espectros cargados, **sin importar visibilidad**
+  (la visibilidad en EIS es solo visual). Header **fijo** `EIS_SPECTRA_COLS`:
+  `experiment, spectrum, point_idx, freq_Hz, Z_real, Z_imag, Z_mod, phase_deg, E_V, t_s`;
+  celdas **vacías** donde un espectro no tiene esa magnitud (p.ej. `freq_Hz`/`E_V`/`t_s`
+  según el modo). `%.9g` por celda. Es el archivo que permite **guardar las curvas usadas
+  para análisis y recargarlas sin re-seleccionarlas**.
+- **`<base>.csv` (el path elegido) — solo si hay al menos una medición** Nyquist
+  (Rs/Rct/Warburg). Formato intacto: `experiment, spectrum, Rs_ohm, Rct_ohm,
+  warburg_len_ohm, warburg_angle_deg`. Sin mediciones, no se crea (el status lo dice).
+
+**Import** (`import_spectra`, botón `📥 Import` y `Ctrl+I` en la pestaña EIS) recarga un
+`_spectra.csv`: valida el header (`experiment` + `spectrum` + alguna columna `Z_*`),
+agrupa por `(experiment, spectrum)` y **conserva los nombres** (incluidos los renombrados
+a mano), a diferencia de **Load CSV** que re-deduce el nombre del `eis_data_*.csv` crudo.
+`Z_mod`/`phase_deg` se re-derivan al construir el `EISSpectrum` cuando hay `Z_real/Z_imag`;
+en modos sin Z (|Z| vs t) el `Z_mod` del archivo se conserva. Hace **append** (no
+reemplaza) y de-duplica nombres de experimento colisionantes con sufijo `_1`, `_2`, …
+
+Los atajos `Ctrl+L` (Load) y `Ctrl+I` (Import) del shell `AnalysisWindow` se **enrutan a
+la pestaña activa** del notebook (antes iban fijos a Peaks).
 
 ---
 
