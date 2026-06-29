@@ -109,4 +109,56 @@ cualquier fase sin la clave (low, ext, …) conserva el comportamiento PI puro p
   guarda de `MAX_AGE`.
 - No se introducen escrituras CSV nuevas; el flag `dev` no se ve afectado.
 
+## 7. Omisión de fases con tiempo ≤ 0 (skip-on-zero)
+
+Una fase cuyo campo de tiempo es `<= 0` se **omite por completo**: ni la rampa de
+alcance ni el *hold*. El objetivo es no calentar/enfriar hacia un setpoint que luego
+no se sostiene (p. ej. `Ext. Time = 0` ya no calienta inútilmente hacia `ext_temp`).
+
+Helper único `_skip(t)` (módulo `ui/PcrFrame.py`): `True` si `float(t) <= 0` (o no
+numérico). Se usa **idéntico** en ejecución y en la preview, para que el perfil
+dibujado coincida con lo que realmente corre.
+
+Fases omitibles y matices:
+
+| Fase | Campo | Al omitir |
+|------|-------|-----------|
+| Denaturación | `denat_time` | Sin rampa ni hold. **Efecto colateral:** el primer ciclo arranca en frío, así que su "Reach High" usa `break_if_below=False` (ver abajo). |
+| High | `time_high` | Sin rampa ni hold. |
+| Low | `time_low` | Se omite el *hold*, pero el **enfriamiento por giro del motor se conserva**, apuntando al setpoint de la **siguiente fase activa** del ciclo (Extension) en vez de `low_temp`. |
+| Extension | `ext_time` | Sin rampa ni hold. La lectura de fluorescencia **por ciclo sigue corriendo** (la medición nunca se salta). |
+| Extensión final | `ext_time_final` | Se omite el *hold*, pero la **lectura de fluorescencia final SIEMPRE se realiza**. |
+
+### Enfriamiento hacia la siguiente fase activa
+
+El bloque de *cooling* en `_run_cycle` calcula `cool_target`:
+
+```
+cool_target = low_temp  si NO _skip(time_low)
+              ext_temp  si _skip(time_low) y NO _skip(ext_time)
+              None      si ambas se omiten   # nada que enfriar (la próxima fase calienta)
+```
+
+El giro solo corre si `cool_target is not None` y `self.temp > cool_target + 0.5`
+(no se enfría si ya estamos por debajo). El `stop_func` del motor y el bucle de espera
+posterior referencian `cool_target`, no `low_temp`. Alcance **mínimo y a prueba de
+crashes** (no se persigue el objetivo a través de límites de ciclo): para combinaciones
+extrañas el ciclo simplemente procede sin colgarse ni dejar el lazo varado.
+
+### `break_if_below` y la desnaturalización omitida
+
+`break_if_below=True` significa "si `temp < setpoint`, sal de inmediato sin calentar".
+En el ciclo 0 esto era seguro **solo** porque se asumía llegar caliente del hold de
+denaturación. Si `denat_time <= 0`, ese supuesto se rompe: el ciclo 0 arrancaría frío y
+el "Reach High" saldría sin calentar. Por eso `experiment_pcr` calcula
+`denat_skipped = _skip(denat_time)` y lo pasa a `_run_cycle`, que usa
+`break_if_below=(idx == 0 and not denat_skipped)`. El "Reach Ext" del ciclo 0 mantiene
+`break_if_below=(idx == 0)` (independiente de denat).
+
+### Visibilidad
+
+Silencioso en la UI (no se escribe un estado "skipped" transitorio en `svar_status`);
+cada fase omitida solo emite un `print(...)` a consola para depuración. La **preview**
+ya da confirmación visual previa al Start de que una fase se omite.
+
 __author__ = "Edisson A. Naula"

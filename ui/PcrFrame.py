@@ -51,6 +51,18 @@ def check_temp_higher(temp, target_temp):
     return temp >= target_temp
 
 
+def _skip(t):
+    """True si una fase debe omitirse: su tiempo es <= 0 (o no numérico).
+
+    Cuando una fase se omite se salta tanto la rampa de alcance como el hold,
+    para no calentar hacia un setpoint que luego no se sostiene.
+    """
+    try:
+        return float(t) <= 0
+    except (TypeError, ValueError):
+        return False
+
+
 def _fuzzy_gains(error: float, base_kp: float, base_ki: float) -> tuple:
     """Escala KP/KI dinámicamente según la magnitud del error (fuzzy gain scheduling).
 
@@ -547,8 +559,11 @@ class PCRFrame(ttk.Frame):
             clip_marks = []  # (x_corte, temp, duracion_real) de tramos comprimidos
 
             # (start, end, from_temp, to_temp, label, color)
+            # Las fases con tiempo <= 0 se omiten (misma regla que la ejecución):
+            # ni rampa de alcance ni hold, para que la preview refleje lo real.
             phase_segments = []
             current_time = 0.0
+            current_temp = room_temp
 
             # Initial spin: temperatura ambiente
             phase_segments.append(
@@ -563,121 +578,133 @@ class PCRFrame(ttk.Frame):
             )
             current_time += initial_spin_time
 
-            # Rampa hacia denaturation
-            ramp_denat = transition_time_up(room_temp, denat_temp)
-            phase_segments.append(
-                (
-                    current_time,
-                    current_time + ramp_denat,
-                    room_temp,
-                    denat_temp,
-                    "Ramp Denat",
-                    "darkorange",
+            # Rampa + hold de denaturation (omitible)
+            if not _skip(denat_time):
+                ramp_denat = transition_time_up(current_temp, denat_temp)
+                phase_segments.append(
+                    (
+                        current_time,
+                        current_time + ramp_denat,
+                        current_temp,
+                        denat_temp,
+                        "Ramp Denat",
+                        "darkorange",
+                    )
                 )
-            )
-            current_time += ramp_denat
+                current_time += ramp_denat
 
-            # Hold Denaturation (recortable si es muy largo)
-            disp_denat, real_denat, clipped_denat = clip_hold(denat_time)
-            phase_segments.append(
-                (
-                    current_time,
-                    current_time + disp_denat,
-                    denat_temp,
-                    denat_temp,
-                    "Denaturation",
-                    "purple",
+                disp_denat, real_denat, clipped_denat = clip_hold(denat_time)
+                phase_segments.append(
+                    (
+                        current_time,
+                        current_time + disp_denat,
+                        denat_temp,
+                        denat_temp,
+                        "Denaturation",
+                        "purple",
+                    )
                 )
-            )
-            current_time += disp_denat
-            if clipped_denat:
-                clip_marks.append((current_time, denat_temp, real_denat))
+                current_time += disp_denat
+                if clipped_denat:
+                    clip_marks.append((current_time, denat_temp, real_denat))
+                current_temp = denat_temp
 
             n_display = min(5, cycles)
-            prev_temp = denat_temp
             for _ in range(n_display):
-                # Rampa hacia High
-                ramp_high = transition_time_up(prev_temp, high_temp)
-                phase_segments.append(
-                    (
-                        current_time,
-                        current_time + ramp_high,
-                        prev_temp,
-                        high_temp,
-                        "Heating",
-                        "orange",
+                # Rampa + hold High (omitible)
+                if not _skip(time_high):
+                    ramp_high = transition_time_up(current_temp, high_temp)
+                    phase_segments.append(
+                        (
+                            current_time,
+                            current_time + ramp_high,
+                            current_temp,
+                            high_temp,
+                            "Heating",
+                            "orange",
+                        )
                     )
-                )
-                current_time += ramp_high
+                    current_time += ramp_high
 
-                # Hold High
-                phase_segments.append(
-                    (current_time, current_time + time_high, high_temp, high_temp, "High", "red")
-                )
-                current_time += time_high
-
-                # Cooling hacia Low
-                phase_segments.append(
-                    (
-                        current_time,
-                        current_time + transition_time_down,
-                        high_temp,
-                        low_temp,
-                        "Cooling",
-                        "green",
+                    phase_segments.append(
+                        (current_time, current_time + time_high, high_temp, high_temp, "High", "red")
                     )
-                )
-                current_time += transition_time_down
+                    current_time += time_high
+                    current_temp = high_temp
 
-                # Hold Low
-                phase_segments.append(
-                    (current_time, current_time + time_low, low_temp, low_temp, "Low", "blue")
+                # Cooling hacia la siguiente fase activa (Low, o Extension si Low se
+                # omite). Solo si hay algo más frío hacia lo que enfriar.
+                cool_target = (
+                    low_temp
+                    if not _skip(time_low)
+                    else (ext_temp if not _skip(ext_time) else None)
                 )
-                current_time += time_low
+                if cool_target is not None and current_temp > cool_target:
+                    phase_segments.append(
+                        (
+                            current_time,
+                            current_time + transition_time_down,
+                            current_temp,
+                            cool_target,
+                            "Cooling",
+                            "green",
+                        )
+                    )
+                    current_time += transition_time_down
+                    current_temp = cool_target
 
-                # Rampa hacia Extension
-                ramp_ext = transition_time_up(low_temp, ext_temp)
+                # Hold Low (omitible)
+                if not _skip(time_low):
+                    phase_segments.append(
+                        (current_time, current_time + time_low, low_temp, low_temp, "Low", "blue")
+                    )
+                    current_time += time_low
+                    current_temp = low_temp
+
+                # Rampa + hold Extension (omitible)
+                if not _skip(ext_time):
+                    ramp_ext = transition_time_up(current_temp, ext_temp)
+                    phase_segments.append(
+                        (
+                            current_time,
+                            current_time + ramp_ext,
+                            current_temp,
+                            ext_temp,
+                            "Ramp Ext",
+                            "goldenrod",
+                        )
+                    )
+                    current_time += ramp_ext
+
+                    phase_segments.append(
+                        (
+                            current_time,
+                            current_time + ext_time,
+                            ext_temp,
+                            ext_temp,
+                            "Extension",
+                            "darkcyan",
+                        )
+                    )
+                    current_time += ext_time
+                    current_temp = ext_temp
+
+            # Extensión final (omitible; recortable si es muy larga)
+            if not _skip(ext_time_final):
+                disp_ext_final, real_ext_final, clipped_ext_final = clip_hold(ext_time_final)
                 phase_segments.append(
                     (
                         current_time,
-                        current_time + ramp_ext,
-                        low_temp,
+                        current_time + disp_ext_final,
                         ext_temp,
-                        "Ramp Ext",
-                        "goldenrod",
+                        ext_temp,
+                        "Final Ext.",
+                        "magenta",
                     )
                 )
-                current_time += ramp_ext
-
-                # Hold Extension
-                phase_segments.append(
-                    (
-                        current_time,
-                        current_time + ext_time,
-                        ext_temp,
-                        ext_temp,
-                        "Extension",
-                        "darkcyan",
-                    )
-                )
-                current_time += ext_time
-                prev_temp = ext_temp
-
-            # Extensión final (recortable si es muy larga)
-            disp_ext_final, real_ext_final, clipped_ext_final = clip_hold(ext_time_final)
-            phase_segments.append(
-                (
-                    current_time,
-                    current_time + disp_ext_final,
-                    ext_temp,
-                    ext_temp,
-                    "Final Ext.",
-                    "magenta",
-                )
-            )
-            current_time += disp_ext_final
-            if clipped_ext_final:
-                clip_marks.append((current_time, ext_temp, real_ext_final))
+                current_time += disp_ext_final
+                if clipped_ext_final:
+                    clip_marks.append((current_time, ext_temp, real_ext_final))
 
             # Crear figura
             fig, ax = plt.subplots(figsize=(7, 4))
@@ -1203,6 +1230,7 @@ class PCRFrame(ttk.Frame):
         ext_time,
         ext_temp,
         ads,
+        denat_skipped=False,
     ):
         global sistemaMotor
         from Drivers.DriverStepperSys import spinMotorRPM_ramped
@@ -1213,71 +1241,90 @@ class PCRFrame(ttk.Frame):
 
         # Reach High temp: feed-forward a potencia plena hasta ff_frac_high*setpoint
         # y luego PI (tolerancia 0.5). En el ciclo 0 (break_if_below) se omite el
-        # blast porque venimos del hold de denaturación ya en temperatura.
-        self.fase = "Reach High temp"
-        self.pin_heating.write(True)  # pyrefly: ignore
-        self._reach_temperature_pi(
-            high_temp,
-            self._load_phase_pid("high", ts),
-            self.stop_udp_listenner,
-            break_if_below=(idx == 0),
-            tolerance=0.5,
+        # blast porque venimos del hold de denaturación ya en temperatura, salvo
+        # que la desnaturalización se haya omitido (denat_skipped): en ese caso
+        # arrancamos en frío y hay que alcanzar High de verdad.
+        if not _skip(time_high):
+            self.fase = "Reach High temp"
+            self.pin_heating.write(True)  # pyrefly: ignore
+            self._reach_temperature_pi(
+                high_temp,
+                self._load_phase_pid("high", ts),
+                self.stop_udp_listenner,
+                break_if_below=(idx == 0 and not denat_skipped),
+                tolerance=0.5,
+            )
+            print(f"Temperature reached: {self.temp} °C")
+
+            # Hold High
+            self.fase = "Hold High temp"
+            print(f"Holding temperature for {time_high} seconds")
+            self._hold_phase("h_high", high_temp, time_high, ts)
+        else:
+            print("Skipping High phase: time <= 0")
+
+        # Cool down con giro del motor hacia la siguiente fase activa del ciclo.
+        # Si Low se omite (time_low <= 0) se enfría hacia la extensión; si ambas
+        # se omiten no hay nada que enfriar (la próxima fase es calentamiento).
+        cool_target = (
+            low_temp
+            if not _skip(time_low)
+            else (ext_temp if not _skip(ext_time) else None)
         )
-        print(f"Temperature reached: {self.temp} °C")
+        if cool_target is not None and self.temp > cool_target + 0.5:
+            print(f"Cooling down to {cool_target} °C with motor spin")
+            self.fase = "Cooling"
+            self.stop_event_motor.clear()  # pyrefly: ignore
+            spinMotorRPM_ramped(
+                direction,
+                rpm,
+                ts,
+                acceleration,
+                900.0,
+                True,
+                sistemaMotor,
+                None,
+                stop_func=lambda: self.stop_udp_listenner.is_set()  # pyrefly: ignore
+                or self.temp <= cool_target
+                or self.temp < cool_target + 9.5,
+                stop_event=self.stop_event_motor,
+            )
 
-        # Hold High
-        self.fase = "Hold High temp"
-        print(f"Holding temperature for {time_high} seconds")
-        self._hold_phase("h_high", high_temp, time_high, ts)
-        print(f"Hold complete, cooling down to {low_temp} °C with motor spin")
-
-        # Cool down con giro del motor
-        self.fase = "Cooling"
-        self.stop_event_motor.clear()  # pyrefly: ignore
-        spinMotorRPM_ramped(
-            direction,
-            rpm,
-            ts,
-            acceleration,
-            900.0,
-            True,
-            sistemaMotor,
-            None,
-            stop_func=lambda: self.stop_udp_listenner.is_set()  # pyrefly: ignore
-            or self.temp <= low_temp
-            or self.temp < low_temp + 9.5,
-            stop_event=self.stop_event_motor,
-        )
-
-        print(self.temp, "low temp....dis")
-        while (
-            self.temp > low_temp + 0.5 and not self.stop_udp_listenner.is_set()
-        ):  # pyrefly: ignore
-            time.sleep(0.001)
-        print(f"Temperature reached: {self.temp} °C")
+            print(self.temp, "cool target....dis")
+            while (
+                self.temp > cool_target + 0.5 and not self.stop_udp_listenner.is_set()
+            ):  # pyrefly: ignore
+                time.sleep(0.001)
+            print(f"Temperature reached: {self.temp} °C")
 
         # Hold Low
-        self.fase = "LOW temp Hold"
-        print(f"Holding LOW temperature for {time_low} seconds")
-        self._hold_phase("h_low", low_temp, time_low, ts)
+        if not _skip(time_low):
+            self.fase = "LOW temp Hold"
+            print(f"Holding LOW temperature for {time_low} seconds")
+            self._hold_phase("h_low", low_temp, time_low, ts)
+        else:
+            print("Skipping Low phase: time <= 0")
 
-        # Reach Ext temp (PI, tolerancia 0.2)
-        self.fase = "Reach ext temp"
-        self.pin_heating.write(True)  # pyrefly: ignore
-        self._reach_temperature_pi(
-            ext_temp,
-            self._load_phase_pid("ext", ts),
-            self.stop_udp_listenner,
-            break_if_below=(idx == 0),
-            tolerance=0.5,
-        )
-        print(f"Temperature reached: {self.temp} °C")
+        # Reach Ext temp (PI, tolerancia 0.5) + Hold Ext
+        if not _skip(ext_time):
+            self.fase = "Reach ext temp"
+            self.pin_heating.write(True)  # pyrefly: ignore
+            self._reach_temperature_pi(
+                ext_temp,
+                self._load_phase_pid("ext", ts),
+                self.stop_udp_listenner,
+                break_if_below=(idx == 0),
+                tolerance=0.5,
+            )
+            print(f"Temperature reached: {self.temp} °C")
 
-        # Hold Ext
-        self.fase = "extension temp Hold "
-        print(f"Holding extension temperature for {ext_time} seconds")
-        self._hold_phase("h_ext", ext_temp, ext_time, ts)
-        print(f"Hold ext complete, end of cycle {idx}")
+            # Hold Ext
+            self.fase = "extension temp Hold "
+            print(f"Holding extension temperature for {ext_time} seconds")
+            self._hold_phase("h_ext", ext_temp, ext_time, ts)
+            print(f"Hold ext complete, end of cycle {idx}")
+        else:
+            print("Skipping Extension phase: time <= 0")
 
         # Lectura de fluorescencia
         time.sleep(FLUOR_PRE_SLEEP_S)
@@ -1411,20 +1458,26 @@ class PCRFrame(ttk.Frame):
             # ----- Denaturación: mismo principio que "Reach High temp":
             # feed-forward a potencia plena hasta ff_frac_denat*setpoint y luego PI
             # (ganancias difusas + anti-windup + descarte de temperatura vieja).
-            self.fase = "Denaturation"
-            self.pin_heating.write(True)  # pyrefly: ignore
-            self._reach_temperature_pi(
-                denat_temp,
-                self._load_phase_pid("denat", ts),
-                self.stop_udp_listenner,
-                break_if_below=False,
-                tolerance=0.5,
-            )
+            # Si denat_time <= 0 se omite por completo (arrancamos en frío); en ese
+            # caso el primer ciclo debe alcanzar High de verdad (denat_skipped).
+            denat_skipped = _skip(denat_time)
+            if not denat_skipped:
+                self.fase = "Denaturation"
+                self.pin_heating.write(True)  # pyrefly: ignore
+                self._reach_temperature_pi(
+                    denat_temp,
+                    self._load_phase_pid("denat", ts),
+                    self.stop_udp_listenner,
+                    break_if_below=False,
+                    tolerance=0.5,
+                )
 
-            # ----- Denaturation Hold
-            self.fase = "Denaturation Hold"
-            self._hold_phase("h_denat", denat_temp, denat_time, ts)
-            print(f"Denaturation complete, temperature: {self.temp} °C")
+                # ----- Denaturation Hold
+                self.fase = "Denaturation Hold"
+                self._hold_phase("h_denat", denat_temp, denat_time, ts)
+                print(f"Denaturation complete, temperature: {self.temp} °C")
+            else:
+                print("Skipping Denaturation phase: time <= 0")
 
             # ----- Ciclos PCR
             for idx in range(cycles):
@@ -1444,13 +1497,19 @@ class PCRFrame(ttk.Frame):
                     ext_time,
                     ext_temp,
                     ads,
+                    denat_skipped=denat_skipped,
                 )
 
-            # ----- Extensión final + lectura de fluorescencia (solo si no se detuvo)
+            # ----- Extensión final + lectura de fluorescencia (solo si no se detuvo).
+            # El hold final se omite si ext_time_final <= 0, pero la lectura de
+            # fluorescencia final SIEMPRE se realiza (la medición no se salta).
             if not self.stop_udp_listenner.is_set():
                 print("PCR cycles complete, reading fluorescence")
                 self.fase = "Extension"
-                self._hold_phase("h_ext", ext_temp, ext_time_final, ts)
+                if not _skip(ext_time_final):
+                    self._hold_phase("h_ext", ext_temp, ext_time_final, ts)
+                else:
+                    print("Skipping Final Extension hold: time <= 0")
                 time.sleep(FLUOR_PRE_SLEEP_S)
                 v_fluo_final = self._read_fluorescence(ads)
                 print(f"Final fluorescence delta voltage: {v_fluo_final}")
