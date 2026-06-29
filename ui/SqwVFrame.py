@@ -515,6 +515,7 @@ class SWVFrame(ElectrochemProjectBarMixin, ttk.Frame):
             max_points=5000,
             update_interval_ms=80,
             payload=self.payload,
+            frames_to_hide=[self.frame_entries],
             on_end_expriment=self.on_end_experiment,
         )
         self.udp_plotter.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
@@ -524,6 +525,8 @@ class SWVFrame(ElectrochemProjectBarMixin, ttk.Frame):
         self.load_initial_project()
 
     def show_inputs_frame(self):
+        if self.frame_w_scroll:
+            self.frame_w_scroll.yview_moveto(0)
         self.frame_project.grid(row=0, column=0, sticky="nswe", padx=10, pady=(5, 0))
         self.frame_entries.grid(row=1, column=0, sticky="nsew")
 
@@ -679,11 +682,17 @@ class SWVFrame(ElectrochemProjectBarMixin, ttk.Frame):
         return script.strip()
 
     def send_script(self):
+        # Validar ANTES de ocultar las entradas (como CV/CA): si generate_payload
+        # falla por una entrada invalida, no dejamos los inputs escondidos sin vuelta.
+        try:
+            self.generate_payload()
+        except ValueError as e:
+            print(f"Error: check input values -> {e}")
+            return
         # Snapshot de lo que se va a correr -> _last_run.
         self.snapshot_current_run()
         self.frame_project.grid_forget()
         self.frame_entries.grid_forget()
-        self.generate_payload()
         ip_sender = self.callback_ip() if self.callback_ip else "localhost"
 
         # Motor durante el PRE-TRATAMIENTO (condition + deposition). Arranca con la
@@ -737,6 +746,9 @@ class SWVFrame(ElectrochemProjectBarMixin, ttk.Frame):
             pretreatment_phases=pretreatment_phases or None,
         )
         self.frame_plotter.grid(row=4, column=0, padx=10, pady=10, sticky="nsew")
+        # Lleva el scroll al inicio para ver el plotter desde arriba (como CV/CA).
+        if self.frame_w_scroll:
+            self.frame_w_scroll.yview_moveto(0)
 
     def start_spin_motor_angle(self):
         """Arranca el oscilador (±angle) para el pre-tratamiento y arma el Timer que lo
@@ -813,6 +825,9 @@ class SWVFrame(ElectrochemProjectBarMixin, ttk.Frame):
                 print(f"Error joining motor thread: {e}")
         self.thread_motor = None
         self.stop_event = None
+        # Restaura las entradas al terminar (como CV/CA); el plotter sigue visible con
+        # el resultado del barrido.
+        self.show_inputs_frame()
         print("Experimento SWV finalizado. Motor detenido.")
 
 

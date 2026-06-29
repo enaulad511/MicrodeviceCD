@@ -165,7 +165,8 @@ class PeakAnalysisFrame(ttk.Frame):
     # UI
     # ---------------------------------------------------------------------
     def _build_ui(self):
-        # --- Toolbar fila 1: acciones ---
+        # --- Toolbar fila 1: archivo (izq) + globales (der). Dos filas para que en
+        # pantallas chicas (touchscreen del Pi) no se corten Clear all / Legend. ---
         toolbar = ttk.Frame(self)
         toolbar.pack(side=ttk.TOP, fill=ttk.X, padx=6, pady=(6, 2))
 
@@ -178,17 +179,6 @@ class PeakAnalysisFrame(ttk.Frame):
         ttk.Button(
             toolbar, text="💾 Export", bootstyle="secondary", command=self.export_results
         ).pack(side=ttk.LEFT, padx=3)
-        ttk.Separator(toolbar, orient=ttk.VERTICAL).pack(side=ttk.LEFT, fill=ttk.Y, padx=6)
-
-        ttk.Button(toolbar, text="🗑 Remove", bootstyle="danger", command=self.remove_selected).pack(
-            side=ttk.LEFT, padx=3
-        )
-        ttk.Button(
-            toolbar, text="👁 Show/Hide", bootstyle="info", command=self.toggle_visibility
-        ).pack(side=ttk.LEFT, padx=3)
-        ttk.Button(
-            toolbar, text="📊 Compute", bootstyle="success", command=self.compute_extrema
-        ).pack(side=ttk.LEFT, padx=3)
         self._legend_visible = True
         self.btn_legend = ttk.Button(
             toolbar, text="Legend ON", bootstyle="secondary", command=self.toggle_legend
@@ -197,6 +187,19 @@ class PeakAnalysisFrame(ttk.Frame):
         ttk.Button(
             toolbar, text="Clear all", bootstyle="danger-outline", command=self.clear_all
         ).pack(side=ttk.RIGHT, padx=3)
+
+        # --- Toolbar fila 1b: acciones de selección / cómputo ---
+        toolbar_b = ttk.Frame(self)
+        toolbar_b.pack(side=ttk.TOP, fill=ttk.X, padx=6, pady=(0, 2))
+        ttk.Button(
+            toolbar_b, text="🗑 Remove", bootstyle="danger", command=self.remove_selected
+        ).pack(side=ttk.LEFT, padx=3)
+        ttk.Button(
+            toolbar_b, text="👁 Show/Hide", bootstyle="info", command=self.toggle_visibility
+        ).pack(side=ttk.LEFT, padx=3)
+        ttk.Button(
+            toolbar_b, text="📊 Compute", bootstyle="success", command=self.compute_extrema
+        ).pack(side=ttk.LEFT, padx=3)
 
         # --- Toolbar fila 2: selectores de picos + filtro ---
         toolbar2 = ttk.Frame(self)
@@ -1170,7 +1173,8 @@ class EISAnalysisFrame(ttk.Frame):
     # UI
     # ------------------------------------------------------------------
     def _build_ui(self):
-        # --- Toolbar fila 1: acciones ---
+        # --- Toolbar fila 1: archivo (izq) + globales (der). Dos filas para que en
+        # pantallas chicas (touchscreen del Pi) no se corte Clear all. ---
         toolbar = ttk.Frame(self)
         toolbar.pack(side=ttk.TOP, fill=ttk.X, padx=6, pady=(6, 2))
         ttk.Button(toolbar, text="📂 Load CSV", bootstyle="secondary", command=self.load_csv).pack(
@@ -1182,16 +1186,19 @@ class EISAnalysisFrame(ttk.Frame):
         ttk.Button(
             toolbar, text="💾 Export", bootstyle="secondary", command=self.export_results
         ).pack(side=ttk.LEFT, padx=3)
-        ttk.Separator(toolbar, orient=ttk.VERTICAL).pack(side=ttk.LEFT, fill=ttk.Y, padx=6)
-        ttk.Button(toolbar, text="🗑 Remove", bootstyle="danger", command=self.remove_selected).pack(
-            side=ttk.LEFT, padx=3
-        )
-        ttk.Button(
-            toolbar, text="👁 Show/Hide", bootstyle="info", command=self.toggle_visibility
-        ).pack(side=ttk.LEFT, padx=3)
         ttk.Button(
             toolbar, text="Clear all", bootstyle="danger-outline", command=self.clear_all
         ).pack(side=ttk.RIGHT, padx=3)
+
+        # --- Toolbar fila 1b: acciones de selección ---
+        toolbar_b = ttk.Frame(self)
+        toolbar_b.pack(side=ttk.TOP, fill=ttk.X, padx=6, pady=(0, 2))
+        ttk.Button(
+            toolbar_b, text="🗑 Remove", bootstyle="danger", command=self.remove_selected
+        ).pack(side=ttk.LEFT, padx=3)
+        ttk.Button(
+            toolbar_b, text="👁 Show/Hide", bootstyle="info", command=self.toggle_visibility
+        ).pack(side=ttk.LEFT, padx=3)
 
         # --- Toolbar fila 2: checkboxes de qué plots mostrar (deshabilitados si los
         # datos cargados no tienen las columnas que cada uno necesita) ---
@@ -2233,7 +2240,8 @@ class SqwvAnalysisFrame(ttk.Frame):
 
     # ------------------------------------------------------------------ UI
     def _build_ui(self):
-        # --- Toolbar fila 1: acciones ---
+        # --- Toolbar fila 1: archivo (izq) + globales (der). Dos filas para que en
+        # pantallas chicas (touchscreen del Pi) no se corten Clear all / Legend. ---
         toolbar = ttk.Frame(self)
         toolbar.pack(side=ttk.TOP, fill=ttk.X, padx=6, pady=(6, 2))
         ttk.Button(toolbar, text="📂 Load CSV", bootstyle="secondary", command=self.load_csv).pack(
@@ -2245,16 +2253,6 @@ class SqwvAnalysisFrame(ttk.Frame):
         ttk.Button(
             toolbar, text="💾 Export", bootstyle="secondary", command=self.export_results
         ).pack(side=ttk.LEFT, padx=3)
-        ttk.Separator(toolbar, orient=ttk.VERTICAL).pack(side=ttk.LEFT, fill=ttk.Y, padx=6)
-        ttk.Button(
-            toolbar, text="🗑 Remove", bootstyle="danger", command=self.remove_selected
-        ).pack(side=ttk.LEFT, padx=3)
-        ttk.Button(
-            toolbar, text="👁 Show/Hide", bootstyle="info", command=self.toggle_visibility
-        ).pack(side=ttk.LEFT, padx=3)
-        ttk.Button(
-            toolbar, text="📊 Compute", bootstyle="success", command=self.compute_peaks
-        ).pack(side=ttk.LEFT, padx=3)
         self.btn_legend = ttk.Button(
             toolbar, text="Legend ON", bootstyle="secondary", command=self.toggle_legend
         )
@@ -2262,6 +2260,19 @@ class SqwvAnalysisFrame(ttk.Frame):
         ttk.Button(
             toolbar, text="Clear all", bootstyle="danger-outline", command=self.clear_all
         ).pack(side=ttk.RIGHT, padx=3)
+
+        # --- Toolbar fila 1b: acciones de selección / cómputo ---
+        toolbar_b = ttk.Frame(self)
+        toolbar_b.pack(side=ttk.TOP, fill=ttk.X, padx=6, pady=(0, 2))
+        ttk.Button(
+            toolbar_b, text="🗑 Remove", bootstyle="danger", command=self.remove_selected
+        ).pack(side=ttk.LEFT, padx=3)
+        ttk.Button(
+            toolbar_b, text="👁 Show/Hide", bootstyle="info", command=self.toggle_visibility
+        ).pack(side=ttk.LEFT, padx=3)
+        ttk.Button(
+            toolbar_b, text="📊 Compute", bootstyle="success", command=self.compute_peaks
+        ).pack(side=ttk.LEFT, padx=3)
 
         # --- Toolbar fila 2: dirección + ventana + prominencia + filtro ---
         toolbar2 = ttk.Frame(self)

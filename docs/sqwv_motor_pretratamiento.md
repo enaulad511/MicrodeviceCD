@@ -56,7 +56,9 @@ Parada efectiva = `min(Timer @ 75 s, 1er paquete sweep @ ~85 s)` = **75 s**.
 - **Fin de corrida** (terminal del firmware, Stop manual o error de MethodSCRIPT): el plotter
   llama `on_end_experiment`, que **cancela el Timer**, setea el `stop_event` y hace `join` del
   hilo para liberar UART/GPIO antes de la siguiente corrida. Cubre también un Stop/error
-  **durante** el pre-tratamiento (el motor para con la corrida).
+  **durante** el pre-tratamiento (el motor para con la corrida). Tras la limpieza del motor,
+  restaura las entradas con `show_inputs_frame()` (paridad con CV/CA: el plotter sigue visible
+  con el resultado).
 - **Ventana cero.** Si el motor está habilitado pero `t_con + t_dep == 0`, **no se arranca el
   motor** (`callback_spin_motor=None` para esa corrida): evita un motor que arranca y se le
   manda parar en el mismo instante.
