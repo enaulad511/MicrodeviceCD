@@ -39,10 +39,10 @@ thread_lock = threading.Lock()
 # Duración de la lectura de fluorescencia (fuente única de verdad).
 # Usadas como defaults de _read_fluorescence, en los sleeps previos a cada
 # lectura y en la estimación de tiempo restante del experimento.
-FLUOR_PRE_SLEEP_S = 0.5   # espera tras el hold de extensión, antes de muestrear
-FLUOR_BASELINE_S = 0.5    # ventana de línea base (luz OFF)
-FLUOR_LIGHT_S = 2.0       # ventana de excitación (luz ON)
-FLUOR_POST_S = 0.5        # ventana de decaimiento (luz OFF)
+FLUOR_PRE_SLEEP_S = 0.5  # espera tras el hold de extensión, antes de muestrear
+FLUOR_BASELINE_S = 0.5  # ventana de línea base (luz OFF)
+FLUOR_LIGHT_S = 2.0  # ventana de excitación (luz ON)
+FLUOR_POST_S = 0.5  # ventana de decaimiento (luz OFF)
 # Tiempo total que consume una lectura completa (sleep previo + 3 ventanas).
 FLUOR_READ_TOTAL_S = FLUOR_PRE_SLEEP_S + FLUOR_BASELINE_S + FLUOR_LIGHT_S + FLUOR_POST_S
 
@@ -257,18 +257,18 @@ class PCRFrame(ttk.Frame):
         self.cbo_project.grid(row=0, column=1, padx=5, pady=5, sticky="we")
         self.cbo_project.bind("<<ComboboxSelected>>", self._on_project_selected)
 
-        ttk.Button(
-            frame, text="💾Save", style="success.TButton", command=self._on_save_as
-        ).grid(row=0, column=2, padx=3, pady=5, sticky="we")
-        ttk.Button(
-            frame, text="📁Import", style="info.TButton", command=self._on_import
-        ).grid(row=0, column=3, padx=3, pady=5, sticky="we")
-        ttk.Button(
-            frame, text="📤Export", style="info.TButton", command=self._on_export
-        ).grid(row=0, column=4, padx=3, pady=5, sticky="we")
-        ttk.Button(
-            frame, text="🗑️Delete", style="danger.TButton", command=self._on_delete
-        ).grid(row=0, column=5, padx=3, pady=5, sticky="we")
+        ttk.Button(frame, text="💾Save", style="success.TButton", command=self._on_save_as).grid(
+            row=0, column=2, padx=3, pady=5, sticky="we"
+        )
+        ttk.Button(frame, text="📁Import", style="info.TButton", command=self._on_import).grid(
+            row=0, column=3, padx=3, pady=5, sticky="we"
+        )
+        ttk.Button(frame, text="📤Export", style="info.TButton", command=self._on_export).grid(
+            row=0, column=4, padx=3, pady=5, sticky="we"
+        )
+        ttk.Button(frame, text="🗑️Delete", style="danger.TButton", command=self._on_delete).grid(
+            row=0, column=5, padx=3, pady=5, sticky="we"
+        )
         return frame
 
     def _display_name(self, name):
@@ -352,7 +352,8 @@ class PCRFrame(ttk.Frame):
             return
         # Sugerir el nombre activo salvo que sea el snapshot implicito.
         suggested = (
-            "" if self.active_project_name in (None, pcrp.LAST_RUN_KEY)
+            ""
+            if self.active_project_name in (None, pcrp.LAST_RUN_KEY)
             else self.active_project_name
         )
         name = self._ask_project_name(suggested)
@@ -384,9 +385,7 @@ class PCRFrame(ttk.Frame):
             return
         from tkinter import messagebox
 
-        if not messagebox.askyesno(
-            "Delete project", f"Delete project '{name}'?", parent=self
-        ):
+        if not messagebox.askyesno("Delete project", f"Delete project '{name}'?", parent=self):
             return
         if pcrp.delete_project(name):
             # Tras borrar, recargar el proyecto inicial de la cascada.
@@ -440,9 +439,7 @@ class PCRFrame(ttk.Frame):
         if name is None:
             self.svar_status.set("No project to export.")
             return
-        default_name = (
-            "last_run" if name == pcrp.LAST_RUN_KEY else name
-        )
+        default_name = "last_run" if name == pcrp.LAST_RUN_KEY else name
         path = filedialog.asksaveasfilename(
             title="Export PCR project",
             defaultextension=".json",
@@ -532,9 +529,14 @@ class PCRFrame(ttk.Frame):
             # duración real supera 1.5x la de un ciclo, se dibujan comprimidos a
             # ese tope para no aplastar los ciclos. Es solo visual: el tiempo real
             # se conserva en la anotación de cada tramo recortado.
-            cycle_dur = (transition_time_up(ext_temp, high_temp) + time_high
-                         + transition_time_down + time_low
-                         + transition_time_up(low_temp, ext_temp) + ext_time)
+            cycle_dur = (
+                transition_time_up(ext_temp, high_temp)
+                + time_high
+                + transition_time_down
+                + time_low
+                + transition_time_up(low_temp, ext_temp)
+                + ext_time
+            )
             clip_cap = 1.5 * cycle_dur if cycle_dur > 0 else float("inf")
 
             def clip_hold(real_dur):
@@ -549,20 +551,44 @@ class PCRFrame(ttk.Frame):
             current_time = 0.0
 
             # Initial spin: temperatura ambiente
-            phase_segments.append((current_time, current_time + initial_spin_time,
-                                    room_temp, room_temp, "Initial Spin", "gray"))
+            phase_segments.append(
+                (
+                    current_time,
+                    current_time + initial_spin_time,
+                    room_temp,
+                    room_temp,
+                    "Initial Spin",
+                    "gray",
+                )
+            )
             current_time += initial_spin_time
 
             # Rampa hacia denaturation
             ramp_denat = transition_time_up(room_temp, denat_temp)
-            phase_segments.append((current_time, current_time + ramp_denat,
-                                    room_temp, denat_temp, "Ramp Denat", "darkorange"))
+            phase_segments.append(
+                (
+                    current_time,
+                    current_time + ramp_denat,
+                    room_temp,
+                    denat_temp,
+                    "Ramp Denat",
+                    "darkorange",
+                )
+            )
             current_time += ramp_denat
 
             # Hold Denaturation (recortable si es muy largo)
             disp_denat, real_denat, clipped_denat = clip_hold(denat_time)
-            phase_segments.append((current_time, current_time + disp_denat,
-                                    denat_temp, denat_temp, "Denaturation", "purple"))
+            phase_segments.append(
+                (
+                    current_time,
+                    current_time + disp_denat,
+                    denat_temp,
+                    denat_temp,
+                    "Denaturation",
+                    "purple",
+                )
+            )
             current_time += disp_denat
             if clipped_denat:
                 clip_marks.append((current_time, denat_temp, real_denat))
@@ -572,41 +598,83 @@ class PCRFrame(ttk.Frame):
             for _ in range(n_display):
                 # Rampa hacia High
                 ramp_high = transition_time_up(prev_temp, high_temp)
-                phase_segments.append((current_time, current_time + ramp_high,
-                                        prev_temp, high_temp, "Heating", "orange"))
+                phase_segments.append(
+                    (
+                        current_time,
+                        current_time + ramp_high,
+                        prev_temp,
+                        high_temp,
+                        "Heating",
+                        "orange",
+                    )
+                )
                 current_time += ramp_high
 
                 # Hold High
-                phase_segments.append((current_time, current_time + time_high,
-                                        high_temp, high_temp, "High", "red"))
+                phase_segments.append(
+                    (current_time, current_time + time_high, high_temp, high_temp, "High", "red")
+                )
                 current_time += time_high
 
                 # Cooling hacia Low
-                phase_segments.append((current_time, current_time + transition_time_down,
-                                        high_temp, low_temp, "Cooling", "green"))
+                phase_segments.append(
+                    (
+                        current_time,
+                        current_time + transition_time_down,
+                        high_temp,
+                        low_temp,
+                        "Cooling",
+                        "green",
+                    )
+                )
                 current_time += transition_time_down
 
                 # Hold Low
-                phase_segments.append((current_time, current_time + time_low,
-                                        low_temp, low_temp, "Low", "blue"))
+                phase_segments.append(
+                    (current_time, current_time + time_low, low_temp, low_temp, "Low", "blue")
+                )
                 current_time += time_low
 
                 # Rampa hacia Extension
                 ramp_ext = transition_time_up(low_temp, ext_temp)
-                phase_segments.append((current_time, current_time + ramp_ext,
-                                        low_temp, ext_temp, "Ramp Ext", "goldenrod"))
+                phase_segments.append(
+                    (
+                        current_time,
+                        current_time + ramp_ext,
+                        low_temp,
+                        ext_temp,
+                        "Ramp Ext",
+                        "goldenrod",
+                    )
+                )
                 current_time += ramp_ext
 
                 # Hold Extension
-                phase_segments.append((current_time, current_time + ext_time,
-                                        ext_temp, ext_temp, "Extension", "darkcyan"))
+                phase_segments.append(
+                    (
+                        current_time,
+                        current_time + ext_time,
+                        ext_temp,
+                        ext_temp,
+                        "Extension",
+                        "darkcyan",
+                    )
+                )
                 current_time += ext_time
                 prev_temp = ext_temp
 
             # Extensión final (recortable si es muy larga)
             disp_ext_final, real_ext_final, clipped_ext_final = clip_hold(ext_time_final)
-            phase_segments.append((current_time, current_time + disp_ext_final,
-                                    ext_temp, ext_temp, "Final Ext.", "magenta"))
+            phase_segments.append(
+                (
+                    current_time,
+                    current_time + disp_ext_final,
+                    ext_temp,
+                    ext_temp,
+                    "Final Ext.",
+                    "magenta",
+                )
+            )
             current_time += disp_ext_final
             if clipped_ext_final:
                 clip_marks.append((current_time, ext_temp, real_ext_final))
@@ -620,7 +688,9 @@ class PCRFrame(ttk.Frame):
             for seg in phase_segments:
                 start, end, t_from, t_to, label, color = seg
                 first_occurrence = label not in labeled
-                kwargs: dict = {"linewidth": 2.5} if t_from == t_to else {"linestyle": "--", "linewidth": 1.5}
+                kwargs: dict = (
+                    {"linewidth": 2.5} if t_from == t_to else {"linestyle": "--", "linewidth": 1.5}
+                )
                 if first_occurrence:
                     kwargs["label"] = label
                     labeled.add(label)
@@ -636,16 +706,21 @@ class PCRFrame(ttk.Frame):
 
             # Marca de discontinuidad + duración real en los holds recortados
             for x_cut, temp, real_dur in clip_marks:
-                ax.axvline(x_cut, color="black", linestyle=(0, (2, 2)),
-                           linewidth=1.0, alpha=0.6)
-                ax.annotate(f"≈{real_dur:.0f}s", xy=(x_cut, temp),
-                            xytext=(0, 8), textcoords="offset points",
-                            ha="right", va="bottom", fontsize=7,
-                            fontweight="bold", color="black")
+                ax.axvline(x_cut, color="black", linestyle=(0, (2, 2)), linewidth=1.0, alpha=0.6)
+                ax.annotate(
+                    f"≈{real_dur:.0f}s",
+                    xy=(x_cut, temp),
+                    xytext=(0, 8),
+                    textcoords="offset points",
+                    ha="right",
+                    va="bottom",
+                    fontsize=7,
+                    fontweight="bold",
+                    color="black",
+                )
 
             ax.legend(loc="upper right", fontsize=7, ncol=2)
-            ax.set_xlabel("Time (s) — long holds compressed"
-                          if clip_marks else "Time (s)")
+            ax.set_xlabel("Time (s) — long holds compressed" if clip_marks else "Time (s)")
             # Eje X sin valores: tras el recorte ya no son segundos reales
             ax.set_xticks([])
             ax.set_ylabel("Temperature (°C)")
@@ -832,12 +907,14 @@ class PCRFrame(ttk.Frame):
         if self.ads is not None:
             return True
         from templates.constants import secrets
+
         if secrets.get("environment", "") == "dev":
             return False
         try:
             settings = read_settings_from_file()
             ads_fsr = float(settings.get("ads_fsr", 1.024))
             from Drivers.ReaderADS import Ads1115Reader
+
             self.ads = Ads1115Reader(address=0x48, fsr=ads_fsr, sps=64, single_shot=False)
             return True
         except Exception as e:
@@ -1077,10 +1154,7 @@ class PCRFrame(ttk.Frame):
             # tiempo transcurrido. Devuelve True si se abortó (stop).
             t_end = time.time() + duration
             while time.time() < t_end:
-                if (
-                    self.stop_udp_listenner is not None
-                    and self.stop_udp_listenner.is_set()
-                ):
+                if self.stop_udp_listenner is not None and self.stop_udp_listenner.is_set():
                     return True
                 t_iter = time.time()
                 v = read_one()
@@ -1174,7 +1248,7 @@ class PCRFrame(ttk.Frame):
             or self.temp < low_temp + 9.5,
             stop_event=self.stop_event_motor,
         )
-        
+
         print(self.temp, "low temp....dis")
         while (
             self.temp > low_temp + 0.5 and not self.stop_udp_listenner.is_set()
@@ -1376,7 +1450,7 @@ class PCRFrame(ttk.Frame):
             if not self.stop_udp_listenner.is_set():
                 print("PCR cycles complete, reading fluorescence")
                 self.fase = "Extension"
-                self._hold_phase("h_ext", 68, ext_time_final, ts)
+                self._hold_phase("h_ext", ext_temp, ext_time_final, ts)
                 time.sleep(FLUOR_PRE_SLEEP_S)
                 v_fluo_final = self._read_fluorescence(ads)
                 print(f"Final fluorescence delta voltage: {v_fluo_final}")
