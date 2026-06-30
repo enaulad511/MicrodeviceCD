@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 
+import re
 import threading
 import time
 from datetime import datetime
@@ -61,6 +62,21 @@ def _skip(t):
         return float(t) <= 0
     except (TypeError, ValueError):
         return False
+
+
+def _project_slug(name):
+    """Slug seguro para nombre de archivo a partir del proyecto PCR activo.
+
+    El snapshot implícito (`_last_run`) o un nombre vacío/no nombrado cae a
+    "last_run". Cualquier carácter fuera de [A-Za-z0-9._-] se neutraliza a "_"
+    (sin transliterar acentos), colapsando repeticiones. Si tras sanear queda
+    vacío, también cae a "last_run".
+    """
+    if not name or name == pcrp.LAST_RUN_KEY:
+        return "last_run"
+    slug = re.sub(r"[^A-Za-z0-9._-]", "_", str(name))
+    slug = re.sub(r"_+", "_", slug).strip("_")
+    return slug or "last_run"
 
 
 def _fuzzy_gains(error: float, base_kp: float, base_ki: float) -> tuple:
@@ -908,21 +924,24 @@ class PCRFrame(ttk.Frame):
         import csv
 
         timestamp = datetime.now()
-        filename = f"files/temperature_data_{timestamp.strftime('%Y%m%d_%H%M%S')}.csv"
+        # Prefijo con el nombre del protocolo (proyecto PCR activo) saneado.
+        slug = _project_slug(self.active_project_name)
+        ts = timestamp.strftime("%Y%m%d_%H%M%S")
+        filename = f"files/{slug}_temperature_data_{ts}.csv"
         with open(filename, "w", newline="") as file:
             writer = csv.writer(file)
             writer.writerow([self.prefix_row])
             for temp in self.data_temperature:
                 writer.writerow([temp])
         print(f"Data saved to {filename}")
-        filename_photo = f"files/photodetector_data_{timestamp.strftime('%Y%m%d_%H%M%S')}.csv"
+        filename_photo = f"files/{slug}_photodetector_data_{ts}.csv"
         with open(filename_photo, "w", newline="") as file:
             writer = csv.writer(file)
             writer.writerow(["photodetector"])
             for phot in self.data_photodetector:
                 writer.writerow([phot])
         # Serie temporal cruda en formato largo (una fila por muestra)
-        filename_raw = f"files/photodetector_raw_{timestamp.strftime('%Y%m%d_%H%M%S')}.csv"
+        filename_raw = f"files/{slug}_photodetector_raw_{ts}.csv"
         with open(filename_raw, "w", newline="") as file:
             writer = csv.writer(file)
             writer.writerow(["cycle", "t_rel_s", "light_on", "voltage"])

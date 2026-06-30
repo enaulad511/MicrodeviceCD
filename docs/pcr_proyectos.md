@@ -99,12 +99,19 @@ baseline, persiste `_last_used` y regenera la preview.
 
 ## Trazabilidad receta → datos
 
-`experiment_pcr` antepone `project: <nombre>` al `prefix_col` que ya encabeza los
-CSV de resultados ([ui/PcrFrame.py](../ui/PcrFrame.py),
-`save_data_temps_file`). Si corrió con entradas editadas a mano (proyecto activo
-== `_last_run` o `None`), se marca `project: _last_run (sin guardar)`. **No** se
-mete el nombre en el *nombre de archivo* (puede tener espacios/acentos); el
-timestamp sigue siendo el identificador único.
+`experiment_pcr` antepone `project: <nombre>` al `prefix_col` que ya encabeza el
+CSV de temperatura ([ui/PcrFrame.py](../ui/PcrFrame.py), `save_data_temps_file`).
+Si corrió con entradas editadas a mano (proyecto activo == `_last_run` o `None`),
+se marca `project: _last_run (sin guardar)`.
+
+Además, **el nombre del proyecto activo prefija el nombre de archivo** de los tres
+CSV: `files/<slug>_temperature_data_<ts>.csv`, `..._photodetector_data_...` y
+`..._photodetector_raw_...`. El slug lo deriva `_project_slug(active_project_name)`:
+el snapshot implícito (`_last_run`/`None`) cae a `last_run`, y cualquier carácter
+fuera de `[A-Za-z0-9._-]` se neutraliza a `_` (sin transliterar acentos, colapsando
+repeticiones; vacío → `last_run`). Se usa `active_project_name` tal cual —sin
+detectar entradas editadas-pero-no-guardadas—, consistente con la etiqueta del
+encabezado. El timestamp sigue garantizando unicidad por corrida.
 
 ## Layout y runtime
 
