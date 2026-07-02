@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+from ui.PcrFrame import PCRFrame
 from Drivers.ClientUDP import UdpClient
 from templates.constants import font_buttons_small, font_footer, font_options, font_text
 from ui.ConfigFrame import ConfigFrame
@@ -28,14 +29,13 @@ from ui.ElectrochemicalFrame import ElectrochemicalFrame
 from ui.FluorecenseLEDFrame import ControlFluorescenteFrame
 from ui.FrameInit import StartImageFrame
 from ui.LEDFrame import ControleLEDFrame
-from ui.PcrFrame import PCRFrame
 from ui.PhotoreceptorFrame import PhotoreceptorFrame
 from ui.QuickControlFrame import QuickControlFrame
 
 
 def configure_styles():
     style = ttk.Style()
-    
+
     style.configure("Custom.TButton", font=font_buttons)
     style.configure("Custom.TLabel", font=font_labels)
     style.configure("Custom.TEntry", font=font_entry)
