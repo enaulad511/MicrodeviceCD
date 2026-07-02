@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
+
+__author__ = "Edisson A. Naula"
+__date__ = "$ 08/10/2025  at 09:35 a.m. $"
+
 from ui.PcrFrame import PCRFrame
 from Drivers.ClientUDP import UdpClient
 from templates.constants import font_buttons_small, font_footer, font_options, font_text
 from ui.ConfigFrame import ConfigFrame
 from ui.TemperatureFrame import TemperatureFrame
-
-__author__ = "Edisson A. Naula"
-__date__ = "$ 08/10/2025  at 09:35 a.m. $"
 
 import platform
 
@@ -209,8 +210,9 @@ class MainGUI(ttk.Window):
             except Exception:
                 pass
         from ui.AnalysisWindow import AnalysisWindow
+
         self.analysis_window = AnalysisWindow(self, plotter=self)
-    
+
     def callback_ip(self):
         return self.ip_sender
 
