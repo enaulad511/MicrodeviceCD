@@ -35,6 +35,7 @@ from ui.QuickControlFrame import QuickControlFrame
 
 def configure_styles():
     style = ttk.Style()
+    
     style.configure("Custom.TButton", font=font_buttons)
     style.configure("Custom.TLabel", font=font_labels)
     style.configure("Custom.TEntry", font=font_entry)
