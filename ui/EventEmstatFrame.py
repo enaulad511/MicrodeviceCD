@@ -656,7 +656,7 @@ class EventPlotter(ttk.Frame):
                     return
             except Exception:
                 pass
-        from ui.AnalysisWindow import AnalysisWindow
+        from ui.analysis import AnalysisWindow
 
         self.analysis_window = AnalysisWindow(self, plotter=self)
 

@@ -398,7 +398,7 @@ cambios:
 
 ---
 
-## 8. Ventana de análisis EIS (`ui/AnalysisWindow.py`)
+## 8. Ventana de análisis EIS (`ui/analysis/eis.py`)
 
 `AnalysisWindow` pasó de ser una ventana única (análisis de picos CV/SWV) a un **shell
 `Toplevel` con un `ttk.Notebook` por método**: pestaña **"Peaks (CV/SWV)"**

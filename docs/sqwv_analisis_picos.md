@@ -9,7 +9,7 @@ Una traza SQWV típica trae **varios picos a distintos potenciales** (multiplexa
 analito aparece a su `E`), por eso la detección es multi-pico y de **ambas direcciones**
 (máximos = oxidación, mínimos = reducción).
 
-UI: [ui/AnalysisWindow.py](../ui/AnalysisWindow.py) (`SqwvAnalysisFrame`), tercera
+UI: [ui/analysis/sqwv.py](../ui/analysis/sqwv.py) (`SqwvAnalysisFrame`), tercera
 pestaña de `AnalysisWindow` ("SQWV Peaks"), junto a "Peaks (CV)" y "EIS".
 
 ## 1. Dónde vive y cómo se abre
@@ -24,7 +24,7 @@ del `EventPlotter` ([ui/EventEmstatFrame.py:651](../ui/EventEmstatFrame.py#L651)
 
 La pestaña vieja "Peaks (CV/SWV)" se renombró a **"Peaks (CV)"** y ya **no auto-siembra**
 desde una corrida SWV (`method not in ("eis", "sqwv")`,
-[ui/AnalysisWindow.py:158](../ui/AnalysisWindow.py#L158)); sí puede cargar CSVs SWV a mano
+[ui/analysis/peaks.py:96](../ui/analysis/peaks.py#L96)); sí puede cargar CSVs SWV a mano
 si alguien quiere su lógica de tendencia.
 
 ## 2. Modelo de datos

@@ -209,9 +209,9 @@ class MainGUI(ttk.Window):
                     return
             except Exception:
                 pass
-        from ui.AnalysisWindow import AnalysisWindow
+        from ui.analysis import AnalysisWindow
 
-        self.analysis_window = AnalysisWindow(self, plotter=self)
+        self.analysis_window = AnalysisWindow(self, plotter=self, pcr_frame=self.tab_pcr)
 
     def callback_ip(self):
         return self.ip_sender
