@@ -10,6 +10,7 @@ import ttkbootstrap as ttk
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 from matplotlib.figure import Figure
 
+from templates.utils import experiment_dir
 from ui.analysis.common import CycleCurve, Experiment, _apply_filter, plt
 
 
@@ -584,6 +585,7 @@ class PeakAnalysisFrame(ttk.Frame):
         """Carga un CSV (un experimento) — crea un Experiment con N ciclos."""
         path = askopenfilename(
             title="Select CSV (one experiment)",
+            initialdir=experiment_dir("cv"),
             filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
         )
         if not path:

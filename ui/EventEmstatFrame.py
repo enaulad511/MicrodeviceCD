@@ -27,6 +27,8 @@ import matplotlib.pyplot as plt
 import ttkbootstrap as ttk
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 
+from templates.utils import experiment_dir
+
 
 class EventPlotter(ttk.Frame):
     """
@@ -502,13 +504,13 @@ class EventPlotter(ttk.Frame):
             self._set_status("No data to save.")
             return
         print("Saving data …")
-        os.makedirs("files", exist_ok=True)
+        save_dir = experiment_dir(self.method)
         suffix = self._build_filename_suffix()
         initialfile = f"{self.method}_data_{time.strftime('%Y%m%d_%H%M%S')}{suffix}.csv"
         filename = asksaveasfilename(
             parent=self,
             title="Save data",
-            initialdir="files",
+            initialdir=save_dir,
             initialfile=initialfile,
             defaultextension=".csv",
             filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
@@ -559,6 +561,7 @@ class EventPlotter(ttk.Frame):
         mediciones live almacenadas en self.lines_by_m."""
         path = askopenfilename(
             title="Select CSV to load",
+            initialdir=experiment_dir(self.method),
             filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
         )
         if not path:

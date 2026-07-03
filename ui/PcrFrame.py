@@ -20,7 +20,7 @@ from templates.constants import (
     led_heatin_pin,
     serial_port_encoder,
 )
-from templates.utils import read_settings_from_file
+from templates.utils import experiment_dir, read_settings_from_file
 from ui.KeyboardFrame import NumericKeyboard
 
 # spinMotorRPM_ramped se importa lazy desde Drivers.DriverStepperSys dentro de
@@ -102,6 +102,27 @@ def _fuzzy_gains(error: float, base_kp: float, base_ki: float) -> tuple:
         kp_s = 0.5 + t * 0.5  # 0.5 → 1.0
         ki_s = 1.3 - t * 0.3  # 1.0 → 1.3
     return base_kp * kp_s, base_ki * ki_s
+
+
+def _fuzzy_max_age(error: float, m_age_min: float, m_age_max: float) -> float:
+    """Escala dinámicamente la edad máxima de temperatura confiable (freshness).
+
+    Reutiliza los mismos umbrales de |error| que `_fuzzy_gains` (2°C y 5°C):
+      |e| >= 5°C   → m_age_max (plano): rampa dura, tolera lecturas UDP añejas
+      2 <= |e| < 5 → interpolación lineal m_age_min → m_age_max
+      |e| < 2°C    → m_age_min (plano): cerca del setpoint, exige frescura
+
+    Monótona: mayor error ⇒ mayor m_age. Solo se usa en la rampa (reach);
+    el hold conserva su umbral estricto. Los límites vienen de settings.json
+    por fase (m_age_min_<phase> / m_age_max_<phase>).
+    """
+    abs_error = abs(error)
+    if abs_error >= 5.0:
+        return m_age_max
+    if abs_error < 2.0:
+        return m_age_min
+    t = (abs_error - 2.0) / 3.0  # 0..1 de 2°C a 5°C
+    return m_age_min + t * (m_age_max - m_age_min)
 
 
 def create_widgets_pcr(parent):
@@ -927,21 +948,22 @@ class PCRFrame(ttk.Frame):
         # Prefijo con el nombre del protocolo (proyecto PCR activo) saneado.
         slug = _project_slug(self.active_project_name)
         ts = timestamp.strftime("%Y%m%d_%H%M%S")
-        filename = f"files/{slug}_temperature_data_{ts}.csv"
+        save_dir = experiment_dir("pcr")
+        filename = f"{save_dir}/{slug}_temperature_data_{ts}.csv"
         with open(filename, "w", newline="") as file:
             writer = csv.writer(file)
             writer.writerow([self.prefix_row])
             for temp in self.data_temperature:
                 writer.writerow([temp])
         print(f"Data saved to {filename}")
-        filename_photo = f"files/{slug}_photodetector_data_{ts}.csv"
+        filename_photo = f"{save_dir}/{slug}_photodetector_data_{ts}.csv"
         with open(filename_photo, "w", newline="") as file:
             writer = csv.writer(file)
             writer.writerow(["photodetector"])
             for phot in self.data_photodetector:
                 writer.writerow([phot])
         # Serie temporal cruda en formato largo (una fila por muestra)
-        filename_raw = f"files/{slug}_photodetector_raw_{ts}.csv"
+        filename_raw = f"{save_dir}/{slug}_photodetector_raw_{ts}.csv"
         with open(filename_raw, "w", newline="") as file:
             writer = csv.writer(file)
             writer.writerow(["cycle", "t_rel_s", "light_on", "voltage"])
@@ -1092,6 +1114,10 @@ class PCRFrame(ttk.Frame):
             "TEMP_BAND": pid.get(f"tband_{phase}", 0.05),
             "WINDOW": pid.get(f"win_{phase}", ts * 0.9),
             "MAX_AGE": pid.get(f"m_age_{phase}", 0.09),
+            # Límites de la edad-máxima dinámica (fuzzy) usada solo en la rampa.
+            # m_age_max cae al viejo m_age_<phase> si no hay clave nueva.
+            "MAX_AGE_MIN": pid.get(f"m_age_min_{phase}", 0.02),
+            "MAX_AGE_MAX": pid.get(f"m_age_max_{phase}", pid.get(f"m_age_{phase}", 0.2)),
             # Fracción del setpoint hasta la que se hace feed-forward a potencia
             # plena antes de entregar el control al PI. 0.0 = sin pre-rampa.
             "FF_FRAC": pid.get(f"ff_frac_{phase}", 0.0),
@@ -1107,7 +1133,8 @@ class PCRFrame(ttk.Frame):
         I_MAX = params["I_MAX"]
         TEMP_BAND = params["TEMP_BAND"]
         WINDOW = params["WINDOW"]
-        MAX_AGE = params["MAX_AGE"]
+        MAX_AGE_MIN = params["MAX_AGE_MIN"]
+        MAX_AGE_MAX = params["MAX_AGE_MAX"]
         FF_FRAC = params.get("FF_FRAC", 0.0)
 
         # ----- Pre-rampa feed-forward (mismo principio que la desnaturalización):
@@ -1121,7 +1148,8 @@ class PCRFrame(ttk.Frame):
             ceiling = setpoint * FF_FRAC
             while self.temp < ceiling and not stop_event.is_set():
                 age = time.time() - self.temp_ts
-                if age > MAX_AGE:
+                max_age = _fuzzy_max_age(setpoint - self.temp, MAX_AGE_MIN, MAX_AGE_MAX)
+                if age > max_age:
                     # Temperatura vieja → no confiar; corta y reintenta.
                     self.pin_heating.write(False)  # pyrefly: ignore
                     continue
@@ -1132,11 +1160,11 @@ class PCRFrame(ttk.Frame):
             if break_if_below and self.temp < setpoint:
                 break
             age = time.time() - self.temp_ts
-            if age > MAX_AGE:
+            error = setpoint - self.temp
+            if age > _fuzzy_max_age(error, MAX_AGE_MIN, MAX_AGE_MAX):
                 # Temperatura vieja → no confiar
                 self.pin_heating.write(False)  # pyrefly: ignore
                 continue
-            error = setpoint - self.temp
             kp_dyn, ki_dyn = _fuzzy_gains(error, KP, KI)
             integral += error * WINDOW
             integral = max(-I_MAX, min(I_MAX, integral))

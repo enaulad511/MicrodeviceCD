@@ -1,9 +1,89 @@
 # -*- coding: utf-8 -*-
+import copy
 import json
+import os
 import subprocess
 
 __author__ = "Edisson A. Naula"
 __date__ = "$ 08/10/2025  at 11:20 a.m. $"
+
+
+# Esquema por defecto de settings.json. Solo se usa para RELLENAR claves ausentes
+# (ver seed_default_settings): los valores locales existentes nunca se sobreescriben.
+# Al añadir una clave nueva de configuración, agrégala aquí con su valor por defecto
+# para que un dispositivo con un settings.json viejo (conservado tras `git pull` por
+# el script update_repo) la auto-repare al arrancar.
+DEFAULT_SETTINGS = {
+    "version": "0.1.0",
+    "pidControllerRPM": {
+        "KP_denat": 1.2,
+        "win_denat": 0.05,
+        "m_age_denat": 0.1,
+        "m_age_min_denat": 0.02,
+        "m_age_max_denat": 0.2,
+        "KP_h_denat": 0.2,
+        "win_h_denat": 0.09,
+        "KI_denat": 0.6,
+        "imax_denat": 0.6,
+        "tband_denat": 0.01,
+        "ff_frac_denat": 0.8,
+        "imax_h_denat": 0.55,
+        "tband_h_denat": 0.05,
+        "KP_high": 0.9,
+        "win_high": 0.09,
+        "m_age_high": 0.09,
+        "m_age_min_high": 0.02,
+        "m_age_max_high": 0.2,
+        "tband_high": 0.02,
+        "KI_high": 0.9,
+        "ff_frac_high": 0.8,
+        "imax_high": 0.5,
+        "KP_h_high": 0.5,
+        "win_h_high": 0.05,
+        "KI_h_high": 0.9,
+        "imax_h_high": 0.5,
+        "tband_h_high": 0.03,
+        "KP_h_low": 0.1,
+        "win_h_low": 0.05,
+        "KI_h_low": 0.2,
+        "imax_h_low": 0.5,
+        "tband_h_low": 0.02,
+        "KP_h_ext": 0.1,
+        "win_h_ext": 0.09,
+        "KI_h_ext": 0.5,
+        "imax_h_ext": 0.5,
+        "tband_h_ext": 0.02,
+        "kp": 0.0005,
+        "ki": 0.0002,
+        "kd": 0.001,
+        "max": 35.0,
+        "min": 14.0,
+        "acceleration_spin": 300.0,
+        "ts_pcr": 0.1,
+    },
+    "ads_fsr": 0.256,
+    "photoreceptor": {"use_diff": 1.0},
+    "windows_pcr": 1500.0,
+}
+
+
+def experiment_dir(method: str) -> str:
+    """Devuelve (y crea) el directorio de guardado para un experimento.
+
+    Ordena los CSV por método en subcarpetas de ``files/`` (``files/CV``,
+    ``files/SQWV``, ``files/EIS``, ``files/CA``, ``files/PCR``). El nombre de la
+    carpeta es el método en mayúsculas; los datos de temperatura del ciclador
+    (UDP) pertenecen conceptualmente a PCR.
+
+    :param method: método del experimento (``"cv"``, ``"sqwv"``, ``"eis"``,
+        ``"ca"``, ``"pcr"``); no distingue mayúsculas.
+    :type method: str
+    :return: ruta relativa de la carpeta, ya creada.
+    :rtype: str
+    """
+    folder = os.path.join("files", str(method).upper())
+    os.makedirs(folder, exist_ok=True)
+    return folder
 
 
 def validar_entero(valor: str | int, minimo: int, maximo: int) -> tuple[bool, int | str]:
@@ -73,6 +153,52 @@ def write_settings_to_file(new_settings: dict, file_path="resources/settings.jso
         print(f"Error writing to settings file '{file_path}': {e}")
         return False
     return True
+
+
+def _merge_missing_defaults(target: dict, defaults: dict) -> bool:
+    """Rellena en ``target`` las claves ausentes tomándolas de ``defaults``.
+
+    Recursivo para sub-dicts (p. ej. ``pidControllerRPM``). Los valores locales
+    existentes NUNCA se sobreescriben: solo se añaden claves que faltan. Devuelve
+    ``True`` si mutó ``target`` (se agregó al menos una clave).
+    """
+    changed = False
+    for key, dval in defaults.items():
+        if key not in target:
+            target[key] = copy.deepcopy(dval)
+            changed = True
+        elif isinstance(dval, dict) and isinstance(target[key], dict):
+            if _merge_missing_defaults(target[key], dval):
+                changed = True
+    return changed
+
+
+def seed_default_settings(file_path: str = "resources/settings.json") -> bool:
+    """Auto-repara ``settings.json`` sembrando claves ausentes de DEFAULT_SETTINGS.
+
+    Pensado para correr al arrancar la app: tras un ``git pull`` que conserva el
+    ``settings.json`` local del dispositivo (ver script ``update_repo``, "local
+    siempre gana"), las claves nuevas que trajo el update aparecen aquí con su
+    valor por defecto —sin tocar ningún valor ya afinado localmente— para que
+    sean visibles/editables en el archivo. Reescribe solo si faltaba algo (o si el
+    archivo no existía / estaba corrupto, en cuyo caso siembra el set completo).
+    Devuelve ``True`` si reescribió el archivo.
+    """
+    settings = read_settings_from_file(file_path)
+    if not settings:
+        # Ausente o corrupto → siembra el esquema completo por defecto.
+        settings = copy.deepcopy(DEFAULT_SETTINGS)
+        changed = True
+    else:
+        changed = _merge_missing_defaults(settings, DEFAULT_SETTINGS)
+    if changed:
+        try:
+            with open(file_path, "w") as file:
+                json.dump(settings, file, indent=4)
+        except Exception as e:
+            print(f"Error seeding settings file '{file_path}': {e}")
+            return False
+    return changed
 
 
 def convert_si_integer_full(value):

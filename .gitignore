@@ -36,6 +36,9 @@ pyrefly.toml
 # --- Recetas de usuario (proyectos PCR) ---
 resources/pcr_projects.json
 
+# --- Respaldos de configuración del script update_repo ---
+.update_backup/
+
 # --- Opcional: Pruebas ---
 # Descomenta la siguiente línea si NO quieres subir tus archivos de test
 *_test.py

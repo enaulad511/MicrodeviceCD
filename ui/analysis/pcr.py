@@ -9,6 +9,7 @@ import ttkbootstrap as ttk
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 from matplotlib.figure import Figure
 
+from templates.utils import experiment_dir
 from ui.analysis.common import plt
 
 
@@ -791,6 +792,7 @@ class PcrAnalysisFrame(ttk.Frame):
         *_photodetector_data_*.csv en la misma carpeta (decisión Q5)."""
         path = askopenfilename(
             title="Select PCR temperature CSV",
+            initialdir=experiment_dir("pcr"),
             filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
         )
         if not path:

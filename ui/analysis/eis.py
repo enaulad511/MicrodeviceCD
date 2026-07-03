@@ -10,6 +10,7 @@ import ttkbootstrap as ttk
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 from matplotlib.figure import Figure
 
+from templates.utils import experiment_dir
 from ui.analysis.common import plt
 
 
@@ -278,6 +279,7 @@ class EISAnalysisFrame(ttk.Frame):
         por (run, cycle) en espectros."""
         path = askopenfilename(
             title="Select EIS CSV",
+            initialdir=experiment_dir("eis"),
             filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
         )
         if not path:

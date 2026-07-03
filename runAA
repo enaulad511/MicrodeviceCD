@@ -1,0 +1,19 @@
+#!/bin/bash
+
+# Guardar la ruta del proyecto
+export PROJECT_DIR="/home/raspb-cd/opt/MicrodeviceCD"
+
+cd "$PROJECT_DIR" || exit 1
+
+# Asegurar que Python busque módulos en la raíz del proyecto
+export PYTHONPATH="$PROJECT_DIR:$PYTHONPATH"
+
+# Activar el entorno virtual
+source ../.venv/bin/activate
+
+# Ejecutar
+python3 main.py
+
+echo ""
+echo "El programa ha terminado. Presiona Enter para cerrar la terminal."
+read

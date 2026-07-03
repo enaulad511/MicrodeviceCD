@@ -1,0 +1,108 @@
+#!/bin/bash
+#
+# Actualiza el repositorio en el dispositivo forzando el árbol a coincidir con el
+# remoto (determinista), pero PRESERVANDO los archivos de configuración/proyectos
+# locales ("local siempre gana"). Antes de forzar se respalda cada archivo en una
+# carpeta con marca de tiempo, y al final se ofrece RESTAURAR seleccionando el
+# respaldo (snapshot) a recuperar.
+#
+set -u
+
+REPO="/home/raspb-cd/opt/MicrodeviceCD"
+BACKUP_ROOT="$REPO/.update_backup"
+
+# Archivos de configuración/proyectos que el update NO debe pisar.
+CONFIG_FILES=(
+  "resources/settings.json"
+  "resources/electrochem_projects.json"
+  "resources/pcr_projects.json"
+)
+
+echo "===== ACTUALIZANDO REPOSITORIO ====="
+echo ""
+
+cd "$REPO" || {
+  echo "ERROR: No se pudo acceder al directorio del repo ($REPO)"
+  read -p "Presiona Enter para salir..."
+  exit 1
+}
+
+BRANCH=$(git branch --show-current)
+echo "Rama actual: $BRANCH"
+echo ""
+
+# ---------------------------------------------------------------------------
+# 1) Respaldar config/proyectos en un snapshot con marca de tiempo.
+#    (.update_backup es untracked, así que 'git reset --hard' no lo borra.)
+# ---------------------------------------------------------------------------
+TS=$(date +%Y%m%d-%H%M%S)
+SNAP="$BACKUP_ROOT/$TS"
+echo "Respaldando configuración local en: $SNAP"
+for f in "${CONFIG_FILES[@]}"; do
+  if [ -f "$f" ]; then
+    mkdir -p "$SNAP/$(dirname "$f")"
+    cp -a "$f" "$SNAP/$f"
+    echo "  respaldado: $f"
+  fi
+done
+echo ""
+
+# ---------------------------------------------------------------------------
+# 2) Forzar el árbol a coincidir EXACTAMENTE con origin/<rama> (determinista).
+#    Descarta cualquier edición local en archivos versionados (ya respaldamos
+#    los de configuración arriba).
+# ---------------------------------------------------------------------------
+echo "Descargando cambios y forzando a origin/$BRANCH ..."
+git fetch --all --prune || {
+  echo "ERROR: 'git fetch' falló (¿sin red?). No se modificó el árbol."
+  read -p "Presiona Enter para salir..."
+  exit 1
+}
+if ! git reset --hard "origin/$BRANCH"; then
+  echo "ERROR: 'git reset --hard origin/$BRANCH' falló."
+  read -p "Presiona Enter para salir..."
+  exit 1
+fi
+echo ""
+
+# ---------------------------------------------------------------------------
+# 3) Restaurar configuración/proyectos: SELECCIONAR el snapshot a recuperar.
+#    Enter = el respaldo recién creado (config previa al update).
+# ---------------------------------------------------------------------------
+echo "===== RESTAURAR CONFIGURACIÓN / PROYECTOS ====="
+mapfile -t SNAPS < <(ls -1 "$BACKUP_ROOT" 2>/dev/null | sort -r)
+
+echo "Selecciona el respaldo a restaurar:"
+echo "  0) Omitir restauración (mantener la versión del repositorio)"
+i=1
+for s in "${SNAPS[@]}"; do
+  marker=""
+  [ "$s" = "$TS" ] && marker="  <- recién creado (config previa al update)"
+  echo "  $i) $s$marker"
+  i=$((i + 1))
+done
+echo ""
+read -p "Opción [1]: " CHOICE
+CHOICE=${CHOICE:-1}
+
+if [ "$CHOICE" = "0" ]; then
+  echo "Restauración omitida. Se conserva la configuración del repositorio."
+else
+  SEL="${SNAPS[$((CHOICE - 1))]:-}"
+  if [ -z "$SEL" ] || [ ! -d "$BACKUP_ROOT/$SEL" ]; then
+    echo "Selección inválida; usando el respaldo más reciente ($TS)."
+    SEL="$TS"
+  fi
+  echo "Restaurando desde: $SEL"
+  for f in "${CONFIG_FILES[@]}"; do
+    if [ -f "$BACKUP_ROOT/$SEL/$f" ]; then
+      mkdir -p "$(dirname "$f")"
+      cp -a "$BACKUP_ROOT/$SEL/$f" "$f"
+      echo "  restaurado: $f"
+    fi
+  done
+fi
+
+echo ""
+echo "===== ACTUALIZACIÓN FINALIZADA ====="
+read -p "Presiona Enter para cerrar la terminal..."

@@ -161,4 +161,43 @@ Silencioso en la UI (no se escribe un estado "skipped" transitorio en `svar_stat
 cada fase omitida solo emite un `print(...)` a consola para depuración. La **preview**
 ya da confirmación visual previa al Start de que una fase se omite.
 
+## 8. `m_age` dinámico (fuzzy) durante la rampa
+
+`MAX_AGE` es la edad máxima que una lectura UDP puede tener antes de que el lazo la
+descarte y apague el heater (guarda anti-*runaway*, §2). Históricamente era un valor
+estático por fase (`m_age_<phase>`). Ahora, **solo en la rampa** (`_reach_temperature_pi`),
+se calcula de forma **difusa** en cada iteración a partir del error, reutilizando los
+**mismos umbrales** que `_fuzzy_gains` para KP/KI:
+
+```
+_fuzzy_max_age(error, m_age_min, m_age_max):
+    |e| >= 5°C   → m_age_max            (plano)   # rampa dura, tolera lecturas añejas
+    2 <= |e| < 5 → interp m_age_min → m_age_max   # transición lineal
+    |e| < 2°C    → m_age_min            (plano)   # cerca del setpoint, exige frescura
+```
+
+Monótona: **más error ⇒ más `m_age`**. La idea es que cuando estás lejos del setpoint
+(blast / rampa dura) el heater no debe apagarse por una lectura ligeramente vieja; cerca
+del setpoint sí conviene exigir frescura para no sobrepasar. Se aplica en **ambos** sitios
+de la rampa: la pre-rampa *feed-forward* (el `error = setpoint - temp` se calcula ahí) y
+el lazo PI (donde `error` se reordenó para computarse antes de la guarda).
+
+El **hold** (`hold_temperature`) queda intacto: usa su propio umbral estricto (`ts`), no el
+`m_age` difuso.
+
+> **Nota de umbrales:** el docstring de `_fuzzy_gains` menciona 15°C/5°C, pero el código
+> real usa **5°C/2°C** — esos son los cortes efectivos, replicados en `_fuzzy_max_age`.
+
+### Parámetros (`settings.json` → `pidControllerRPM`)
+
+| Clave | Default | Significado |
+|-------|---------|-------------|
+| `m_age_min_<phase>` | `0.02` | Cota inferior de `m_age` (cerca del setpoint). |
+| `m_age_max_<phase>` | `m_age_<phase>` si existe, si no `0.2` | Cota superior (rampa dura / blast). |
+| `m_age_<phase>` | — | Clave estática antigua. **Ya no se usa como umbral directo** en la rampa; sobrevive solo como *fallback* de `m_age_max_<phase>`. |
+
+`_load_phase_pid` devuelve `MAX_AGE_MIN`/`MAX_AGE_MAX`. Cualquier fase sin las claves nuevas
+(p. ej. `ext`) cae a `0.02`/`0.2`. Los límites son absolutos (no escalan el valor base),
+acotados a `[m_age_min, m_age_max]` por construcción del interpolador.
+
 __author__ = "Edisson A. Naula"
