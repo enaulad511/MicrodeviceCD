@@ -839,6 +839,15 @@ class PCRFrame(ttk.Frame):
             self._ui_poll_graph_counter = 0
             self.update_graph_temperature()
 
+        if not self.running_experiment:
+            # El experimento terminó por sí mismo (finally del hilo) — no vía Stop.
+            # Restaura los inputs aquí, en el hilo principal (Tkinter no es
+            # thread-safe), igual que hace Stop, y detén el poll.
+            self._ui_poll_active = False
+            self.update_graph_temperature()
+            self._restore_input_ui()
+            return
+
         self.after(500, self._ui_poll_loop)
 
     def _estimate_remaining_time(self, elapsed_pcr_time):
@@ -1602,16 +1611,22 @@ class PCRFrame(ttk.Frame):
             except Exception as e:
                 print(f"error closing pin_pcr: {e}")
             self.pin_pcr = None
-        self._ui_poll_active = False
+        # No se toca _ui_poll_active aquí: dejamos que _ui_poll_loop detecte el fin
+        # (running_experiment=False) y restaure los inputs en el hilo principal.
         self.running_experiment = False
+
+    def _restore_input_ui(self):
+        # Vuelve a mostrar los inputs y la barra de proyectos (ocultados al iniciar).
+        # Debe invocarse desde el hilo principal (Tkinter no es thread-safe).
+        self.frame_entries.grid(row=1, column=0, padx=5, pady=5, sticky="nswe")
+        self.frame_project.grid(row=0, column=0, sticky="nswe", padx=(5, 25), pady=(5, 0))
+        self._refresh_project_list()
 
     def callback_stop_experiment(self):
         # Restaura UI y dispara la salida ordenada del hilo del experimento.
         # El propio finally del experimento llama a _teardown_hardware; aquí solo
         # señalizamos, esperamos al hilo, y tiramos red de seguridad si se colgó.
-        self.frame_entries.grid(row=1, column=0, padx=5, pady=5, sticky="nswe")
-        self.frame_project.grid(row=0, column=0, sticky="nswe", padx=(5, 25), pady=(5, 0))
-        self._refresh_project_list()
+        self._restore_input_ui()
         if self.stop_event_motor is None or self.stop_udp_listenner is None:
             print("No experiment running")
             self.running_experiment = False

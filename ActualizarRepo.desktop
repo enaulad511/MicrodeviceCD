@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Actualizar Repo
+Comment=Actualizar MicrodeviceCD desde Git
+Exec=/home/raspb-cd/opt/MicrodeviceCD/update_repo
+Icon=system-software-update
+Terminal=true
+Categories=Utility;
+StartupNotify=true

@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=runAA
+Exec=/home/raspb-cd/opt/MicrodeviceCD/runAA
+Icon=drive-harddisk
+Terminal=true
+Categories=Utilities;
