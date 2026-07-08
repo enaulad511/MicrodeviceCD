@@ -88,7 +88,70 @@ Temperature a un `lbl_status` nuevo del panel de control; en Quick Control al
 - **Temperature**: el encabezado de columna incluye la fuente
   (`Temp IR Object (°C)`).
 - **Quick Control**: para corridas de temperatura se agrega `tsrc=<label>` al
-  meta que arma el sufijo del nombre de archivo (`start_reading`).
+  meta que arma el sufijo del nombre de archivo (`start_reading`); en modo
+  "All (3 temps)" el valor es `tsrc=All`.
+
+### 7. Quick Control: graficar las 3 temperaturas a la vez
+
+`ui/QuickControlFrame.py` agrega una 4ª entrada al combobox, **`"All (3 temps)"`**
+(`ALL_TEMPS_LABEL`), que activa `self.temp_all_mode`. Es un modo **local a Quick
+Control** — no se agrega a `templates.utils.TEMP_SOURCES`/`temp_source_labels()`
+(así PcrFrame y TemperatureFrame no la ofrecen, porque no aplica a un lazo PID
+de un solo sensor) y **no se persiste** en el `temp_source` global de
+`settings.json` (seleccionarla no toca el valor que lee PcrFrame; queda el
+último single-source elegido).
+
+- **Filtro por canal.** El promedio móvil de 4 muestras deja de ser un único
+  `temps_filter`; ahora es `self.temp_filters` (3 buffers independientes, uno
+  por índice de payload). Así el modo "All" luce igual que el modo de un solo
+  canal —cada línea es la misma suavización que ya se confiaba—, y
+  `_thermocouple_reader` (single-source) y `_read_all_temps` (All) leen del
+  mismo array.
+- **Modelo de datos unificado.** Cada corrida (`run` en `self.runs`) gana
+  `run["cols"]`: la lista de nombres de columna (`["Thermocouple"]` en
+  single-source, `["IR Ambient","IR Object","Thermocouple"]` en All,
+  `["Voltage"]` en fluorescencia). `run["v"]` pasa de lista de escalares a
+  lista de filas (`[c0, c1, ...]`, largo `len(cols)`); single-source es
+  simplemente el caso de 1 columna. `_acquire` arma la fila con
+  `_read_all_temps()` (All) o `[self._thermocouple_reader()]` (single/fluor).
+- **Combobox bloqueado durante la lectura.** Cambiar de fuente/modo a mitad de
+  una corrida rompería el modelo de filas (`cols` se fija al iniciar en
+  `start_reading`, pero `_acquire` lee el modo *en vivo*): filas de distinto
+  largo corromperían `_redraw`/CSV. Por eso `cbo_temp_source` se deshabilita en
+  `start_reading` junto a los demás controles y se rehabilita en
+  `stop_reading`, igual que ya hacían `chk_sig_temp`/`chk_sig_fluor`/
+  `chk_keep`.
+- **Sensor caído en modo All.** `_read_all_temps` sostiene el último valor
+  **por canal** (no todo-o-nada) y el aviso lista los caídos por nombre:
+  `⚠ IR Object unavailable — holding last value` (uno) o
+  `⚠ IR Object, IR Ambient unavailable — holding last value` (varios).
+- **Colores fijos por canal + leyenda adaptativa.** `TEMP_CHANNEL_COLORS`
+  (`IR Ambient`→azul, `IR Object`→naranja, `Thermocouple`→rojo) se aplica en
+  `_redraw` tanto en modo All como single-source, para que un canal mantenga su
+  color aunque se apilen corridas (Keep data). La leyenda se muestra siempre
+  que haya **más de 1 corrida** (Keep data) **o más de 1 columna** (modo All,
+  incluso con una sola corrida); las etiquetas son solo el nombre del canal
+  (`IR Object`) con una corrida, o `R{run} {canal}` con varias apiladas.
+- **CSV en formato largo.** `save_data` cambia de
+  `t_s,value,signal,run` a **`t_s,value,channel,signal,run`**: una fila por
+  muestra y canal. Esto soporta sin celdas vacías que Keep data mezcle, en el
+  mismo archivo, corridas de distinta forma (single-source de 1 columna, All
+  de 3, fluorescencia con `channel="Voltage"`). Nada más en el repo relee estos
+  CSV, así que el cambio de encabezado es seguro.
+- **Retención (Keep data) sin cambios de regla.** Igual que un cambio de fuente
+  single→single ya no limpiaba el plot, pasar a/desde "All" tampoco lo hace —
+  solo un cambio de señal (temp↔fluor) limpia. Los colores fijos por canal +
+  las etiquetas `R{run} {canal}` mantienen legible una mezcla de corridas de 1
+  y 3 columnas.
+- **`_set_status` a prueba de encoding.** Los avisos de sensor caído usan `⚠` y
+  `—`; en una consola cp1252 (Windows sin UTF-8) `print()` con esos caracteres
+  lanza `UnicodeEncodeError`. Como `_set_status` se llama **desde dentro** de
+  `_thermocouple_reader`/`_read_all_temps`, que a su vez corren dentro del
+  `try` de `_acquire`, ese error se tragaba silenciosamente en el `except`
+  genérico —la muestra se descartaba y el label nunca llegaba a actualizarse
+  con el aviso real—. `_set_status` ahora configura el label **antes** de
+  intentar el `print` (Tk sí soporta Unicode sin problema) y el `print` cae a
+  un fallback ASCII (`encode("ascii","replace")`) si falla.
 
 ## Orden de los campos (crítico)
 

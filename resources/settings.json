@@ -50,5 +50,6 @@
     "photoreceptor": {
         "use_diff": 1.0
     },
-    "windows_pcr": 1500.0
+    "windows_pcr": 1500.0,
+    "temp_source": "thermocouple"
 }

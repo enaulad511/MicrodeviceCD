@@ -111,6 +111,18 @@ def temp_source_key(label: str) -> str:
     return DEFAULT_TEMP_SOURCE
 
 
+def temp_source_label_by_index(idx: int) -> str:
+    """Etiqueta visible para un índice del payload UDP (0=amb, 1=obj, 2=tc).
+
+    Usado por modos que iteran los tres campos a la vez (p. ej. Quick Control
+    graficando las 3 temperaturas), donde se parte del índice y no de la clave.
+    """
+    for _key, label, i in TEMP_SOURCES:
+        if i == idx:
+            return label
+    return "Thermocouple"
+
+
 def read_temp_source(file_path: str = "resources/settings.json") -> str:
     """Clave de fuente de temperatura persistida (por defecto termocupla)."""
     key = read_settings_from_file(file_path).get("temp_source", DEFAULT_TEMP_SOURCE)

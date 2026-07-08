@@ -8,9 +8,11 @@ Reúne en una sola página lo esencial de las demás tabs del Manual Control:
 - LEDs de calentamiento (GPIO 25) y fluorescencia (GPIO 24) con toggles
   round-toggle. La línea GPIO se mantiene abierta mientras el toggle está ON
   (el bloqueo de tabs evita el 'line busy' con las tabs viejas).
-- Lecturas de temperatura (UDP 5005, filtro de 4 muestras) o fluorescencia
-  (ADS1115 canal 0) — una señal a la vez por ahora — con plot, retención de
-  corridas (Keep data) y guardado a CSV con metadata de actuadores en el nombre.
+- Lecturas de temperatura (UDP 5005, filtro de 4 muestras por canal — IR
+  ambiente, IR objeto o termocupla, o las 3 a la vez con "All (3 temps)") o
+  fluorescencia (ADS1115 canal 0) — una señal a la vez por ahora — con plot,
+  retención de corridas (Keep data) y guardado a CSV (formato largo con columna
+  "channel") con metadata de actuadores en el nombre.
 
 Mientras haya CUALQUIER actuador o lectura activa se bloquean las demás tabs
 (ambos notebooks) vía lock_tabs_callback; se desbloquean solas al quedar todo
@@ -43,6 +45,7 @@ from templates.utils import (
     temp_source_index,
     temp_source_key,
     temp_source_label,
+    temp_source_label_by_index,
     temp_source_labels,
     write_temp_source,
 )
@@ -50,6 +53,20 @@ from ui.KeyboardFrame import NumericKeyboard
 
 __author__ = "Edisson A. Naula"
 __date__ = "$ 10/06/2026 at 10:00 a.m. $"
+
+# Entrada sintética del combobox para graficar las 3 temperaturas a la vez. Vive
+# solo en Quick Control (no en templates.utils.TEMP_SOURCES): no se persiste como
+# el "temp_source" global (PcrFrame necesita una única fuente para el PID) ni
+# aparece en TemperatureFrame. Ver docs/temp_source_selector.md.
+ALL_TEMPS_LABEL = "All (3 temps)"
+
+# Color fijo por canal: una corrida mantiene el mismo color de línea por canal
+# aunque se apilen varias corridas (Keep data).
+TEMP_CHANNEL_COLORS = {
+    "IR Ambient": "tab:blue",
+    "IR Object": "tab:orange",
+    "Thermocouple": "tab:red",
+}
 
 
 class QuickControlFrame(ttk.Frame):
@@ -79,16 +96,21 @@ class QuickControlFrame(ttk.Frame):
         self.run_index = 0
         self.start_time = 0.0
         self.udp_client: Optional[UdpClient] = None
-        self.temps_filter = [20.0, 20.0, 20.0, 20.0]
         self.latest_temp = 20.0
         # Últimas tres temperaturas del disco (IR amb, IR obj, termocupla) + fuente
-        # elegida; _thermocouple_reader usa temp_source_idx, sostiene el último valor
-        # y avisa (temp_source_bad) cuando el sensor elegido viene ausente.
+        # elegida. Cada canal tiene su propio promedio móvil de 4 muestras
+        # (temp_filters[idx]) para que el modo "All" luzca igual que el modo de un
+        # solo canal. temp_source_bad avisa cuando el/los sensor(es) elegidos vienen
+        # ausentes (se sostiene el último valor). temp_all_mode es local a Quick
+        # Control (no se persiste como el "temp_source" global — ver
+        # docs/temp_source_selector.md).
         self.latest_temps = [20.0, 20.0, 20.0]
         self._field_ok = [True, True, True]
+        self.temp_filters = [[20.0, 20.0, 20.0, 20.0] for _ in range(3)]
         self.temp_source = read_temp_source()
         self.temp_source_idx = temp_source_index(self.temp_source)
         self.temp_source_bad = False
+        self.temp_all_mode = False
         self.sig_temp_var = ttk.BooleanVar(value=False)
         self.sig_fluor_var = ttk.BooleanVar(value=False)
         self.keep_data_var = ttk.BooleanVar(value=False)
@@ -257,29 +279,31 @@ class QuickControlFrame(ttk.Frame):
         self.interval_entry.grid(row=0, column=3, padx=5, pady=5, sticky="w")
         entry_widgets.append(self.interval_entry)
 
-        self.chk_keep = ttk.Checkbutton(
-            frame, text="Keep data", style="Custom.TCheckbutton", variable=self.keep_data_var
-        )
-        self.chk_keep.grid(row=0, column=4, padx=5, pady=5, sticky="w")
-
+        # Fila 2: fuente de temperatura + retención de corridas.
         ttk.Label(frame, text="Temp source:", style="Custom.TLabel").grid(
-            row=1, column=4, padx=5, pady=5, sticky="e"
+            row=1, column=0, padx=5, pady=5, sticky="e"
         )
         self.cbo_temp_source = ttk.Combobox(
             frame,
-            values=temp_source_labels(),
+            values=[*temp_source_labels(), ALL_TEMPS_LABEL],
             state="readonly",
             font=font_entry,
             width=14,
         )
         self.cbo_temp_source.set(temp_source_label(self.temp_source))
-        self.cbo_temp_source.grid(row=1, column=5, padx=5, pady=5, sticky="w")
+        self.cbo_temp_source.grid(row=1, column=1, padx=5, pady=5, sticky="w")
         self.cbo_temp_source.bind("<<ComboboxSelected>>", self._on_temp_source_changed)
 
+        self.chk_keep = ttk.Checkbutton(
+            frame, text="Keep data", style="Custom.TCheckbutton", variable=self.keep_data_var
+        )
+        self.chk_keep.grid(row=1, column=4, padx=5, pady=5, sticky="w")
+
+        # Fila 3: botones de la lectura.
         self.btn_read_start = ttk.Button(
             frame, text="▶ Start", style="info.TButton", command=self.start_reading
         )
-        self.btn_read_start.grid(row=1, column=0, padx=5, pady=5, sticky="we")
+        self.btn_read_start.grid(row=2, column=0, padx=5, pady=5, sticky="we")
         self.btn_read_stop = ttk.Button(
             frame,
             text="⏹ Stop",
@@ -287,15 +311,15 @@ class QuickControlFrame(ttk.Frame):
             command=self.stop_reading,
             state=ttk.DISABLED,
         )
-        self.btn_read_stop.grid(row=1, column=1, padx=5, pady=5, sticky="we")
+        self.btn_read_stop.grid(row=2, column=1, padx=5, pady=5, sticky="we")
         self.btn_read_clean = ttk.Button(
             frame, text="🗑 Clean", style="secondary.TButton", command=self.clean_data
         )
-        self.btn_read_clean.grid(row=1, column=2, padx=5, pady=5, sticky="we")
+        self.btn_read_clean.grid(row=2, column=2, padx=5, pady=5, sticky="we")
         self.btn_read_save = ttk.Button(
             frame, text="💾 Save", style="success.TButton", command=self.save_data
         )
-        self.btn_read_save.grid(row=1, column=3, padx=5, pady=5, sticky="we")
+        self.btn_read_save.grid(row=2, column=3, padx=5, pady=5, sticky="we")
 
     def _build_plot_section(self, parent):
         graphic_frame = ttk.Frame(parent)
@@ -572,7 +596,10 @@ class QuickControlFrame(ttk.Frame):
                 parse_float=True,
             )
             self.udp_client.start()
-            self.temps_filter = [20.0, 20.0, 20.0, 20.0]
+            # Reinicia el promedio móvil de los 3 canales al último valor conocido
+            # (evita un salto artificial hacia 20.0 al arrancar la lectura).
+            for idx in range(3):
+                self.temp_filters[idx] = [self.latest_temps[idx]] * 4
 
         # Retención: Keep data solo apila corridas de la MISMA señal; cambiar de
         # señal (o Keep apagado) limpia el plot y reinicia el índice de corrida.
@@ -582,15 +609,22 @@ class QuickControlFrame(ttk.Frame):
         self.run_index += 1
         meta = self._current_actuator_meta()
         if signal == "temp":
-            # Documenta qué temperatura del disco se registró (va al nombre del CSV).
-            meta["tsrc"] = temp_source_label(self.temp_source)
+            if self.temp_all_mode:
+                cols = [temp_source_label_by_index(i) for i in range(3)]
+                meta["tsrc"] = "All"
+            else:
+                cols = [temp_source_label(self.temp_source)]
+                meta["tsrc"] = temp_source_label(self.temp_source)
+        else:
+            cols = ["Voltage"]
         self.runs.append(
             {
                 "signal": signal,
                 "t": [],
-                "v": [],
+                "v": [],  # filas [c0, c1, ...] alineadas con "cols"
                 "run": self.run_index,
                 "meta": meta,
+                "cols": cols,
             }
         )
         self.reading_signal = signal
@@ -602,6 +636,9 @@ class QuickControlFrame(ttk.Frame):
         self.chk_sig_temp.configure(state=ttk.DISABLED)
         self.chk_sig_fluor.configure(state=ttk.DISABLED)
         self.chk_keep.configure(state=ttk.DISABLED)
+        # Bloqueado mientras corre: cambiar de fuente/modo a mitad de corrida
+        # produciría filas de distinto largo que "cols" (ver docs).
+        self.cbo_temp_source.configure(state=ttk.DISABLED)
         name = "Temperature" if signal == "temp" else "Fluorescence"
         self._set_status(f"Reading {name} every {interval} ms (R{self.run_index}).")
         self._update_lock()
@@ -619,6 +656,7 @@ class QuickControlFrame(ttk.Frame):
         self.chk_sig_temp.configure(state=ttk.NORMAL)
         self.chk_sig_fluor.configure(state=ttk.NORMAL if not self.is_dev else ttk.DISABLED)
         self.chk_keep.configure(state=ttk.NORMAL)
+        self.cbo_temp_source.configure(state="readonly")
         self._set_status("Reading stopped.")
         self._update_lock()
 
@@ -627,20 +665,21 @@ class QuickControlFrame(ttk.Frame):
             return
         try:
             if self.reading_signal == "temp":
-                value = self._thermocouple_reader()
+                row = self._read_all_temps() if self.temp_all_mode else [self._thermocouple_reader()]
             else:
                 settings = read_settings_from_file()
                 if settings.get("photoreceptor", {}).get("use_diff", False):
-                    value = self.ads.read_voltage_diff(0, 1, averages=8)
+                    v = self.ads.read_voltage_diff(0, 1, averages=8)
                 else:
-                    value = self.ads.read_voltage(0, averages=8)
+                    v = self.ads.read_voltage(0, averages=8)
+                row = [v]
         except Exception as e:
             print(f"Error reading signal: {e}")
-            value = None
-        if value is not None:
+            row = None
+        if row is not None:
             run = self.runs[-1]
             run["t"].append(time.time() - self.start_time)
-            run["v"].append(float(value))
+            run["v"].append([float(x) for x in row])
             self._redraw()
         try:
             interval = max(int(self.interval_entry.get()), 100)
@@ -650,10 +689,20 @@ class QuickControlFrame(ttk.Frame):
             self.stop_reading()
 
     def _on_temp_source_changed(self, event=None):
-        self.temp_source = temp_source_key(self.cbo_temp_source.get())
+        label = self.cbo_temp_source.get()
+        if label == ALL_TEMPS_LABEL:
+            # Modo local a Quick Control: no toca temp_source/settings.json (la
+            # fuente global que usa PcrFrame para el PID queda intacta).
+            self.temp_all_mode = True
+            self.temp_source_bad = False
+            for idx in range(3):
+                self.temp_filters[idx] = [self.latest_temps[idx]] * 4
+            return
+        self.temp_all_mode = False
+        self.temp_source = temp_source_key(label)
         self.temp_source_idx = temp_source_index(self.temp_source)
         self.temp_source_bad = False
-        self.temps_filter = [self.latest_temps[self.temp_source_idx]] * 4
+        self.temp_filters[self.temp_source_idx] = [self.latest_temps[self.temp_source_idx]] * 4
         write_temp_source(self.temp_source)
 
     def _on_udp_message(self, text, address, temps_list):
@@ -680,16 +729,50 @@ class QuickControlFrame(ttk.Frame):
             self._set_status(f"⚠ {temp_source_label(self.temp_source)} unavailable — holding last value")
         else:
             self.temp_source_bad = False
-        self.temps_filter.pop(0)
-        self.temps_filter.append(self.latest_temps[idx])
-        return sum(self.temps_filter) / len(self.temps_filter)
+        filt = self.temp_filters[idx]
+        filt.pop(0)
+        filt.append(self.latest_temps[idx])
+        return sum(filt) / len(filt)
+
+    def _read_all_temps(self) -> list:
+        """Promedio móvil de 4 muestras por canal para los 3 a la vez (modo
+        'All (3 temps)'). Cada canal sostiene su último valor si viene ausente;
+        el status lista los canales caídos por nombre."""
+        bad_labels = []
+        values = []
+        for idx in range(3):
+            if not self._field_ok[idx]:
+                bad_labels.append(temp_source_label_by_index(idx))
+            filt = self.temp_filters[idx]
+            filt.pop(0)
+            filt.append(self.latest_temps[idx])
+            values.append(sum(filt) / len(filt))
+        self.temp_source_bad = bool(bad_labels)
+        if bad_labels:
+            self._set_status(f"⚠ {', '.join(bad_labels)} unavailable — holding last value")
+        return values
 
     # ---------------- Plot ----------------
 
     def _redraw(self):
         self.ax.clear()
+        multi_run = len(self.runs) > 1
+        # Leyenda siempre visible en modo "All" (3 líneas necesitan distinguirse
+        # incluso en una sola corrida); en modo single-source, solo si hay >1 corrida
+        # apilada (comportamiento previo).
+        show_legend = multi_run or any(len(run.get("cols") or []) > 1 for run in self.runs)
         for run in self.runs:
-            self.ax.plot(run["t"], run["v"], linewidth=1.5, label=f"R{run['run']}")
+            cols = run.get("cols") or ["value"]
+            for ci, col_name in enumerate(cols):
+                ys = [row[ci] for row in run["v"]]
+                label = f"R{run['run']} {col_name}" if multi_run else col_name
+                self.ax.plot(
+                    run["t"],
+                    ys,
+                    linewidth=1.5,
+                    label=label,
+                    color=TEMP_CHANNEL_COLORS.get(col_name),
+                )
         signal = self.runs[-1]["signal"] if self.runs else None
         if signal == "temp":
             title, ylabel = "Temperature", "Temperature (°C)"
@@ -701,7 +784,7 @@ class QuickControlFrame(ttk.Frame):
         self.ax.set_xlabel("Time (s)")
         self.ax.set_ylabel(ylabel)
         self.ax.grid(True, alpha=0.25)
-        if len(self.runs) > 1:
+        if show_legend:
             self.ax.legend(loc="best", frameon=True)
         self.canvas.draw()
 
@@ -767,10 +850,15 @@ class QuickControlFrame(ttk.Frame):
             filename += ".csv"
         try:
             with open(filename, "w", encoding="utf-8") as f:
-                f.write("t_s,value,signal,run\n")
+                # Formato largo (una fila por muestra y canal): soporta corridas
+                # heterogéneas apiladas por Keep data (single-source vs. All (3
+                # temps) vs. fluorescencia) en un mismo archivo sin celdas vacías.
+                f.write("t_s,value,channel,signal,run\n")
                 for run in self.runs:
-                    for t, v in zip(run["t"], run["v"]):
-                        f.write(f"{t:.3f},{v},{run['signal']},{run['run']}\n")
+                    cols = run.get("cols") or ["value"]
+                    for t, row in zip(run["t"], run["v"]):
+                        for ci, col_name in enumerate(cols):
+                            f.write(f"{t:.3f},{row[ci]},{col_name},{run['signal']},{run['run']}\n")
             self._set_status(f"Data saved: {os.path.basename(filename)}")
         except Exception as e:
             self._set_status(f"Error saving CSV: {e}")
@@ -802,8 +890,15 @@ class QuickControlFrame(ttk.Frame):
                 print(f"Error in lock_tabs_callback: {e}")
 
     def _set_status(self, msg):
-        print(f"[QuickControl] {msg}")
+        # El label Tk siempre soporta Unicode (⚠, — de los avisos de sensor
+        # caído); el print a consola no —en cp1252 puede lanzar
+        # UnicodeEncodeError—, así que va después y no debe tumbar la
+        # actualización del label si falla.
         self.lbl_status.configure(text=msg)
+        try:
+            print(f"[QuickControl] {msg}")
+        except UnicodeEncodeError:
+            print(f"[QuickControl] {msg}".encode("ascii", "replace").decode("ascii"))
 
     # ---------------- Limpieza ----------------
 
