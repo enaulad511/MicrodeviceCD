@@ -153,11 +153,11 @@ de un solo sensor) y **no se persiste** en el `temp_source` global de
   intentar el `print` (Tk sí soporta Unicode sin problema) y el `print` cae a
   un fallback ASCII (`encode("ascii","replace")`) si falla.
 
-### 8. PCR: las tres temperaturas en el label durante la corrida
+### 8. PCR: el label durante la corrida
 
-`_ui_poll_loop` arma la primera línea del status (`ui/PcrFrame.py`). Antes
-mostraba **solo** la fuente que regula el PID; ahora añade las **otras dos**
-temperaturas entre paréntesis, sin tocar el lazo térmico:
+`_ui_poll_loop` arma la primera línea del status (`ui/PcrFrame.py`). Muestra el
+primario (regula el PID), el secundario del par (sección 9) y IR Ambient como
+referencia:
 
 ```
 Temperature: 94.12 °C [Thermocouple]  (IR Object 92.3, IR Ambient 25.1)
@@ -165,26 +165,16 @@ State: Reach High temp
 Time passed: 2 m 14.3 s -- cycles: 3/30 -- Estimated finish: 41m 8.0s
 ```
 
-- **Primaria suavizada, secundarias crudas.** El número principal sigue siendo
-  `self.temp` (la fuente elegida, suavizada α=0.3, sin cambios: es lo que el PID
-  regula, sección 4). Las dos secundarias muestran el **último valor crudo**
-  recibido — `update_displayed_temperature` ahora guarda los tres campos del
-  payload en `self.temps_raw` (`[t_amb, t_obj, t_tc]` por índice, `None` incluido)
-  además de calcular `self.temp` como siempre.
-- **Orden fijo, salta la primaria.** Se itera `TEMP_SOURCES` (Thermocouple, IR
-  Object, IR Ambient) y se omite el índice primario (`temp_source_idx`), así el
-  par secundario aparece siempre en el mismo orden sin importar cuál regula.
-- **Sensor secundario ausente → `N/A`.** Un canal secundario en `None` (o no
-  numérico) se muestra como `N/A`, **sin** el aviso `⚠`. El
-  `⚠ … holding last value` queda reservado para la fuente que maneja el PID
-  (sección 5): un canal secundario caído no afecta el control, así que no merece
-  alarma. Ambos coexisten en la línea si la primaria además se cae.
-- **Solo el label.** El plot (`update_graph_temperature`) y el CSV
-  (`save_data_temps_file`) siguen guardando **solo** `self.temp` (la primaria).
-  Graficar/persistir las tres es justo lo que cubre Quick Control (sección 7);
-  duplicarlo en PCR no aporta. Como `_ui_poll_loop` solo corre durante la
-  corrida, el display multi-temp aparece únicamente mientras el experimento está
-  activo. Host-only.
+- **Primario y secundario suavizados; IR Ambient crudo.** El número principal es
+  `self.temp` (la fuente elegida, suavizada α=0.3: lo que el PID regula, sección
+  4). El secundario del par (`self.temp_secondary`, también suavizado, ver sección
+  9) va entre paréntesis con su nombre — **coincide con la 2ª curva del plot**. IR
+  Ambient va crudo desde `self.temps_raw[0]` como referencia (`N/A` si viene
+  ausente); no se plotea ni se guarda.
+- **Aviso solo para el primario.** El `⚠ … holding last value` queda reservado
+  para la fuente que maneja el PID (sección 5). El secundario, ante sensor caído,
+  sostiene su último valor (no muestra `N/A` porque está en la curva); IR Ambient
+  sí muestra `N/A` si falta.
 - **Reconstrucción completa cada tick.** `_ui_poll_loop` arma el status entero
   (`Temperature…` / `State: …` / `Time passed…`) desde cero en cada iteración;
   es el único escritor de `svar_status` durante la corrida. El patrón previo
@@ -193,6 +183,41 @@ Time passed: 2 m 14.3 s -- cycles: 3/30 -- Estimated finish: 41m 8.0s
   línea (dos `\n` en el status) las líneas viejas dejaban de sobreescribirse y el
   label crecía sin límite (una línea por tick). Reconstruir sin releer fija el
   número de líneas.
+
+### 9. PCR: captura y plot del par IR Object / Termocupla
+
+Solo en PCR se capturan, suavizan, plotean y guardan **dos** temperaturas del
+par IR Object ↔ Termocupla: el **primario** (regula el PID) y el **secundario**
+(el complemento). Todo es host-only.
+
+- **IR Ambient fuera de PCR.** El combobox de fuente en `PcrFrame` se restringe a
+  Termocupla e IR Object (`PCR_TEMP_SOURCE_KEYS`); IR Ambient no es temperatura de
+  la muestra, solo referencia en el label. Si el `temp_source` global persistido
+  fuese `ir_ambient`, `PcrFrame` cae a termocupla al construir y `_on_temp_source_changed`
+  lo re-fija. El secundario es el complemento del par: `_secondary_idx()` devuelve
+  IR Object(1) si el primario es termocupla(2), y termocupla(2) en cualquier otro caso.
+- **Secundario: mismo modelo que el primario.** `update_displayed_temperature`
+  lee ambos canales, los suaviza (α=0.3) y los anexa **alineados por índice** a
+  `data_temperature` y `data_temperature_secondary` (misma longitud). Cada canal
+  arranca en **20°** (seed) y ante sensor caído **sostiene el último valor** (igual
+  que el primario para el PID). El 20° solo aparece si ese canal nunca entregó
+  lectura. El PID **nunca** recibe 20°: sigue con hold-last + frescura (seguridad).
+- **Plot de dos curvas.** `init_temperature_graph` crea `self.line` (primario) y
+  `self.line_secondary`, coloreadas por canal (`PCR_TEMP_CHANNEL_COLORS`: Termocupla
+  rojo, IR Object naranja) con leyenda. `update_graph_temperature` refresca ambas
+  en la misma ventana deslizante.
+- **CSV de dos columnas.** `save_data_temps_file` escribe `[primario, secundario]`
+  por fila (fila 0 sigue siendo el `prefix_row`, extendido con `cols: <pri>|<sec>`).
+  El loader del análisis (`ui/analysis/pcr.py:_read_temp_csv`) lee `row[0]`
+  (primario), así que la 2ª columna es retrocompatible.
+- **Watchdog "ambas caídas".** Si ni el primario ni el secundario entregan lectura
+  fresca por `PCR_TEMP_DEAD_S` (5 s) seguidos, `_check_temp_watchdog` (llamado desde
+  `_ui_poll_loop`, hilo principal) señaliza los stop-events y el hilo del experimento
+  desmonta ordenadamente (idempotente vía `_temp_abort_triggered`). Al inicio, un
+  **start-gate** en `experiment_pcr` espera hasta `PCR_TEMP_START_WAIT_S` (3 s) una
+  primera lectura válida de cualquiera de los dos (`_temp_ever_valid`); si no llega,
+  no arranca (retorna dentro del `try`, el `finally` desmonta). Un glitch UDP puntual
+  no detiene: los valores sostenidos mantienen plot/CSV hasta que se cumpla la ventana.
 
 ## Orden de los campos (crítico)
 
@@ -203,6 +228,7 @@ Time passed: 2 m 14.3 s -- cycles: 3/30 -- Estimated finish: 41m 8.0s
 | 2              | `t_tc`   | MAX31855 termocupla | `thermocouple` | Thermocouple |
 
 El combobox se muestra en orden **Thermocouple, IR Object, IR Ambient**
-(termocupla primero = comportamiento por defecto previo).
+(termocupla primero = comportamiento por defecto previo). **Excepción:** el
+combobox de PCR omite IR Ambient (sección 9), quedando **Thermocouple, IR Object**.
 
 __author__ = "Edisson A. Naula"

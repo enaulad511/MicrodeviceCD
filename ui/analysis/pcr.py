@@ -37,9 +37,15 @@ class PcrExperiment:
     tasa se pican a mano sobre la curva de temperatura y se guardan como pares de índices.
     """
 
-    def __init__(self, name, temps, photo=None):
+    def __init__(self, name, temps, photo=None, temps_secondary=None):
         self.name = name
         self.temps = np.asarray(temps, dtype=float)
+        # Canal secundario del par (overlay de solo lectura, ver docs/pcr_analisis.md
+        # §8): se dibuja tenue junto al primario pero NO participa del picado de
+        # segmentos ni de las tasas. Vacío = corrida de 1 canal (CSV viejo / sin par).
+        self.temps_secondary = np.asarray(
+            temps_secondary if temps_secondary is not None else [], dtype=float
+        )
         self.photo = np.asarray(photo if photo is not None else [], dtype=float)
         self.visible = True
         self.segments = []  # list[PcrSegment]
@@ -314,6 +320,7 @@ class PcrAnalysisFrame(ttk.Frame):
         """Siembra la corrida PCR en memoria como un experimento (decisión Q3)."""
         try:
             temps = list(getattr(pcr, "data_temperature", []) or [])
+            temps2 = list(getattr(pcr, "data_temperature_secondary", []) or [])
             photo = list(getattr(pcr, "data_photodetector", []) or [])
         except Exception:
             return
@@ -321,7 +328,9 @@ class PcrAnalysisFrame(ttk.Frame):
             return
         base = getattr(pcr, "active_project_name", None) or "last_run"
         name = self._unique_name(f"{base} (live)")
-        self.experiments.append(PcrExperiment(name=name, temps=temps, photo=photo))
+        self.experiments.append(
+            PcrExperiment(name=name, temps=temps, photo=photo, temps_secondary=temps2)
+        )
 
     def _default_dt(self):
         # dt por defecto: ts del lazo PCR en settings.json (decisión Q1); editable.
@@ -422,6 +431,15 @@ class PcrAnalysisFrame(ttk.Frame):
             (line,) = self.ax_temp.plot(xs, exp.temps, linewidth=1.0, label=exp.name)
             self._temp_lines[id(exp)] = line
             any_t = True
+            # Overlay del secundario (solo lectura): tenue, mismo color que su
+            # experimento, SIN leyenda (no duplica entradas). No participa del
+            # picado ni de las tasas — es un cross-check visual del par.
+            if exp.temps_secondary.size:
+                xs2 = np.arange(exp.temps_secondary.size) * dt
+                self.ax_temp.plot(
+                    xs2, exp.temps_secondary,
+                    color=line.get_color(), linewidth=0.8, alpha=0.4,
+                )
             for seg in exp.segments:
                 m = exp.seg_metrics(seg, dt)
                 if m is None:
@@ -846,9 +864,15 @@ class PcrAnalysisFrame(ttk.Frame):
 
     # --------------------------------------------------------- Carga CSV
     def _read_temp_csv(self, path):
-        """Serie de temperatura: primera fila = prefijo/metadatos (se salta), luego
-        un valor por fila (decisión Q5/executive: el prefijo no se parsea)."""
-        vals = []
+        """Serie(s) de temperatura: primera fila = prefijo/metadatos (se salta), luego
+        un valor por fila (decisión Q5/executive: el prefijo no se parsea).
+
+        Devuelve `(primario, secundario)`. El CSV nuevo de PcrFrame trae dos columnas
+        `[primario, secundario]`; los CSV viejos tienen una sola y el secundario sale
+        vacío. Ambas listas quedan alineadas por muestra (una fila con primario no
+        parseable descarta también su secundario). Si ninguna muestra trajo secundario
+        (todo NaN), se devuelve `[]` para no dibujar overlay."""
+        vals, vals2 = [], []
         try:
             with open(path, newline="") as f:
                 reader = csv.reader(f, skipinitialspace=True)
@@ -860,10 +884,20 @@ class PcrAnalysisFrame(ttk.Frame):
                         vals.append(float(row[0]))
                     except (ValueError, TypeError):
                         continue
+                    # 2ª columna = secundario (CSV nuevo); ausente/vacía en los viejos.
+                    if len(row) > 1 and row[1].strip() != "":
+                        try:
+                            vals2.append(float(row[1]))
+                        except (ValueError, TypeError):
+                            vals2.append(float("nan"))
+                    else:
+                        vals2.append(float("nan"))
         except Exception as e:
             self._set_status(f"Error loading temperature: {e}")
             return None
-        return vals
+        if not any(v == v for v in vals2):  # todo NaN → sin overlay
+            vals2 = []
+        return vals, vals2
 
     def _read_photo_csv(self, path):
         vals = []
@@ -892,9 +926,10 @@ class PcrAnalysisFrame(ttk.Frame):
         )
         if not path:
             return
-        temps = self._read_temp_csv(path)
-        if temps is None:
+        result = self._read_temp_csv(path)
+        if result is None:
             return
+        temps, temps2 = result
         if not temps:
             self._set_status("No temperature data parsed from file.")
             return
@@ -911,10 +946,15 @@ class PcrAnalysisFrame(ttk.Frame):
             else:
                 photo_note = "; no photo sibling"
         name = self._unique_name(os.path.splitext(base)[0].replace("_temperature_data", ""))
-        self.experiments.append(PcrExperiment(name=name, temps=temps, photo=photo))
+        self.experiments.append(
+            PcrExperiment(name=name, temps=temps, photo=photo, temps_secondary=temps2)
+        )
         self._refresh_tree()
         self._redraw()
-        self._set_status(f"Loaded '{name}' ({len(temps)} temp samples{photo_note}).")
+        sec_note = f"; +secondary {len(temps2)}" if temps2 else ""
+        self._set_status(
+            f"Loaded '{name}' ({len(temps)} temp samples{sec_note}{photo_note})."
+        )
 
     # --------------------------------------------------------- Export / Import
     def export_results(self):
@@ -943,6 +983,10 @@ class PcrAnalysisFrame(ttk.Frame):
                 for exp in self.experiments:
                     for i, v in enumerate(exp.temps):
                         w.writerow(["temp", exp.name, i, "", "", f"{v:.9g}"])
+                    # Overlay secundario (solo lectura): registro 'temp2' para
+                    # round-trip. Bundles viejos no lo traen → import sin overlay.
+                    for i, v in enumerate(exp.temps_secondary):
+                        w.writerow(["temp2", exp.name, i, "", "", f"{v:.9g}"])
                     for i, v in enumerate(exp.photo):
                         w.writerow(["photo", exp.name, i, "", "", f"{v:.9g}"])
                     for seg in exp.segments:
@@ -1003,7 +1047,7 @@ class PcrAnalysisFrame(ttk.Frame):
             return
         dt_val = None
         win_lo = win_hi = None
-        temps, photos, segs, order = {}, {}, {}, []
+        temps, temps2, photos, segs, order = {}, {}, {}, {}, []
         try:
             with open(path, newline="", encoding="utf-8") as f:
                 reader = csv.reader(f, skipinitialspace=True)
@@ -1042,12 +1086,18 @@ class PcrAnalysisFrame(ttk.Frame):
                         continue
                     if name not in temps:
                         temps[name] = {}
+                        temps2[name] = {}
                         photos[name] = {}
                         segs[name] = []
                         order.append(name)
                     if rec == "temp":
                         try:
                             temps[name][int(float(cell(row, "i")))] = float(cell(row, "value"))
+                        except (ValueError, TypeError):
+                            pass
+                    elif rec == "temp2":
+                        try:
+                            temps2[name][int(float(cell(row, "i")))] = float(cell(row, "value"))
                         except (ValueError, TypeError):
                             pass
                     elif rec == "photo":
@@ -1068,11 +1118,12 @@ class PcrAnalysisFrame(ttk.Frame):
             return
         added = 0
         for name in order:
-            tmap, pmap = temps[name], photos[name]
+            tmap, pmap, t2map = temps[name], photos[name], temps2[name]
             tarr = [tmap[k] for k in sorted(tmap)]
             parr = [pmap[k] for k in sorted(pmap)]
+            t2arr = [t2map[k] for k in sorted(t2map)]
             uname = self._unique_name(name)
-            exp = PcrExperiment(name=uname, temps=tarr, photo=parr)
+            exp = PcrExperiment(name=uname, temps=tarr, photo=parr, temps_secondary=t2arr)
             for ia, ib in segs[name]:
                 exp.segments.append(PcrSegment(ia, ib))
             self.experiments.append(exp)

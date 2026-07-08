@@ -29,10 +29,11 @@ enrutan a la pestaña activa (`_active_load` / `_active_import`).
 ## 2. Eje temporal sintético (dt global)
 
 La temperatura que guarda PcrFrame **no lleva eje temporal**: `save_data_temps_file`
-escribe una fila de prefijo/metadatos y luego un valor por muestra, sin timestamp
-([ui/PcrFrame.py:923](../ui/PcrFrame.py#L923)). Por eso el tiempo se **sintetiza** con un
-`dt` global editable (decisión Q1): `X = índice_de_muestra · dt` [s]. **No se tocó el
-guardado de PcrFrame.**
+escribe una fila de prefijo/metadatos y luego, por muestra, **dos columnas**
+`[primario, secundario]` (antes una sola), sin timestamp. Por eso el tiempo se
+**sintetiza** con un `dt` global editable (decisión Q1): `X = índice_de_muestra · dt`
+[s]. **No se tocó el guardado de PcrFrame** más allá de la 2ª columna; ver §8 para el
+canal secundario.
 
 - Campo "Sampling dt (s)" en la barra; default desde `settings.json` →
   `pidControllerRPM.ts_pcr` (`_default_dt`, fallback 0.05).
@@ -150,5 +151,39 @@ escribe dos archivos (decisión Q10):
 `import_analysis` valida por la presencia de la columna `record`; si falta, avisa que se
 eligió el archivo equivocado (p. ej. el `_rates.csv`).
 
+## 8. Canal secundario (overlay de referencia)
+
+PcrFrame ahora guarda dos temperaturas del par IR Object ↔ Termocupla (primario que
+regula el PID + secundario; ver [docs/temp_source_selector.md](temp_source_selector.md)
+§9). El análisis las trata como **overlay de solo lectura**: la 2ª curva se dibuja como
+cross-check visual, pero **no participa** del picado de segmentos, tasas, slices
+extraídos, ventana ni tabla — esos siguen sobre el **primario** (la temperatura que el
+instrumento regula es la que define las tasas de calentamiento/enfriamiento).
+
+- **Modelo.** `PcrExperiment` gana `temps_secondary` (np.array; vacío = corrida de 1
+  canal). `PcrSegment` **no cambia** (los índices siguen siendo sobre `temps`).
+- **Carga.** `_read_temp_csv` devuelve `(primario, secundario)`: lee la columna 0 y, si
+  existe, la columna 1. Los CSV viejos de 1 columna cargan igual, con secundario vacío
+  (retrocompatible). Las dos listas quedan **alineadas por muestra** (una fila con
+  primario no parseable descarta también su secundario); si ninguna muestra trajo
+  secundario, se devuelve `[]` y no se dibuja overlay. La **siembra en vivo**
+  (`_seed_from_pcr`) toma además `data_temperature_secondary` de la corrida.
+- **Dibujo** (`_redraw`, eje 1). Tras la curva primaria se dibuja la secundaria con el
+  **mismo color** del experimento (`line.get_color()`), `linewidth=0.8`, `alpha=0.4` y
+  **sin entrada de leyenda** (no duplica). Con la ventana de muestras activa, la Y se
+  sigue calculando **solo del primario** (el overlay puede recortarse, como los
+  segmentos): la ventana existe para picar sobre el primario.
+- **Round-trip.** El bundle re-importable gana un registro **`temp2`** (experimento,
+  índice, valor) por muestra del secundario; `import_analysis` lo reconstruye en
+  `temps_secondary`. Bundles viejos sin `temp2` → experimento sin overlay (sin romper).
+  El resumen `_rates.csv` **no** cambia (solo mide tasas del primario).
+
+## Orden de decisiones nuevas
+
+- **Rol del secundario:** overlay de solo lectura (no se pican segmentos ni tasas sobre él).
+- **Round-trip:** el secundario se persiste en el bundle (`temp2`) para sobrevivir export→import.
+- **Estilo:** tenue (mismo color, alpha 0.4, sin leyenda) para no ensuciar el plot con
+  varios experimentos superpuestos.
+
 __author__ = "Edisson A. Naula"
-__date__ = "2026-07-06"
+__date__ = "2026-07-08"

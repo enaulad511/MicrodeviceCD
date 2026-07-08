@@ -21,14 +21,13 @@ from templates.constants import (
     serial_port_encoder,
 )
 from templates.utils import (
-    TEMP_SOURCES,
     experiment_dir,
     read_settings_from_file,
     read_temp_source,
     temp_source_index,
     temp_source_key,
     temp_source_label,
-    temp_source_labels,
+    temp_source_label_by_index,
     write_temp_source,
 )
 from ui.KeyboardFrame import NumericKeyboard
@@ -56,6 +55,23 @@ FLUOR_LIGHT_S = 2.0  # ventana de excitación (luz ON)
 FLUOR_POST_S = 0.5  # ventana de decaimiento (luz OFF)
 # Tiempo total que consume una lectura completa (sleep previo + 3 ventanas).
 FLUOR_READ_TOTAL_S = FLUOR_PRE_SLEEP_S + FLUOR_BASELINE_S + FLUOR_LIGHT_S + FLUOR_POST_S
+
+# Fuentes de temperatura válidas en PCR: IR Ambient queda fuera (no es la
+# temperatura de la muestra, solo referencia). El primario regula el PID y el
+# secundario capturado/ploteado es el complemento del par {IR Object, Termocupla}.
+PCR_TEMP_SOURCE_KEYS = ("thermocouple", "ir_object")
+
+# Colores por canal para las dos curvas del plot (misma convención que Quick
+# Control: IR Ambient azul, IR Object naranja, Termocupla rojo).
+PCR_TEMP_CHANNEL_COLORS = {
+    "IR Ambient": "tab:blue",
+    "IR Object": "tab:orange",
+    "Thermocouple": "tab:red",
+}
+
+# Ventanas del watchdog de sensores (par IR Object/Termocupla) en PCR.
+PCR_TEMP_START_WAIT_S = 3.0  # espera máxima al inicio por una lectura válida
+PCR_TEMP_DEAD_S = 5.0  # sin lectura fresca de ninguno de los dos → detener
 
 
 def check_temp_higher(temp, target_temp):
@@ -230,18 +246,30 @@ class PCRFrame(ttk.Frame):
         self.temp = 0.0
         self.temp_ts = time.time()
         # Últimas tres temperaturas crudas del disco por índice del payload UDP
-        # (0=IR amb, 1=IR obj, 2=termocupla). El canal primario se muestra
-        # suavizado (self.temp); los otros dos se muestran crudos en el label
-        # durante la corrida. None = ese sensor no reportó (se muestra "N/A").
+        # (0=IR amb, 1=IR obj, 2=termocupla). El primario y el secundario del par
+        # se muestran suavizados en el label; IR Ambient se muestra crudo (solo
+        # referencia). None = ese sensor no reportó (se muestra "N/A").
         self.temps_raw: list = [None, None, None]
-        # Fuente de temperatura elegida (termocupla por defecto). El índice apunta
-        # al campo del payload UDP (0=IR amb, 1=IR obj, 2=termocupla) y es lo que
-        # el lazo PID regula. self.temp_source_bad marca "sensor caído" (se sostiene
-        # el último valor y se avisa en el status).
+        # Fuente de temperatura elegida. El índice apunta al campo del payload UDP
+        # (0=IR amb, 1=IR obj, 2=termocupla) y es lo que el lazo PID regula.
+        # En PCR IR Ambient no es válido como primario (no es temp de la muestra):
+        # si el valor global persistido fuese ir_ambient, cae a termocupla.
         self.temp_source = read_temp_source()
+        if self.temp_source not in PCR_TEMP_SOURCE_KEYS:
+            self.temp_source = "thermocouple"
         self.temp_source_idx = temp_source_index(self.temp_source)
         self.temp_source_bad = False
         self.cbo_temp_source: "ttk.Combobox | None" = None
+        # Canal secundario (complemento del par): se captura, suaviza y plotea
+        # junto al primario. Seed 20° (aparece solo si nunca llegó lectura);
+        # ante sensor caído sostiene el último valor (igual que el primario).
+        self.temp_secondary = 20.0
+        self.data_temperature_secondary: list = []
+        # Timestamp de la última lectura VÁLIDA por canal (para el watchdog de
+        # "ambas caídas") y bandera de que ya llegó al menos una lectura buena.
+        self._chan_last_good: list = [0.0, 0.0, 0.0]
+        self._temp_ever_valid = False
+        self._temp_abort_triggered = False
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=1)
         self.ads = ads_reader
@@ -327,9 +355,11 @@ class PCRFrame(ttk.Frame):
         ttk.Label(frame, text="Temp source:", style="Custom.TLabel").grid(
             row=0, column=0, padx=(10, 5), pady=2, sticky="w"
         )
+        # Solo Termocupla e IR Object: IR Ambient no es primario válido en PCR.
+        pcr_labels = [temp_source_label(k) for k in PCR_TEMP_SOURCE_KEYS]
         self.cbo_temp_source = ttk.Combobox(
             frame,
-            values=temp_source_labels(),
+            values=pcr_labels,
             state="readonly",
             font=font_entry,
             width=14,
@@ -341,10 +371,23 @@ class PCRFrame(ttk.Frame):
     def _on_temp_source_changed(self, event=None):
         if self.cbo_temp_source is None:
             return
-        self.temp_source = temp_source_key(self.cbo_temp_source.get())
+        key = temp_source_key(self.cbo_temp_source.get())
+        # Guardarraíl: el combobox ya excluye IR Ambient, pero si por cualquier
+        # vía llegara, cae a termocupla para no dejar el par sin sentido.
+        if key not in PCR_TEMP_SOURCE_KEYS:
+            key = "thermocouple"
+            self.cbo_temp_source.set(temp_source_label(key))
+        self.temp_source = key
         self.temp_source_idx = temp_source_index(self.temp_source)
         self.temp_source_bad = False
         write_temp_source(self.temp_source)
+
+    def _secondary_idx(self) -> int:
+        """Índice del canal secundario: el complemento del par {IR Object(1),
+        Termocupla(2)}. Si el primario es termocupla, el secundario es IR Object;
+        en cualquier otro caso (IR Object o el guardarraíl) el secundario es la
+        termocupla — el canal que el usuario siempre quiere capturar."""
+        return 1 if self.temp_source_idx == 2 else 2
 
     # ------------------------------------------------------------------ #
     # Proyectos PCR (recetas con nombre de las 12 entradas)
@@ -859,30 +902,87 @@ class PCRFrame(ttk.Frame):
     def update_displayed_temperature(self, text, address, temps_list):
         # Solo actualiza datos Python puros — sin operaciones Tkinter.
         # Tkinter no es thread-safe; toda actualización de UI ocurre en _ui_poll_loop.
-        # Se lee la fuente elegida (temp_source_idx); si ese sensor viene ausente
-        # (None) se sostiene el último valor y se marca temp_source_bad para avisar.
-        try:
-            raw = temps_list[self.temp_source_idx]
-            if raw is None:
-                raise ValueError("sensor unavailable")
-            lf = float(raw)
-            self.temp_ts = temps_list[3]
-            self.temp_source_bad = False
-        except Exception:
+        # Se leen dos canales: el primario (temp_source_idx, regula el PID) y el
+        # secundario del par (complemento). Ausente (None) → se sostiene el último
+        # valor; el primario además marca temp_source_bad para avisar.
+        now = time.time()
+
+        def _valid(i):
+            # float válido del canal i, o None. Al ser válido, registra el
+            # timestamp de última lectura buena (para el watchdog de "ambas caídas").
+            try:
+                v = temps_list[i]
+                if v is None:
+                    return None
+                f = float(v)
+            except (IndexError, TypeError, ValueError):
+                return None
+            self._chan_last_good[i] = now
+            return f
+
+        p_idx = self.temp_source_idx
+        p_val = _valid(p_idx)
+        if p_val is None:
             lf = self.temp
             self.temp_ts = 0.8
             self.temp_source_bad = True
-        # Guardar los tres canales crudos para el label multi-temp. Se conserva
-        # None tal cual (sensor ausente) para mostrar "N/A"; solo el primario se
-        # suaviza. Escritura de floats simples: mismo patrón thread-unsafe-tolerado
-        # que self.temp (se escribe en el hilo UDP, se lee en _ui_poll_loop).
+        else:
+            lf = p_val
+            self.temp_ts = temps_list[3]
+            self.temp_source_bad = False
+
+        # Secundario: float válido o sostener último valor (seed 20°, solo aparece
+        # si nunca llegó lectura de ese canal).
+        s_val = _valid(self._secondary_idx())
+        s_lf = self.temp_secondary if s_val is None else s_val
+
+        if p_val is not None or s_val is not None:
+            self._temp_ever_valid = True
+
+        # Guardar los tres canales crudos para el label (IR Ambient se muestra
+        # crudo como referencia). None se conserva para mostrar "N/A".
         try:
             self.temps_raw = [temps_list[0], temps_list[1], temps_list[2]]
         except (IndexError, TypeError):
             pass
         alpha = 0.3
         self.temp = alpha * lf + (1 - alpha) * self.temp
+        self.temp_secondary = alpha * s_lf + (1 - alpha) * self.temp_secondary
+        # Anexados alineados por índice (misma longitud): primario y secundario.
         self.data_temperature.append(self.temp)
+        self.data_temperature_secondary.append(self.temp_secondary)
+
+    def _check_temp_watchdog(self):
+        """Detiene el experimento si ni el primario ni el secundario del par
+        entregan lectura fresca por PCR_TEMP_DEAD_S seguidos ('ambas caídas').
+
+        Solo se arma tras la primera lectura válida (_temp_ever_valid); antes de
+        eso es el start-gate quien decide no arrancar. Idempotente: dispara una
+        sola vez (_temp_abort_triggered). Se ejecuta en el hilo principal, así que
+        solo señaliza los stop-events y marca la fase — el finally del hilo del
+        experimento desmonta y _ui_poll_loop restaura la UI al ver running=False.
+        """
+        if (
+            not self.running_experiment
+            or not self._temp_ever_valid
+            or self._temp_abort_triggered
+        ):
+            return
+        last_fresh = max(
+            self._chan_last_good[self.temp_source_idx],
+            self._chan_last_good[self._secondary_idx()],
+        )
+        if time.time() - last_fresh > PCR_TEMP_DEAD_S:
+            self._temp_abort_triggered = True
+            self.fase = "Aborted: both temp sensors unavailable"
+            print(
+                f"Aborting PCR: both pair sensors stale > {PCR_TEMP_DEAD_S}s "
+                "— stopping experiment"
+            )
+            if self.stop_udp_listenner is not None:
+                self.stop_udp_listenner.set()
+            if self.stop_event_motor is not None:
+                self.stop_event_motor.set()
 
     def _ui_poll_loop(self):
         """Actualiza la UI desde el hilo principal (scheduled via after). Un solo hilo."""
@@ -896,35 +996,38 @@ class PCRFrame(ttk.Frame):
         )
         remaining = self._estimate_remaining_time(elapsed_pcr_time)
         msg_elapsed_time += f" -- Estimated finish: {int(remaining / 60)}m {remaining % 60:.1f}s"
+        # Watchdog de "ambas caídas": si ni el primario ni el secundario del par
+        # entregan lectura fresca por PCR_TEMP_DEAD_S seguidos, detener ordenadamente.
+        # Solo se arma tras la primera lectura válida (_temp_ever_valid) — antes de
+        # eso el start-gate de experiment_pcr es quien decide no arrancar. Señaliza
+        # los stop-events y deja que el hilo del experimento desmonte; el propio
+        # loop restaurará la UI al detectar running_experiment=False.
+        self._check_temp_watchdog()
+
         src_label = temp_source_label(self.temp_source)
         warn = (
             f"  ⚠ {src_label} unavailable — holding last value" if self.temp_source_bad else ""
         )
-        # Los otros dos canales (no primarios) en crudo, en el orden de
-        # TEMP_SOURCES (Thermocouple, IR Object, IR Ambient). Un canal ausente
-        # (None / no numérico) se muestra como "N/A". Sin ⚠: el aviso queda
-        # reservado para la fuente que regula el PID.
-        secondary = []
-        for _key, label, idx in TEMP_SOURCES:
-            if idx == self.temp_source_idx:
-                continue
-            val = self.temps_raw[idx] if idx < len(self.temps_raw) else None
-            if val is None:
-                shown = "N/A"
-            else:
-                try:
-                    shown = f"{float(val):.1f}"
-                except (TypeError, ValueError):
-                    shown = "N/A"
-            secondary.append(f"{label} {shown}")
-        secondary_str = f"  ({', '.join(secondary)})" if secondary else ""
+        # Secundario del par (suavizado, hold-last): siempre muestra su valor
+        # sostenido porque está en la curva. IR Ambient va crudo como referencia
+        # ("N/A" si viene ausente); no se plotea ni se guarda.
+        sec_label = temp_source_label_by_index(self._secondary_idx())
+        amb_raw = self.temps_raw[0] if self.temps_raw else None
+        if amb_raw is None:
+            amb_shown = "N/A"
+        else:
+            try:
+                amb_shown = f"{float(amb_raw):.1f}"
+            except (TypeError, ValueError):
+                amb_shown = "N/A"
+        extras = f"  ({sec_label} {self.temp_secondary:.1f}, IR Ambient {amb_shown})"
         # Reconstruir el status completo cada tick: este loop es el único escritor
         # de svar_status durante la corrida, así que no hace falta leer/partir el
         # valor previo. El patrón anterior (get().split("\n") + parchar índices)
         # asumía "una línea por slot"; al mover State a su propia línea, las líneas
         # viejas dejaban de sobreescribirse y el label crecía sin límite.
         self.svar_status.set(
-            f"Temperature: {self.temp:.2f} °C [{src_label}]{secondary_str}{warn}\n"
+            f"Temperature: {self.temp:.2f} °C [{src_label}]{extras}{warn}\n"
             f"State: {self.fase}\n"
             f"{msg_elapsed_time}"
         )
@@ -971,18 +1074,36 @@ class PCRFrame(ttk.Frame):
         if self.canvas is not None:
             self.canvas.get_tk_widget().destroy()
         self.data_temperature = []  # Datos acumulados
+        self.data_temperature_secondary = []
         self.data_photodetector = []
         self.data_photodetector_series = []
+        # Reset del estado de captura/watchdog del par para la nueva corrida.
+        self.temp_secondary = 20.0
+        self._chan_last_good = [0.0, 0.0, 0.0]
+        self._temp_ever_valid = False
+        self._temp_abort_triggered = False
 
         # Dos subplots apilados: arriba temperatura (denso), abajo fotodetector (1/ciclo)
         self.fig, (self.ax, self.ax_photo) = plt.subplots(
             2, 1, figsize=(4.5, 5.0), constrained_layout=True
         )
 
-        (self.line,) = self.ax.plot([], [], marker="o", markersize=2)
+        # Dos curvas: primario (regula el PID) y secundario del par, con color por
+        # canal (Termocupla rojo, IR Object naranja) y leyenda para distinguirlos.
+        p_label = temp_source_label(self.temp_source)
+        s_label = temp_source_label_by_index(self._secondary_idx())
+        (self.line,) = self.ax.plot(
+            [], [], marker="o", markersize=2,
+            color=PCR_TEMP_CHANNEL_COLORS.get(p_label), label=p_label,
+        )
+        (self.line_secondary,) = self.ax.plot(
+            [], [], marker="o", markersize=2,
+            color=PCR_TEMP_CHANNEL_COLORS.get(s_label), label=s_label,
+        )
         self.ax.set_title("Temperature (°C)")
         self.ax.set_xlabel("Samples")
         self.ax.set_ylabel("°C")
+        self.ax.legend(fontsize=7, loc="upper right")
         self.ax.grid(True)
 
         (self.line_photo,) = self.ax_photo.plot([], [], marker="o", color="purple", linewidth=1.2)
@@ -1017,6 +1138,12 @@ class PCRFrame(ttk.Frame):
         self.line.set_xdata(x)
         self.line.set_ydata(y)
 
+        # Curva secundaria del par (misma ventana; se anexa alineada al primario).
+        if hasattr(self, "line_secondary"):
+            ys = self.data_temperature_secondary[start:n]
+            self.line_secondary.set_xdata(range(start, start + len(ys)))
+            self.line_secondary.set_ydata(ys)
+
         # Mantener ventana deslizante en X
         self.ax.set_xlim(start, n - 1)
 
@@ -1047,6 +1174,7 @@ class PCRFrame(ttk.Frame):
 
     def save_data_temps_file(self):
         import csv
+        from itertools import zip_longest
 
         timestamp = datetime.now()
         # Prefijo con el nombre del protocolo (proyecto PCR activo) saneado.
@@ -1056,9 +1184,15 @@ class PCRFrame(ttk.Frame):
         filename = f"{save_dir}/{slug}_temperature_data_{ts}.csv"
         with open(filename, "w", newline="") as file:
             writer = csv.writer(file)
+            # Fila 0: prefijo/metadata (una celda; incluye la identidad de columnas
+            # "cols: <primario>|<secundario>"). El loader del análisis la salta y
+            # lee la columna 0 (primario), así que agregar la 2ª columna es seguro.
             writer.writerow([self.prefix_row])
-            for temp in self.data_temperature:
-                writer.writerow([temp])
+            # Dos columnas alineadas por muestra: [primario, secundario]. Se anexan
+            # juntas en update_displayed_temperature; zip_longest cubre un desfase
+            # de a lo más una muestra si el paro cayó entre ambos append.
+            for p, s in zip_longest(self.data_temperature, self.data_temperature_secondary):
+                writer.writerow([p if p is not None else "", s if s is not None else ""])
         print(f"Data saved to {filename}")
         filename_photo = f"{save_dir}/{slug}_photodetector_data_{ts}.csv"
         with open(filename_photo, "w", newline="") as file:
@@ -1546,12 +1680,16 @@ class PCRFrame(ttk.Frame):
             project_label = "_last_run (sin guardar)"
         else:
             project_label = self.active_project_name
+        # Identidad de columnas del CSV de temperatura: col0=primario, col1=secundario.
+        primary_label = temp_source_label(self.temp_source)
+        secondary_label = temp_source_label_by_index(self._secondary_idx())
         prefix_col = (
             f"project: {project_label}"
             f"-high_temp: {high_temp}-low_temp: {low_temp}-time_high: {time_high}"
             f"-time_low: {time_low}-cycles: {cycles}-rpm: {rpm}"
             f"-denat_temp: {denat_temp}-denat_time: {denat_time}-ts: {ts}"
-            f"-temp_source: {temp_source_label(self.temp_source)}"
+            f"-temp_source: {primary_label}"
+            f"-cols: {primary_label}|{secondary_label}"
         )
         self.temp = 20.0
         self.client_temperature = UdpClient(
@@ -1574,6 +1712,21 @@ class PCRFrame(ttk.Frame):
         self.start_pcr_time = time.time()
 
         try:
+            # Start-gate: no arrancar el ciclado si al inicio ninguno de los dos
+            # sensores del par entrega lectura válida dentro de PCR_TEMP_START_WAIT_S.
+            # El cliente UDP ya corre; esperamos a _temp_ever_valid (lo marca
+            # update_displayed_temperature en la primera lectura buena). Al retornar
+            # aquí, el finally desmonta el hardware y _ui_poll_loop restaura la UI.
+            gate_deadline = time.time() + PCR_TEMP_START_WAIT_S
+            while not self._temp_ever_valid and time.time() < gate_deadline:
+                if self.stop_udp_listenner.is_set():
+                    return
+                time.sleep(0.05)
+            if not self._temp_ever_valid:
+                self.fase = "Aborted: temp sensors unavailable at start"
+                print("PCR not started: both pair sensors unavailable at start")
+                return
+
             acceleration = float(pidGains.get("acceleration_spin", 200.0))
             direction = "CW"
             if sistemaMotor is None:
