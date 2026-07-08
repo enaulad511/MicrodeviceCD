@@ -64,7 +64,66 @@ DEFAULT_SETTINGS = {
     "ads_fsr": 0.256,
     "photoreceptor": {"use_diff": 1.0},
     "windows_pcr": 1500.0,
+    "temp_source": "thermocouple",
 }
+
+
+# --- Fuente de temperatura (payload UDP del disco: t_amb:t_obj:t_tc) ---
+# El broadcast trae tres temperaturas en este orden: ambiente y objeto del sensor
+# IR (MLX90614) más la termocupla (MAX31855). El usuario elige cuál se usa en los
+# experimentos. Se persiste la clave canónica en settings.json ("temp_source"),
+# no el índice, para sobrevivir un reordenamiento futuro del payload. La lista está
+# en orden de combobox; "thermocouple" primero = comportamiento por defecto previo.
+TEMP_SOURCES = [
+    ("thermocouple", "Thermocouple", 2),
+    ("ir_object", "IR Object", 1),
+    ("ir_ambient", "IR Ambient", 0),
+]
+DEFAULT_TEMP_SOURCE = "thermocouple"
+
+
+def temp_source_labels() -> list[str]:
+    """Etiquetas para el combobox, en orden (Thermocouple, IR Object, IR Ambient)."""
+    return [label for _key, label, _idx in TEMP_SOURCES]
+
+
+def temp_source_index(key_or_label: str) -> int:
+    """Índice en el payload UDP (0=amb, 1=obj, 2=tc) para una clave o etiqueta."""
+    for key, label, idx in TEMP_SOURCES:
+        if key_or_label in (key, label):
+            return idx
+    return 2  # fallback: termocupla
+
+
+def temp_source_label(key: str) -> str:
+    """Etiqueta visible para una clave canónica."""
+    for k, label, _idx in TEMP_SOURCES:
+        if k == key:
+            return label
+    return "Thermocouple"
+
+
+def temp_source_key(label: str) -> str:
+    """Clave canónica para una etiqueta visible del combobox."""
+    for key, lbl, _idx in TEMP_SOURCES:
+        if lbl == label:
+            return key
+    return DEFAULT_TEMP_SOURCE
+
+
+def read_temp_source(file_path: str = "resources/settings.json") -> str:
+    """Clave de fuente de temperatura persistida (por defecto termocupla)."""
+    key = read_settings_from_file(file_path).get("temp_source", DEFAULT_TEMP_SOURCE)
+    if key not in (k for k, _l, _i in TEMP_SOURCES):
+        return DEFAULT_TEMP_SOURCE
+    return key
+
+
+def write_temp_source(key: str, file_path: str = "resources/settings.json") -> bool:
+    """Persiste la fuente elegida (merge, no pisa otras claves)."""
+    if key not in (k for k, _l, _i in TEMP_SOURCES):
+        key = DEFAULT_TEMP_SOURCE
+    return write_settings_to_file({"temp_source": key}, file_path)
 
 
 def experiment_dir(method: str) -> str:

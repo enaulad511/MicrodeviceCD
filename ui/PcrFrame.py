@@ -20,7 +20,16 @@ from templates.constants import (
     led_heatin_pin,
     serial_port_encoder,
 )
-from templates.utils import experiment_dir, read_settings_from_file
+from templates.utils import (
+    experiment_dir,
+    read_settings_from_file,
+    read_temp_source,
+    temp_source_index,
+    temp_source_key,
+    temp_source_label,
+    temp_source_labels,
+    write_temp_source,
+)
 from ui.KeyboardFrame import NumericKeyboard
 
 # spinMotorRPM_ramped se importa lazy desde Drivers.DriverStepperSys dentro de
@@ -219,6 +228,14 @@ class PCRFrame(ttk.Frame):
         self.pin_pcr = None
         self.temp = 0.0
         self.temp_ts = time.time()
+        # Fuente de temperatura elegida (termocupla por defecto). El índice apunta
+        # al campo del payload UDP (0=IR amb, 1=IR obj, 2=termocupla) y es lo que
+        # el lazo PID regula. self.temp_source_bad marca "sensor caído" (se sostiene
+        # el último valor y se avisa en el status).
+        self.temp_source = read_temp_source()
+        self.temp_source_idx = temp_source_index(self.temp_source)
+        self.temp_source_bad = False
+        self.cbo_temp_source: "ttk.Combobox | None" = None
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=1)
         self.ads = ads_reader
@@ -276,6 +293,7 @@ class PCRFrame(ttk.Frame):
         self.frame_buttons.grid(row=2, column=0, sticky="nswe", padx=(5, 25))
         self.frame_buttons.columnconfigure(0, weight=1)
         create_buttons(self.frame_buttons, callbacks, self.svar_status)
+        self._build_source_selector(self.frame_buttons)
         # Frame para mostrar el gráfico
         self.profile_frame = ttk.LabelFrame(self.content_frame, text="Profile Preview")
         self.profile_frame.grid(row=3, column=0, padx=(2, 20), pady=10, sticky="nswe")
@@ -290,6 +308,37 @@ class PCRFrame(ttk.Frame):
         # Auto-carga del proyecto inicial (cascada last_used -> last_run -> Default).
         # Al final de __init__: ya existen profile_frame/canvas que usa la preview.
         self._load_initial_project()
+
+    def _build_source_selector(self, master):
+        """Combobox 'Temp source:' que fija qué temperatura del disco regula el PID.
+
+        Vive en la barra de botones (visible durante la corrida) y se deshabilita
+        mientras el experimento corre — la fuente se elige antes de Start. El valor
+        es global (settings.json) y se comparte con las tabs de control manual.
+        """
+        frame = ttk.Frame(master)
+        frame.grid(row=2, column=0, sticky="nswe", pady=(0, 5))
+        ttk.Label(frame, text="Temp source:", style="Custom.TLabel").grid(
+            row=0, column=0, padx=(10, 5), pady=2, sticky="w"
+        )
+        self.cbo_temp_source = ttk.Combobox(
+            frame,
+            values=temp_source_labels(),
+            state="readonly",
+            font=font_entry,
+            width=14,
+        )
+        self.cbo_temp_source.set(temp_source_label(self.temp_source))
+        self.cbo_temp_source.grid(row=0, column=1, padx=5, pady=2, sticky="w")
+        self.cbo_temp_source.bind("<<ComboboxSelected>>", self._on_temp_source_changed)
+
+    def _on_temp_source_changed(self, event=None):
+        if self.cbo_temp_source is None:
+            return
+        self.temp_source = temp_source_key(self.cbo_temp_source.get())
+        self.temp_source_idx = temp_source_index(self.temp_source)
+        self.temp_source_bad = False
+        write_temp_source(self.temp_source)
 
     # ------------------------------------------------------------------ #
     # Proyectos PCR (recetas con nombre de las 12 entradas)
@@ -804,12 +853,19 @@ class PCRFrame(ttk.Frame):
     def update_displayed_temperature(self, text, address, temps_list):
         # Solo actualiza datos Python puros — sin operaciones Tkinter.
         # Tkinter no es thread-safe; toda actualización de UI ocurre en _ui_poll_loop.
+        # Se lee la fuente elegida (temp_source_idx); si ese sensor viene ausente
+        # (None) se sostiene el último valor y se marca temp_source_bad para avisar.
         try:
-            lf = float(temps_list[2])
+            raw = temps_list[self.temp_source_idx]
+            if raw is None:
+                raise ValueError("sensor unavailable")
+            lf = float(raw)
             self.temp_ts = temps_list[3]
+            self.temp_source_bad = False
         except Exception:
             lf = self.temp
             self.temp_ts = 0.8
+            self.temp_source_bad = True
         alpha = 0.3
         self.temp = alpha * lf + (1 - alpha) * self.temp
         self.data_temperature.append(self.temp)
@@ -827,7 +883,13 @@ class PCRFrame(ttk.Frame):
         )
         remaining = self._estimate_remaining_time(elapsed_pcr_time)
         msg_elapsed_time += f" -- Estimated finish: {int(remaining / 60)}m {remaining % 60:.1f}s"
-        total_msg[0] = f"Temperature: {self.temp:.2f} °C\tState: {self.fase}"
+        src_label = temp_source_label(self.temp_source)
+        warn = (
+            f"  ⚠ {src_label} unavailable — holding last value" if self.temp_source_bad else ""
+        )
+        total_msg[0] = (
+            f"Temperature: {self.temp:.2f} °C [{src_label}]{warn}\tState: {self.fase}"
+        )
         if len(total_msg) < 2:
             total_msg.append(msg_elapsed_time)
         else:
@@ -1005,6 +1067,14 @@ class PCRFrame(ttk.Frame):
             self.svar_status.set("Error: ADS1115 not available")
             return
         self.running_experiment = True
+        # Fuente de temperatura bloqueada mientras corre (cambiar de sensor a mitad
+        # de un experimento cambiaría el setpoint efectivo del PID). Se relee por si
+        # el selector cambió sin disparar el evento.
+        if self.cbo_temp_source is not None:
+            self.temp_source = temp_source_key(self.cbo_temp_source.get())
+            self.temp_source_idx = temp_source_index(self.temp_source)
+            self.temp_source_bad = False
+            self.cbo_temp_source.configure(state=ttk.DISABLED)
         # Auto-snapshot de las settings que se van a correr: «Última corrida»
         # siempre refleja lo último ejecutado, aunque no se guardara con nombre.
         pcrp.snapshot_last_run(self._entries_to_dict())
@@ -1448,6 +1518,7 @@ class PCRFrame(ttk.Frame):
             f"-high_temp: {high_temp}-low_temp: {low_temp}-time_high: {time_high}"
             f"-time_low: {time_low}-cycles: {cycles}-rpm: {rpm}"
             f"-denat_temp: {denat_temp}-denat_time: {denat_time}-ts: {ts}"
+            f"-temp_source: {temp_source_label(self.temp_source)}"
         )
         self.temp = 20.0
         self.client_temperature = UdpClient(
@@ -1620,6 +1691,8 @@ class PCRFrame(ttk.Frame):
         # Debe invocarse desde el hilo principal (Tkinter no es thread-safe).
         self.frame_entries.grid(row=1, column=0, padx=5, pady=5, sticky="nswe")
         self.frame_project.grid(row=0, column=0, sticky="nswe", padx=(5, 25), pady=(5, 0))
+        if self.cbo_temp_source is not None:
+            self.cbo_temp_source.configure(state="readonly")
         self._refresh_project_list()
 
     def callback_stop_experiment(self):

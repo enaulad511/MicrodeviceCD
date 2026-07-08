@@ -20,6 +20,19 @@ class TempSample:
     ts: float
 
 
+def _parse_temp(raw) -> Optional[float]:
+    """Convierte un campo del payload a float, o None si viene ausente.
+
+    El disco emite ``t_amb:t_obj:t_tc``; cualquier campo puede llegar como el
+    literal ``"None"`` / ``"NS"`` (sensor ausente o con error), así que la
+    conversión tolera basura y devuelve None en lugar de reventar el parseo.
+    """
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
+
+
 class UdpClient:
     """
     Simple UDP client to listen for Arduino messages (broadcast or unicast).
@@ -201,24 +214,34 @@ class UdpClient:
 
                 payload = text.split("UDP:", 1)[-1]
                 temps = payload.split(":")
-                temp = float(temps[2])
+                # Los tres campos del disco: IR ambiente, IR objeto y termocupla.
+                # Cualquiera puede venir como "None"/"NS": se reenvían todos y el
+                # consumidor (según su selector) elige cuál usar.
+                t_amb = _parse_temp(temps[0]) if len(temps) > 0 else None
+                t_obj = _parse_temp(temps[1]) if len(temps) > 1 else None
+                t_tc = _parse_temp(temps[2]) if len(temps) > 2 else None
 
                 now = time.time()
                 self.status_disc = True
                 self.count_timeout = 0
                 self._latest_addr = addr[0]
                 self._msg_received = True
+                # Mantener el último valor válido por campo (no pisar con None).
+                for i, val in enumerate((t_amb, t_obj, t_tc)):
+                    if val is not None:
+                        self.data_temps[i] = val
                 # print(data, addr)
                 with self.latest_lock:
-                    self.latest_temp = TempSample(value=temp, ts=now)
-                    temp_value = self.latest_temp.value
-                    temp_ts = self.latest_temp.ts
+                    # latest_temp sigue siendo la termocupla (compat con lectores
+                    # directos); si no llegó, se conserva la muestra anterior.
+                    if t_tc is not None:
+                        self.latest_temp = TempSample(value=t_tc, ts=now)
                 if self.on_message:
                     try:
                         self.on_message(
                             text,
                             (addr[0],),
-                            [0, 0, temp_value, temp_ts],
+                            [t_amb, t_obj, t_tc, now],
                         )
                     except Exception as e:
                         print(f"[UdpClient] on_message error: {e}")

@@ -15,6 +15,14 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from ttkbootstrap.scrolled import ScrolledFrame
 
 from templates.constants import font_entry
+from templates.utils import (
+    read_temp_source,
+    temp_source_index,
+    temp_source_key,
+    temp_source_label,
+    temp_source_labels,
+    write_temp_source,
+)
 from ui.KeyboardFrame import NumericKeyboard
 
 
@@ -37,6 +45,14 @@ class TemperatureFrame(ttk.Frame):
         self.temps_filter = [20.0, 20.0, 20.0, 20.0]  # temps for filtering
         self.latest_temp = 20.0
         self.latest_temp_ts = 0.0
+        # Últimas tres temperaturas del disco (IR amb, IR obj, termocupla) y la
+        # fuente elegida; el lector usa temp_source_idx. temp_source_bad => sensor
+        # ausente (se sostiene el último valor y se avisa en el status).
+        self.latest_temps = [20.0, 20.0, 20.0]
+        self._field_ok = [True, True, True]  # último broadcast trajo el campo i?
+        self.temp_source = read_temp_source()
+        self.temp_source_idx = temp_source_index(self.temp_source)
+        self.temp_source_bad = False
         # Función para leer temperatura (°C). Si no se pasa, usa simulación.
         self.sensor_reader = (
             self._simulated_reader if sensor_reader == "default" else self._thermocouple_reader
@@ -79,6 +95,23 @@ class TemperatureFrame(ttk.Frame):
         )
         self.unit_combo.grid(row=0, column=3, padx=(2, 20), pady=5, sticky="we")
         self.unit_combo.bind("<<ComboboxSelected>>", lambda e: self.actualizar_grafico())
+
+        ttk.Label(control_frame, text="Temp source:", style="Custom.TLabel").grid(
+            row=2, column=0, padx=5, pady=5, sticky="w"
+        )
+        self.cbo_temp_source = ttk.Combobox(
+            control_frame,
+            values=temp_source_labels(),
+            state="readonly",
+            font=font_entry,
+            width=14,
+        )
+        self.cbo_temp_source.set(temp_source_label(self.temp_source))
+        self.cbo_temp_source.grid(row=2, column=1, padx=5, pady=5, sticky="we")
+        self.cbo_temp_source.bind("<<ComboboxSelected>>", self._on_temp_source_changed)
+
+        self.lbl_status = ttk.Label(control_frame, text="", style="Custom.TLabel", anchor="w")
+        self.lbl_status.grid(row=2, column=2, columnspan=2, padx=5, pady=5, sticky="we")
 
         ttk.Button(
             control_frame,
@@ -223,6 +256,11 @@ class TemperatureFrame(ttk.Frame):
         self.ax.grid(True, alpha=0.25)
         self.canvas.draw()
         # print("Gráfico actualizado")
+        src_label = temp_source_label(self.temp_source)
+        if self.temp_source_bad:
+            self.lbl_status.configure(text=f"⚠ {src_label} unavailable — holding last value")
+        else:
+            self.lbl_status.configure(text=f"Source: {src_label}")
 
     # ----------------- Persistencia -----------------
 
@@ -255,7 +293,7 @@ class TemperatureFrame(ttk.Frame):
         try:
             with open(nombre, "w", newline="", encoding="utf-8") as f:
                 writer = csv.writer(f)
-                writer.writerow(["t (s)", f"Temp ({unidad})"])
+                writer.writerow(["t (s)", f"Temp {temp_source_label(self.temp_source)} ({unidad})"])
                 for t, c in zip(self.timestamps, self.temps):
                     writer.writerow([f"{t:.3f}", f"{self._convert_units(c):.3f}"])
             print(f"CSV saved: {nombre}")
@@ -274,23 +312,41 @@ class TemperatureFrame(ttk.Frame):
         drift = 0.5 * (time.time() % 60) / 60.0  # variación lenta (0 a 0.5 °C)
         return base + ruido + drift
 
+    def _on_temp_source_changed(self, event=None):
+        self.temp_source = temp_source_key(self.cbo_temp_source.get())
+        self.temp_source_idx = temp_source_index(self.temp_source)
+        self.temp_source_bad = False
+        self.temps_filter = [self.latest_temps[self.temp_source_idx]] * 4
+        write_temp_source(self.temp_source)
+        self.actualizar_grafico()
+
     def _on_udp_message(self, text, address, temps_list):
-        """Callback invocado por UdpClient en su hilo cuando llega un broadcast UDP válido."""
-        try:
-            self.latest_temp = float(temps_list[2])
-            self.latest_temp_ts = temps_list[3]
-        except Exception as e:
-            print(f"Error parsing UDP temp: {e}")
+        """Callback invocado por UdpClient en su hilo cuando llega un broadcast UDP válido.
+
+        Guarda las tres temperaturas (IR amb, IR obj, termocupla); conserva el
+        último valor válido por campo y marca cuáles vinieron ausentes (None)."""
+        for i in range(3):
+            v = temps_list[i] if i < len(temps_list) else None
+            if v is not None:
+                self.latest_temps[i] = float(v)
+                self._field_ok[i] = True
+            else:
+                self._field_ok[i] = False
+        self.latest_temp = self.latest_temps[2]  # compat con lectores directos
+        self.latest_temp_ts = temps_list[3]
 
     def _thermocouple_reader(self) -> float:
         """
-        Lector de temperatura del termopar (Thermocouple) en °C.
-        Usa socket to pico
+        Lector de la temperatura elegida (termocupla / IR objeto / IR ambiente) en °C.
+        Usa el broadcast UDP del disco; promedio móvil de 4 muestras. Si el sensor
+        elegido viene ausente, sostiene el último valor y avisa en el status.
         """
         if self.client is None:
             print("Client is None")
             return 20.0
-        lf = self.latest_temp
+        idx = self.temp_source_idx
+        self.temp_source_bad = not self._field_ok[idx]
+        lf = self.latest_temps[idx]
         self.temps_filter.pop(0)
         self.temps_filter.append(lf)
         return sum(self.temps_filter) / len(self.temps_filter)

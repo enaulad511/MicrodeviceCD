@@ -137,6 +137,24 @@ class PcrAnalysisFrame(ttk.Frame):
             toolbar2, text="↻ Apply dt", bootstyle="secondary-outline", command=self._redraw
         ).pack(side=ttk.LEFT, padx=(4, 0))
 
+        # Ventana de muestras (global, solo vista): recorta el eje X del gráfico de
+        # temperatura al rango [start–end] por índice de muestra. En blanco = rango
+        # completo. Los datos y los segmentos no se descartan, solo se recorta la vista.
+        ttk.Separator(toolbar2, orient=ttk.VERTICAL).pack(side=ttk.LEFT, fill=ttk.Y, padx=8)
+        ttk.Label(toolbar2, text="Show samples:").pack(side=ttk.LEFT, padx=(0, 4))
+        self.win_start_var = ttk.StringVar(value="")
+        win_a = ttk.Entry(toolbar2, textvariable=self.win_start_var, width=7)
+        win_a.pack(side=ttk.LEFT)
+        ttk.Label(toolbar2, text="–").pack(side=ttk.LEFT, padx=2)
+        self.win_end_var = ttk.StringVar(value="")
+        win_b = ttk.Entry(toolbar2, textvariable=self.win_end_var, width=7)
+        win_b.pack(side=ttk.LEFT)
+        win_a.bind("<Return>", lambda _e: self._apply_window())
+        win_b.bind("<Return>", lambda _e: self._apply_window())
+        ttk.Button(
+            toolbar2, text="⤢ Full", bootstyle="secondary-outline", command=self._clear_window
+        ).pack(side=ttk.LEFT, padx=(4, 0))
+
         ttk.Separator(toolbar2, orient=ttk.VERTICAL).pack(side=ttk.LEFT, fill=ttk.Y, padx=8)
 
         self.btn_add = ttk.Button(
@@ -323,6 +341,50 @@ class PcrAnalysisFrame(ttk.Frame):
         except (ValueError, TypeError):
             return 0.05
 
+    def _window(self):
+        """Ventana de muestras global (solo vista) → (lo, hi) índices inclusivos, o
+        (None, None) para rango completo. En blanco = completo; se recorta a la
+        longitud máxima entre experimentos visibles; entradas inválidas o lo>=hi →
+        completo (no se descartan datos, solo se recorta la vista)."""
+
+        def _parse(var):
+            s = var.get().strip()
+            if s == "":
+                return None
+            try:
+                return int(float(s))
+            except (ValueError, TypeError):
+                return None
+
+        start = _parse(self.win_start_var)
+        end = _parse(self.win_end_var)
+        if start is None and end is None:
+            return (None, None)
+        nmax = max(
+            (e.temps.size for e in self.experiments if e.visible and e.temps.size),
+            default=0,
+        )
+        if nmax == 0:
+            return (None, None)
+        lo = 0 if start is None else max(0, start)
+        hi = (nmax - 1) if end is None else min(nmax - 1, end)
+        if lo >= hi:
+            return (None, None)
+        return (lo, hi)
+
+    def _apply_window(self):
+        self._redraw()
+        lo, hi = self._window()
+        if lo is None:
+            self._set_status("Showing full sample range.")
+        else:
+            self._set_status(f"Showing samples {lo}–{hi} on the temperature plot.")
+
+    def _clear_window(self):
+        self.win_start_var.set("")
+        self.win_end_var.set("")
+        self._apply_window()
+
     def _unique_name(self, name):
         existing = {e.name for e in self.experiments}
         if name not in existing:
@@ -382,6 +444,28 @@ class PcrAnalysisFrame(ttk.Frame):
             leg = self.ax_temp.legend(loc="best", fontsize=7, ncol=2)
             if leg is not None:
                 leg.set_visible(self._legend_visible)
+
+        # Ventana de muestras (solo vista): recorta el eje X y reajusta Y a la banda
+        # visible. Las líneas de temperatura y TODOS los segmentos ya se dibujaron
+        # arriba en coordenadas absolutas; matplotlib los recorta a la caja del eje,
+        # así que un segmento fuera de la ventana queda cortado (no se descarta, la
+        # tabla y las tasas lo conservan). La ventana es necesaria para seleccionar
+        # segmentos sobre una región ampliada.
+        lo, hi = self._window()
+        if any_t and lo is not None and hi is not None:
+            self.ax_temp.set_xlim(lo * dt, hi * dt)
+            ymins, ymaxs = [], []
+            for exp in self.experiments:
+                if not exp.visible or exp.temps.size == 0:
+                    continue
+                sl = exp.temps[lo : hi + 1]
+                if sl.size:
+                    ymins.append(float(sl.min()))
+                    ymaxs.append(float(sl.max()))
+            if ymins:
+                ymin, ymax = min(ymins), max(ymaxs)
+                pad = (ymax - ymin) * 0.05 or 0.5
+                self.ax_temp.set_ylim(ymin - pad, ymax + pad)
 
         # --- Eje 2: fotodetector (delta por ciclo) ---
         any_p = False
@@ -568,12 +652,23 @@ class PcrAnalysisFrame(ttk.Frame):
         if n == 0:
             return None
         xs = np.arange(n) * self._dt()
+        idxs = np.arange(n)
+        # Con ventana activa el picado se restringe a las muestras visibles para que
+        # A/B caigan sobre lo que se ve en la región ampliada.
+        lo, hi = self._window()
+        if lo is not None and hi is not None:
+            mask = (idxs >= lo) & (idxs <= min(hi, n - 1))
+            if not mask.any():
+                return None
+            idxs = idxs[mask]
         try:
-            pts = self.ax_temp.transData.transform(np.column_stack([xs, exp.temps]))
+            pts = self.ax_temp.transData.transform(
+                np.column_stack([xs[idxs], exp.temps[idxs]])
+            )
         except Exception:
             return None
         d = np.hypot(pts[:, 0] - event.x, pts[:, 1] - event.y)
-        return int(np.argmin(d))
+        return int(idxs[int(np.argmin(d))])
 
     def _on_add_click(self, event):
         try:
@@ -842,6 +937,9 @@ class PcrAnalysisFrame(ttk.Frame):
                 w = csv.writer(f)
                 w.writerow(["record", "experiment", "i", "a", "b", "value"])
                 w.writerow(["dt", "", "", "", "", f"{dt:.9g}"])
+                lo, hi = self._window()
+                if lo is not None and hi is not None:
+                    w.writerow(["window", "", "", lo, hi, ""])
                 for exp in self.experiments:
                     for i, v in enumerate(exp.temps):
                         w.writerow(["temp", exp.name, i, "", "", f"{v:.9g}"])
@@ -904,6 +1002,7 @@ class PcrAnalysisFrame(ttk.Frame):
         if not path:
             return
         dt_val = None
+        win_lo = win_hi = None
         temps, photos, segs, order = {}, {}, {}, []
         try:
             with open(path, newline="", encoding="utf-8") as f:
@@ -928,6 +1027,13 @@ class PcrAnalysisFrame(ttk.Frame):
                     if rec == "dt":
                         try:
                             dt_val = float(cell(row, "value"))
+                        except (ValueError, TypeError):
+                            pass
+                        continue
+                    if rec == "window":
+                        try:
+                            win_lo = int(float(cell(row, "a")))
+                            win_hi = int(float(cell(row, "b")))
                         except (ValueError, TypeError):
                             pass
                         continue
@@ -973,6 +1079,9 @@ class PcrAnalysisFrame(ttk.Frame):
             added += 1
         if dt_val and dt_val > 0:
             self.dt_var.set(f"{dt_val:.9g}")
+        if win_lo is not None and win_hi is not None and 0 <= win_lo < win_hi:
+            self.win_start_var.set(str(win_lo))
+            self.win_end_var.set(str(win_hi))
         self._refresh_tree()
         self._redraw()
         self._set_status(f"Imported {added} experiment(s) from {os.path.basename(path)}.")

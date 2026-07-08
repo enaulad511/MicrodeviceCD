@@ -80,6 +80,36 @@ datos nuevos en el export: los slices se reconstruyen de `temps` + índices de s
 Como las otras pestañas, el canvas se **recrea** entero en cada redibujo (`_reset_plot_canvas`),
 lo que re-arma el modo "Add segment" si seguía activo.
 
+## 4.2 Ventana de muestras (solo vista, global)
+
+Campos **"Show samples: [start]–[end]"** + botón **"⤢ Full"** en la barra `toolbar2`
+(junto a `dt`). Recorta **solo el eje de temperatura** a un rango contiguo de índices de
+muestra; **no descarta datos ni segmentos**, solo la vista. Su propósito es **ampliar una
+región para seleccionar segmentos** con precisión (por eso los segmentos se siguen
+dibujando dentro de la ventana).
+
+- **Índices de muestra**, no segundos (`_window`, [pcr.py:319](../ui/analysis/pcr.py#L319)):
+  robusto a cambios de `dt`. En blanco = rango completo; entradas inválidas o `start≥end`
+  → completo. Se recorta a la longitud máxima entre experimentos visibles.
+- **Global**: una sola ventana para todos los experimentos superpuestos (como `dt`).
+- **Persistente**: el canvas se recrea en cada redibujo (el zoom del toolbar mpl se
+  pierde), pero la ventana sobrevive porque vive en los `StringVar`. `<Return>` en
+  cualquier campo → `_apply_window` (redibuja + status `Showing samples lo–hi`); "⤢ Full"
+  limpia los campos.
+- **Eje Y reajustado a la banda visible**: en `_redraw` ([pcr.py](../ui/analysis/pcr.py))
+  las curvas y **todos** los segmentos se dibujan en coordenadas absolutas; con ventana
+  activa se fija `xlim=[lo·dt, hi·dt]` y se calcula `ylim` **solo** del corte visible
+  (`temps[lo:hi+1]` de los experimentos visibles, +5 % de margen). Matplotlib recorta a la
+  caja del eje, así que un segmento parcialmente fuera muestra su porción visible y el
+  resto se corta (la tabla y las tasas conservan **todos** los segmentos). La ventana
+  **no** se expande para encajar un segmento — recortar es el objetivo.
+- **Picado restringido a la ventana**: con ventana activa, `_nearest_temp_index` limita las
+  muestras candidatas a `[lo, hi]` para que A/B caigan sobre lo que se ve.
+- **Round-trip**: `export_results` escribe una fila global `window` (`a`=lo, `b`=hi, solo si
+  hay ventana activa) junto a la fila `dt`; `import_analysis` la restaura en los campos (si
+  falta, deja la vista actual intacta, igual que `dt`). El guard de import (columna
+  `record`) no cambia.
+
 ## 5. Picado de segmentos (dos clics)
 
 `_on_add_click` ([pcr.py:577](../ui/analysis/pcr.py#L577)): "➕ Add
@@ -121,4 +151,4 @@ escribe dos archivos (decisión Q10):
 eligió el archivo equivocado (p. ej. el `_rates.csv`).
 
 __author__ = "Edisson A. Naula"
-__date__ = "2026-07-03"
+__date__ = "2026-07-06"

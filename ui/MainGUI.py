@@ -309,12 +309,15 @@ class MainGUI(ttk.Window):
         self.try_connect_disc()
 
     def on_message_tester(self, text, address, temps_list):
-        try:
-            lf = float(temps_list[2])
+        # Basta con recibir el broadcast del disco para confirmar conexión y su IP;
+        # no depende de un sensor en particular (cualquiera de las tres temperaturas
+        # sirve — la termocupla puede venir ausente y las IR presentes, o viceversa).
+        lf = next((t for t in temps_list[:3] if t is not None), None)
+        if lf is not None:
             self.ip_sender = str(address[0])
             print("ip sender: ", self.ip_sender, " temp: ", lf)
             self.txt_connected.set("Disc Connected")
-        except Exception:
+        else:
             print("Error at testing connection...")
             self.txt_connected.set("Disc Disconnected")
         if self.client_tester is not None:
