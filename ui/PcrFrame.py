@@ -921,7 +921,7 @@ class PCRFrame(ttk.Frame):
         secondary_str = f"  ({', '.join(secondary)})" if secondary else ""
         total_msg[0] = (
             f"Temperature: {self.temp:.2f} °C [{src_label}]{secondary_str}{warn}"
-            f"\tState: {self.fase}"
+            f"\nState: {self.fase}"
         )
         if len(total_msg) < 2:
             total_msg.append(msg_elapsed_time)
