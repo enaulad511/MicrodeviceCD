@@ -21,6 +21,7 @@ from templates.constants import (
     serial_port_encoder,
 )
 from templates.utils import (
+    TEMP_SOURCES,
     experiment_dir,
     read_settings_from_file,
     read_temp_source,
@@ -228,6 +229,11 @@ class PCRFrame(ttk.Frame):
         self.pin_pcr = None
         self.temp = 0.0
         self.temp_ts = time.time()
+        # Últimas tres temperaturas crudas del disco por índice del payload UDP
+        # (0=IR amb, 1=IR obj, 2=termocupla). El canal primario se muestra
+        # suavizado (self.temp); los otros dos se muestran crudos en el label
+        # durante la corrida. None = ese sensor no reportó (se muestra "N/A").
+        self.temps_raw: list = [None, None, None]
         # Fuente de temperatura elegida (termocupla por defecto). El índice apunta
         # al campo del payload UDP (0=IR amb, 1=IR obj, 2=termocupla) y es lo que
         # el lazo PID regula. self.temp_source_bad marca "sensor caído" (se sostiene
@@ -866,6 +872,14 @@ class PCRFrame(ttk.Frame):
             lf = self.temp
             self.temp_ts = 0.8
             self.temp_source_bad = True
+        # Guardar los tres canales crudos para el label multi-temp. Se conserva
+        # None tal cual (sensor ausente) para mostrar "N/A"; solo el primario se
+        # suaviza. Escritura de floats simples: mismo patrón thread-unsafe-tolerado
+        # que self.temp (se escribe en el hilo UDP, se lee en _ui_poll_loop).
+        try:
+            self.temps_raw = [temps_list[0], temps_list[1], temps_list[2]]
+        except (IndexError, TypeError):
+            pass
         alpha = 0.3
         self.temp = alpha * lf + (1 - alpha) * self.temp
         self.data_temperature.append(self.temp)
@@ -887,8 +901,27 @@ class PCRFrame(ttk.Frame):
         warn = (
             f"  ⚠ {src_label} unavailable — holding last value" if self.temp_source_bad else ""
         )
+        # Los otros dos canales (no primarios) en crudo, en el orden de
+        # TEMP_SOURCES (Thermocouple, IR Object, IR Ambient). Un canal ausente
+        # (None / no numérico) se muestra como "N/A". Sin ⚠: el aviso queda
+        # reservado para la fuente que regula el PID.
+        secondary = []
+        for _key, label, idx in TEMP_SOURCES:
+            if idx == self.temp_source_idx:
+                continue
+            val = self.temps_raw[idx] if idx < len(self.temps_raw) else None
+            if val is None:
+                shown = "N/A"
+            else:
+                try:
+                    shown = f"{float(val):.1f}"
+                except (TypeError, ValueError):
+                    shown = "N/A"
+            secondary.append(f"{label} {shown}")
+        secondary_str = f"  ({', '.join(secondary)})" if secondary else ""
         total_msg[0] = (
-            f"Temperature: {self.temp:.2f} °C [{src_label}]{warn}\tState: {self.fase}"
+            f"Temperature: {self.temp:.2f} °C [{src_label}]{secondary_str}{warn}"
+            f"\tState: {self.fase}"
         )
         if len(total_msg) < 2:
             total_msg.append(msg_elapsed_time)

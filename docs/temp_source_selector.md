@@ -153,6 +153,37 @@ de un solo sensor) y **no se persiste** en el `temp_source` global de
   intentar el `print` (Tk sí soporta Unicode sin problema) y el `print` cae a
   un fallback ASCII (`encode("ascii","replace")`) si falla.
 
+### 8. PCR: las tres temperaturas en el label durante la corrida
+
+`_ui_poll_loop` arma la primera línea del status (`ui/PcrFrame.py`). Antes
+mostraba **solo** la fuente que regula el PID; ahora añade las **otras dos**
+temperaturas entre paréntesis, sin tocar el lazo térmico:
+
+```
+Temperature: 94.12 °C [Thermocouple]  (IR Object 92.3, IR Ambient 25.1)	State: Reach High temp
+```
+
+- **Primaria suavizada, secundarias crudas.** El número principal sigue siendo
+  `self.temp` (la fuente elegida, suavizada α=0.3, sin cambios: es lo que el PID
+  regula, sección 4). Las dos secundarias muestran el **último valor crudo**
+  recibido — `update_displayed_temperature` ahora guarda los tres campos del
+  payload en `self.temps_raw` (`[t_amb, t_obj, t_tc]` por índice, `None` incluido)
+  además de calcular `self.temp` como siempre.
+- **Orden fijo, salta la primaria.** Se itera `TEMP_SOURCES` (Thermocouple, IR
+  Object, IR Ambient) y se omite el índice primario (`temp_source_idx`), así el
+  par secundario aparece siempre en el mismo orden sin importar cuál regula.
+- **Sensor secundario ausente → `N/A`.** Un canal secundario en `None` (o no
+  numérico) se muestra como `N/A`, **sin** el aviso `⚠`. El
+  `⚠ … holding last value` queda reservado para la fuente que maneja el PID
+  (sección 5): un canal secundario caído no afecta el control, así que no merece
+  alarma. Ambos coexisten en la línea si la primaria además se cae.
+- **Solo el label.** El plot (`update_graph_temperature`) y el CSV
+  (`save_data_temps_file`) siguen guardando **solo** `self.temp` (la primaria).
+  Graficar/persistir las tres es justo lo que cubre Quick Control (sección 7);
+  duplicarlo en PCR no aporta. Como `_ui_poll_loop` solo corre durante la
+  corrida, el display multi-temp aparece únicamente mientras el experimento está
+  activo. Host-only.
+
 ## Orden de los campos (crítico)
 
 | índice payload | campo    | sensor            | clave          | etiqueta      |

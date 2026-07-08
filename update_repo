@@ -103,6 +103,9 @@ else
   done
 fi
 
+chmod +x runAA
+chmod +x update_repo
+
 echo ""
 echo "===== ACTUALIZACIÓN FINALIZADA ====="
 read -p "Presiona Enter para cerrar la terminal..."
