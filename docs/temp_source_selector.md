@@ -160,7 +160,9 @@ mostraba **solo** la fuente que regula el PID; ahora añade las **otras dos**
 temperaturas entre paréntesis, sin tocar el lazo térmico:
 
 ```
-Temperature: 94.12 °C [Thermocouple]  (IR Object 92.3, IR Ambient 25.1)	State: Reach High temp
+Temperature: 94.12 °C [Thermocouple]  (IR Object 92.3, IR Ambient 25.1)
+State: Reach High temp
+Time passed: 2 m 14.3 s -- cycles: 3/30 -- Estimated finish: 41m 8.0s
 ```
 
 - **Primaria suavizada, secundarias crudas.** El número principal sigue siendo
@@ -183,6 +185,14 @@ Temperature: 94.12 °C [Thermocouple]  (IR Object 92.3, IR Ambient 25.1)	State: 
   duplicarlo en PCR no aporta. Como `_ui_poll_loop` solo corre durante la
   corrida, el display multi-temp aparece únicamente mientras el experimento está
   activo. Host-only.
+- **Reconstrucción completa cada tick.** `_ui_poll_loop` arma el status entero
+  (`Temperature…` / `State: …` / `Time passed…`) desde cero en cada iteración;
+  es el único escritor de `svar_status` durante la corrida. El patrón previo
+  leía y partía el valor anterior (`get().split("\n")`) para parchar índices
+  concretos, lo que asumía **una línea por slot**: al poner `State:` en su propia
+  línea (dos `\n` en el status) las líneas viejas dejaban de sobreescribirse y el
+  label crecía sin límite (una línea por tick). Reconstruir sin releer fija el
+  número de líneas.
 
 ## Orden de los campos (crítico)
 

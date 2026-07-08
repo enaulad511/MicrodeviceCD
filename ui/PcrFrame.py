@@ -888,7 +888,6 @@ class PCRFrame(ttk.Frame):
         """Actualiza la UI desde el hilo principal (scheduled via after). Un solo hilo."""
         if not self._ui_poll_active:
             return
-        total_msg = self.svar_status.get().split("\n")
         elapsed_pcr_time = time.time() - self.start_pcr_time
         mins_elapsed = int(elapsed_pcr_time / 60)
         msg_elapsed_time = (
@@ -919,15 +918,16 @@ class PCRFrame(ttk.Frame):
                     shown = "N/A"
             secondary.append(f"{label} {shown}")
         secondary_str = f"  ({', '.join(secondary)})" if secondary else ""
-        total_msg[0] = (
-            f"Temperature: {self.temp:.2f} °C [{src_label}]{secondary_str}{warn}"
-            f"\nState: {self.fase}"
+        # Reconstruir el status completo cada tick: este loop es el único escritor
+        # de svar_status durante la corrida, así que no hace falta leer/partir el
+        # valor previo. El patrón anterior (get().split("\n") + parchar índices)
+        # asumía "una línea por slot"; al mover State a su propia línea, las líneas
+        # viejas dejaban de sobreescribirse y el label crecía sin límite.
+        self.svar_status.set(
+            f"Temperature: {self.temp:.2f} °C [{src_label}]{secondary_str}{warn}\n"
+            f"State: {self.fase}\n"
+            f"{msg_elapsed_time}"
         )
-        if len(total_msg) < 3:
-            total_msg.append(msg_elapsed_time)
-        else:
-            total_msg[1] = msg_elapsed_time
-        self.svar_status.set("\n".join(total_msg))
 
         self._ui_poll_graph_counter += 1
         if self._ui_poll_graph_counter >= 5:
