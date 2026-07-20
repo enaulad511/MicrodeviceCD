@@ -47,3 +47,7 @@ test_*.py
 **.csv
 CLAUDE.md
 *draft.md
+
+# --- Análisis local (notebook + figuras exportadas) ---
+analysis_plots.ipynb
+figures/

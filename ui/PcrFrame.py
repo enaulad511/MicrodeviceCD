@@ -1670,9 +1670,9 @@ class PCRFrame(ttk.Frame):
         settings = read_settings_from_file()
         pidGains = settings.get("pidControllerRPM", {})
         try:
-            ts = float(pidGains.get("ts_pcr", 0.05))
+            ts = float(pidGains.get("ts_pcr", 0.02))
         except Exception:
-            ts = 0.05
+            ts = 0.02
 
         # Nombre del proyecto activo para trazabilidad receta->datos. Si corrió con
         # entradas editadas a mano (snapshot implícito), se marca como sin guardar.

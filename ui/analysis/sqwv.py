@@ -229,7 +229,7 @@ class SqwvAnalysisFrame(ttk.Frame):
         _vsb_main = ttk.Scrollbar(_wrap, orient="vertical")
         _vsb_main.pack(side=ttk.RIGHT, fill=ttk.Y)
         self._main_sc = ttk.Canvas(_wrap, bd=0, highlightthickness=0, yscrollcommand=_vsb_main.set)
-        self._main_sc.pack(side=ttk.LEFT, fill=ttk.BOTH, expand=True)
+        self._main_sc.pack(side=ttk.LEFT, fill=ttk.BOTH, expand=True, padx=(5, 20))
         _vsb_main.configure(command=self._main_sc.yview)
         inner = ttk.Frame(self._main_sc)
         _win_id = self._main_sc.create_window((0, 0), window=inner, anchor="nw")

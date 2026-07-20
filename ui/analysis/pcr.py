@@ -191,7 +191,7 @@ class PcrAnalysisFrame(ttk.Frame):
         _vsb_main = ttk.Scrollbar(_wrap, orient="vertical")
         _vsb_main.pack(side=ttk.RIGHT, fill=ttk.Y)
         self._main_sc = ttk.Canvas(_wrap, bd=0, highlightthickness=0, yscrollcommand=_vsb_main.set)
-        self._main_sc.pack(side=ttk.LEFT, fill=ttk.BOTH, expand=True)
+        self._main_sc.pack(side=ttk.LEFT, fill=ttk.BOTH, expand=True, padx=(5,20))
         _vsb_main.configure(command=self._main_sc.yview)
         inner = ttk.Frame(self._main_sc)
         _win_id = self._main_sc.create_window((0, 0), window=inner, anchor="nw")
@@ -220,8 +220,8 @@ class PcrAnalysisFrame(ttk.Frame):
         self.tree_curves = ttk.Treeview(
             left, columns=("info",), show="tree headings", selectmode="extended"
         )
-        self.tree_curves.heading("#0", text="Experiment")
-        self.tree_curves.heading("info", text="State")
+        self.tree_curves.heading("#0", text="Experiment", anchor="w")
+        self.tree_curves.heading("info", text="State", anchor="w")
         self.tree_curves.column("#0", width=240, anchor="w")
         self.tree_curves.column("info", width=120, anchor="w")
         vsb_c = ttk.Scrollbar(left, orient="vertical", command=self.tree_curves.yview)
@@ -242,12 +242,12 @@ class PcrAnalysisFrame(ttk.Frame):
         bottom.pack(fill=ttk.BOTH, pady=(0, 6))
         cols_r = ("type", "dtemp", "dtime", "rate")
         self.tree_res = ttk.Treeview(bottom, columns=cols_r, show="tree headings", height=12)
-        self.tree_res.heading("#0", text="Experiment / Segment")
+        self.tree_res.heading("#0", text="Experiment / Segment", anchor="w")
         self.tree_res.column("#0", width=300, anchor="w")
         heads = {"type": "Type", "dtemp": "ΔT (°C)", "dtime": "Δt (s)", "rate": "Rate (°C/s)"}
         widths = {"type": 90, "dtemp": 110, "dtime": 110, "rate": 150}
         for c in cols_r:
-            self.tree_res.heading(c, text=heads[c])
+            self.tree_res.heading(c, text=heads[c], anchor="w")
             self.tree_res.column(c, width=widths[c], anchor="w")
         vsb_r = ttk.Scrollbar(bottom, orient="vertical", command=self.tree_res.yview)
         self.tree_res.configure(yscrollcommand=vsb_r.set)
