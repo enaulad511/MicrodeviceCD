@@ -285,6 +285,11 @@ class PCRFrame(ttk.Frame):
         self.last_cycle_duration = 0.0
         self.avg_cycle_duration = 0.0
         self.ext_time_final = 0.0
+        # Marca del arranque de la extensión final (0.0 = aún no empieza; el reloj
+        # de pared nunca es 0). La estimación la usa para contar hacia abajo el
+        # segmento final en vez de caer al tiempo teórico ya agotado por el error
+        # acumulado entre ciclos.
+        self.start_final_ext_time = 0.0
         self.stop_event_motor = None
         self.stop_udp_listenner = None
         self.thread_experiment = None
@@ -1066,8 +1071,21 @@ class PCRFrame(ttk.Frame):
                 + FLUOR_READ_TOTAL_S  # lectura de fluorescencia final pendiente
             )
         else:
-            # Ya pasaron todos los ciclos: solo queda la extensión final.
-            remaining = self.teorical_time_pcr - elapsed_pcr_time
+            # Ya pasaron todos los ciclos: solo queda el segmento final (hold de
+            # extensión + lectura de fluorescencia final). NO usar el tiempo
+            # teórico aquí: para este punto el error acumulado entre ciclos suele
+            # dejar elapsed_pcr_time > teorical_time_pcr, y el max(0,...) mostraría
+            # 0 durante toda la extensión final. En su lugar se cuenta hacia abajo
+            # un cronómetro fresco anclado al inicio de la extensión final. Si la
+            # extensión final está desactivada (ext_time_final<=0), el max(0,...)
+            # deja solo la lectura final. start_final_ext_time puede ser 0.0 (no
+            # fijado) en la ventana mínima entre el fin de los ciclos y el arranque
+            # del segmento; ahí se muestra el total sin descontar.
+            total_final = max(0.0, self.ext_time_final) + FLUOR_READ_TOTAL_S
+            if self.start_final_ext_time > 0.0:
+                remaining = total_final - (time.time() - self.start_final_ext_time)
+            else:
+                remaining = total_final
         return max(0.0, remaining)
 
     def init_temperature_graph(self):
@@ -1148,11 +1166,11 @@ class PCRFrame(ttk.Frame):
         self.ax.set_xlim(start, n - 1)
 
         # Recalcular solo el eje Y
-        # self.ax.relim()
-        # self.ax.autoscale_view(scalex=False, scaley=True)
+        self.ax.relim()
+        self.ax.autoscale_view(scalex=False, scaley=True)
 
         # Eje Y fijo
-        self.ax.set_ylim(19, 105)
+        # self.ax.set_ylim(19, 105)
 
         self.canvas.draw_idle()
 
@@ -1659,6 +1677,8 @@ class PCRFrame(ttk.Frame):
         self.last_cycle_duration = 0.0
         self.avg_cycle_duration = 0.0
         self.ext_time_final = ext_time_final
+        # Reset para esta corrida: se fija al iniciar la extensión final (más abajo).
+        self.start_final_ext_time = 0.0
         self.teorical_time_pcr = (
             (time_high + time_low + ext_time) * 1.2 * cycles
             + denat_time
@@ -1819,6 +1839,10 @@ class PCRFrame(ttk.Frame):
             if not self.stop_udp_listenner.is_set():
                 print("PCR cycles complete, reading fluorescence")
                 self.fase = "Extension"
+                # Ancla del cronómetro del segmento final (hold + lectura final).
+                # Se pone siempre, incluso si el hold se omite (ext_time_final<=0),
+                # para que la lectura final igual cuente hacia abajo.
+                self.start_final_ext_time = time.time()
                 if not _skip(ext_time_final):
                     self._hold_phase("h_ext", ext_temp, ext_time_final, ts)
                 else:
