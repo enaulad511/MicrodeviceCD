@@ -8,6 +8,16 @@
 #     (200m) + loop principal; cada paquete trae e/i (sin tiempo: el host sintetiza
 #     el eje t). Topes por corrida como eis: max(max_time_s*1000, MAX_EXPERIMENT_MS)
 #     y max(idle_s*1000, MAX_IDLE_MS) (idle_s lo calcula el host del t_interval).
+#   - emisividad del MLX90614 fijada en EEPROM al arrancar (MLX_EMISSIVITY = 0.96,
+#     escritura idempotente con PEC en mlx90614.set_emissivity; rige tras el
+#     siguiente POR). Se reporta en el hello UDP como "mlx_emissivity".
+#     Ver docs/mlx90614_emisividad.md del repo host.
+#   - [29/07/2026] fiabilidad de lectura del MLX: el driver ya no devuelve -273.15
+#     ante un EIO (lanza OSError -> el except de read_temperatures_payload lo
+#     traduce a None, que el host sabe manejar) y valida el flag de error del
+#     sensor; aqui se agrega _note_mlx_read: contador de racha con print por
+#     FLANCO (entrada en fallo / recuperacion), no por fallo, para no ahogar el
+#     REPL a 80 ms de cadencia. Ver docs/mlx90614_fiabilidad_lectura.md.
 # v1.8: base v1.7 + EIS Fase 2 (ver docs/eis_impedancia.md seccion 7 del repo host).
 #   - rama "eis": reenvia las claves nuevas del payload (scan_type, bandwidth,
 #     E_begin/E_step/E_break/E_dir, t_run/t_interval) a construct_eis_script, que
@@ -173,6 +183,25 @@ try:
 except Exception:
     sensor_temp = None
 
+# --- Emisividad del MLX90614 (EEPROM) ---
+# El sensor sale de fabrica con epsilon = 1.00 (cuerpo negro); la superficie real
+# que ve el IR no lo es, asi que el objeto se lee frio. Se fija a MLX_EMISSIVITY en
+# EEPROM. La escritura es IDEMPOTENTE (solo si el valor guardado difiere), asi que
+# esto puede correr en cada arranque sin desgastar la EEPROM. El chip carga la
+# EEPROM en el POR -> el valor nuevo rige desde el siguiente encendido.
+# Ver docs/mlx90614_emisividad.md del repo host.
+MLX_EMISSIVITY = 0.96
+mlx_emissivity = None  # emisividad efectiva leida del sensor (diagnostico)
+if sensor_temp is not None:
+    try:
+        if sensor_temp.set_emissivity(MLX_EMISSIVITY):
+            print("MLX90614: emisividad escrita ->", MLX_EMISSIVITY, "(rige tras reinicio)")
+        else:
+            print("MLX90614: emisividad ya en", MLX_EMISSIVITY)
+        mlx_emissivity = round(sensor_temp.read_emissivity(), 4)
+    except Exception as e:
+        print("MLX90614: no se pudo fijar la emisividad:", e)
+
 # =========================
 # --- MCP23017: canales de electrodos del EmStat ---
 # =========================
@@ -292,16 +321,44 @@ def send_emstat_line(obj: dict):
         pass
 
 
-# ---- Payload de temperaturas (igual que antes) ----
+# ---- Payload de temperaturas ----
+_mlx_fail_streak = 0  # lecturas del MLX fallidas consecutivas (0 = sano)
+
+
+def _note_mlx_read(err):
+    """Contabiliza el resultado de las lecturas del MLX e imprime SOLO en los flancos.
+
+    El driver ya no imprime nada (lanza OSError y el payload sale con None, que el
+    host traduce a 'sostener ultimo valor' + aviso en la UI). Pero el host ve QUE
+    fallo, no cuantas veces seguidas ni con que error, y esa racha es justo lo que
+    distingue un NACK aislado por EMI del motor de un sensor muerto. Por flanco y
+    no por fallo: a 80 ms de cadencia, imprimir cada uno ahoga el REPL (~12
+    lineas/s) exactamente cuando se esta depurando algo mas."""
+    global _mlx_fail_streak
+    if err is None:
+        if _mlx_fail_streak > 0:
+            print("MLX90614: lectura recuperada tras", _mlx_fail_streak, "fallos")
+        _mlx_fail_streak = 0
+    else:
+        _mlx_fail_streak += 1
+        if _mlx_fail_streak == 1:
+            print("MLX90614: lectura fallida:", err)
+
+
 def read_temperatures_payload():
+    err = None
     try:
         t_obj = round(sensor_temp.read_object_temp(), 2) if sensor_temp else "NS"
-    except Exception:
+    except Exception as e:
         t_obj = None
+        err = e
     try:
         t_amb = round(sensor_temp.read_ambient_temp(), 2) if sensor_temp else "NS"
-    except Exception:
+    except Exception as e:
         t_amb = None
+        err = e
+    if sensor_temp:
+        _note_mlx_read(err)
 
     t_tc = None
     try:
@@ -859,6 +916,7 @@ def main_loop():
             "baud_emstat": UART_EMSTAT_BAUD,
             "sample_ms": sample_ms,
             "emstat_connected": IS_EMSTAT_CONNECTED,
+            "mlx_emissivity": mlx_emissivity,
         }
     )
     while True:

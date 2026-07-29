@@ -12,6 +12,12 @@ arma así:
 line = f"{t_amb}:{t_obj}:{t_tc}"   # cualquier campo puede venir "None" / "NS"
 ```
 
+> La calibración de emisividad del MLX90614 (`ε = 0.96`, afecta sólo a `t_obj`)
+> vive en el firmware del Pico: [mlx90614_emisividad.md](mlx90614_emisividad.md).
+> El camino de fallo de una lectura del IR (EIO, flag de error → `None` →
+> "sostener último valor") está en
+> [mlx90614_fiabilidad_lectura.md](mlx90614_fiabilidad_lectura.md).
+
 Hasta ahora `Drivers/ClientUDP.py` sólo parseaba el tercer campo (termocupla) y
 lo reenviaba. Este cambio agrega un **selector de fuente** para que el usuario
 elija cuál de las tres temperaturas usan los experimentos, en tres lugares:

@@ -33,14 +33,14 @@ Diagramas detallados (pines, baudios, flujos de control/datos/abort):
 
 | Archivo | Rol |
 |---|---|
-| `emstat_wifi_v1.9.py` | **Firmware actual del Pico** (`main.py` en la placa): v1.8 + rama `"ca"` (Chronoamperometry: escalón de potencial, equilibrio opcional, topes `max_ms`/`idle_ms` por corrida). Ver [docs/ca_cronoamperometria.md](../../docs/ca_cronoamperometria.md). |
+| `emstat_wifi_v1.9.py` | **Firmware actual del Pico** (`main.py` en la placa): v1.8 + rama `"ca"` (Chronoamperometry: escalón de potencial, equilibrio opcional, topes `max_ms`/`idle_ms` por corrida) + emisividad del MLX90614 fijada a 0.96 en el arranque. Ver [docs/ca_cronoamperometria.md](../../docs/ca_cronoamperometria.md) y [docs/mlx90614_emisividad.md](../../docs/mlx90614_emisividad.md). |
 | `emstat_wifi_v1.8.py` | Versión previa (flasheada 2026-06-11): EIS Fase 2 (5 modos, topes `max_ms`/`idle_ms` por corrida, fin normal con `'*'` o `'+'`). Ver [docs/eis_impedancia.md §7](../../docs/eis_impedancia.md). |
 | `emstat_wifi_v1.7.py` | Versión previa: EIS Fase 1 + `seq` para recuperación UDP. |
 | `emstat_wifi_v1.6.py` | Versión previa: abort en caliente + robustez de lectura. |
 | `emstat_wifi_v1.5.py` / `v1.4.py` | Versiones históricas. |
 | `EmstatDrivers.py` | Constructores MethodSCRIPT (cv/sqwv/eis/ca) + clase `EmstatPico` (UART). |
-| `mlx90614.py` | Driver I2C del sensor de temperatura MLX90614. |
-| `protocol/emstat_wifi_v1.6.md` | Doc del protocolo del firmware (fuente de verdad del contrato). Carpeta `protocol/` y no `docs/` porque `.gitignore` excluye cualquier carpeta `docs`. |
+| `mlx90614.py` | Driver I2C del sensor de temperatura MLX90614. Incluye escritura SMBus **con PEC** (`write16`) y `set_emissivity()` idempotente sobre EEPROM `0x24` ([docs/mlx90614_emisividad.md](../../docs/mlx90614_emisividad.md)); `read16` reintenta 1 vez ante EIO y `read_temp` **lanza** (ya no devuelve -273.15) y valida el flag de error del sensor ([docs/mlx90614_fiabilidad_lectura.md](../../docs/mlx90614_fiabilidad_lectura.md)). |
+| `protocol/emstat_wifi_v1.6.md` | Doc del protocolo del firmware (fuente de verdad del contrato). Se llama `protocol/` y no `docs/` por herencia: se creía que `.gitignore` excluía cualquier carpeta `docs`, pero no existe tal regla (solo `CLAUDE.md` está ignorado). |
 
 ## `seq`: recuperación de datos perdidos en TCP vía UDP (v1.7)
 
@@ -110,5 +110,5 @@ Tras editar el original y flashear, refresca este espejo:
 
 ```powershell
 Copy-Item ~\MicroPython\DiscPCB\*.py firmware\DiscPCB\ -Force
-Copy-Item ~\MicroPython\DiscPCB\docs\*.md firmware\DiscPCB\docs\ -Force
+Copy-Item ~\MicroPython\DiscPCB\docs\*.md firmware\DiscPCB\protocol\ -Force
 ```
