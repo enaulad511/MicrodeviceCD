@@ -16,10 +16,20 @@ from ui.analysis.common import plt
 # ---------------------------------------------------------------------------
 # Modelo de datos (PCR)
 # ---------------------------------------------------------------------------
+# Cadencia nominal del firmware del disco (sample_ms = 80) cuando se escribieron
+# los CSV que NO llevan columna t_s. Es una constante HISTÓRICA, no un parámetro
+# de operación: la cadencia real la fija el firmware y desde t_s se mide sola, así
+# que esto solo sirve para reconstruir el eje de archivos viejos. Sigue siendo una
+# suposición — el campo dt de la pestaña es editable justo por eso.
+# Ver docs/pcr_eje_tiempo.md.
+PCR_LEGACY_DT_S = 0.08
+
+
 class PcrSegment:
     """Un tramo de dos puntos (por índice de muestra) sobre la curva de temperatura.
 
-    La tasa se deriva con el dt global de la pestaña: rate = ΔT / (Δidx·dt) [°C/s].
+    La tasa se deriva del eje temporal del experimento: rate = ΔT / Δt [°C/s], donde
+    Δt sale del tiempo real medido (t_s) o, en archivos viejos, del dt sintético.
     Signo positivo → calentamiento; negativo → enfriamiento (clasificación por signo,
     decisión Q7).
     """
@@ -32,14 +42,23 @@ class PcrSegment:
 class PcrExperiment:
     """Una corrida PCR: serie de temperatura (densa) + fotodetector por ciclo.
 
-    La temperatura guardada por PcrFrame no lleva eje temporal (solo muestras); aquí
-    el tiempo se sintetiza con el dt global (X = idx·dt, decisión Q1). Los segmentos de
-    tasa se pican a mano sobre la curva de temperatura y se guardan como pares de índices.
+    Desde la columna `t_s`, PcrFrame guarda el **tiempo real** de adquisición de cada
+    muestra y el eje X sale de ahí. Los CSV anteriores no la traen: para ellos el
+    tiempo se sintetiza con el dt global de la pestaña (X = idx·dt). Esa resolución es
+    **por experimento** (`xs()`), para que una corrida vieja y una nueva superpuestas
+    en el mismo eje sigan siendo cada una honesta. Ver docs/pcr_eje_tiempo.md.
+
+    Los segmentos de tasa se pican a mano sobre la curva de temperatura y se guardan
+    como pares de **índices** (no de tiempos), así que los bundles exportados antes de
+    este cambio siguen importando igual.
     """
 
-    def __init__(self, name, temps, photo=None, temps_secondary=None):
+    def __init__(self, name, temps, photo=None, temps_secondary=None, times=None):
         self.name = name
         self.temps = np.asarray(temps, dtype=float)
+        # Eje temporal real (s desde el inicio de la corrida), alineado por muestra
+        # con `temps`. Vacío = corrida sin t_s (CSV viejo) → eje sintético.
+        self.times = np.asarray(times if times is not None else [], dtype=float)
         # Canal secundario del par (overlay de solo lectura, ver docs/pcr_analisis.md
         # §8): se dibuja tenue junto al primario pero NO participa del picado de
         # segmentos ni de las tasas. Vacío = corrida de 1 canal (CSV viejo / sin par).
@@ -50,16 +69,35 @@ class PcrExperiment:
         self.visible = True
         self.segments = []  # list[PcrSegment]
 
+    def xs(self, dt, n=None):
+        """Eje X en segundos de las primeras `n` muestras (por defecto, toda la curva).
+
+        Devuelve el tiempo REAL medido cuando el experimento lo trae (columna `t_s` o
+        corrida en vivo); si no, lo sintetiza con el `dt` global de la pestaña. Este es
+        el único punto donde se decide entre uno y otro.
+        """
+        if n is None:
+            n = self.temps.size
+        if self.times.size:
+            if self.times.size >= n:
+                return self.times[:n]
+            # Defensivo: serie de tiempo más corta que la curva. El loader alinea las
+            # series, así que no debería pasar; se completa para no romper el dibujo.
+            pad = self.times[-1] + dt * np.arange(1, n - self.times.size + 1)
+            return np.concatenate([self.times, pad])
+        return np.arange(n) * dt
+
     def seg_metrics(self, seg, dt):
         """(t_a, t_b, T_a, T_b, dT, dt_s, rate) o None si los índices no son válidos."""
         n = self.temps.size
         ia, ib = seg.ia, seg.ib
         if n == 0 or not (0 <= ia < n) or not (0 <= ib < n) or ia == ib:
             return None
-        t_a, t_b = ia * dt, ib * dt
+        xs = self.xs(dt, n)
+        t_a, t_b = float(xs[ia]), float(xs[ib])
         t_from, t_to = float(self.temps[ia]), float(self.temps[ib])
         d_temp = t_to - t_from
-        d_time = (ib - ia) * dt
+        d_time = t_b - t_a
         rate = d_temp / d_time if d_time != 0 else float("nan")
         return (t_a, t_b, t_from, t_to, d_temp, d_time, rate)
 
@@ -134,8 +172,10 @@ class PcrAnalysisFrame(ttk.Frame):
         # --- Toolbar fila 2: dt global + edición de segmentos ---
         toolbar2 = ttk.Frame(self)
         toolbar2.pack(side=ttk.TOP, fill=ttk.X, padx=6, pady=(0, 6))
-        ttk.Label(toolbar2, text="Sampling dt (s):").pack(side=ttk.LEFT, padx=(0, 4))
-        self.dt_var = ttk.StringVar(value="0.05")
+        # Solo rige a los experimentos sin tiempo real (CSV anteriores a la columna
+        # t_s); los nuevos traen su propio eje y lo ignoran.
+        ttk.Label(toolbar2, text="Legacy dt (s):").pack(side=ttk.LEFT, padx=(0, 4))
+        self.dt_var = ttk.StringVar(value=f"{PCR_LEGACY_DT_S:.9g}")
         dt_entry = ttk.Entry(toolbar2, textvariable=self.dt_var, width=8)
         dt_entry.pack(side=ttk.LEFT)
         dt_entry.bind("<Return>", lambda _e: self._redraw())
@@ -322,6 +362,9 @@ class PcrAnalysisFrame(ttk.Frame):
             temps = list(getattr(pcr, "data_temperature", []) or [])
             temps2 = list(getattr(pcr, "data_temperature_secondary", []) or [])
             photo = list(getattr(pcr, "data_photodetector", []) or [])
+            # Eje temporal real de la corrida en vivo. Se recorta a la longitud de la
+            # curva: la ventana puede abrirse justo entre dos append.
+            times = list(getattr(pcr, "data_time", []) or [])[: len(temps)]
         except Exception:
             return
         if not temps and not photo:
@@ -329,26 +372,24 @@ class PcrAnalysisFrame(ttk.Frame):
         base = getattr(pcr, "active_project_name", None) or "last_run"
         name = self._unique_name(f"{base} (live)")
         self.experiments.append(
-            PcrExperiment(name=name, temps=temps, photo=photo, temps_secondary=temps2)
+            PcrExperiment(
+                name=name, temps=temps, photo=photo, temps_secondary=temps2, times=times
+            )
         )
 
     def _default_dt(self):
-        # dt por defecto: ts del lazo PCR en settings.json (decisión Q1); editable.
-        try:
-            from templates.utils import read_settings_from_file
-
-            settings = read_settings_from_file()
-            v = float(settings.get("pidControllerRPM", {}).get("ts_pcr", 0.05))
-            return v if v > 0 else 0.05
-        except Exception:
-            return 0.05
+        # dt por defecto para experimentos SIN tiempo real: la cadencia nominal del
+        # firmware, no `pidControllerRPM.ts_pcr`. Ese ts es el periodo del lazo PI y
+        # nunca fue la cadencia de muestreo — sembrar el eje con él dejaba las tasas
+        # °C/s ~20% bajas. Ver docs/pcr_eje_tiempo.md.
+        return PCR_LEGACY_DT_S
 
     def _dt(self):
         try:
             v = float(self.dt_var.get())
-            return v if v > 0 else 0.05
+            return v if v > 0 else PCR_LEGACY_DT_S
         except (ValueError, TypeError):
-            return 0.05
+            return PCR_LEGACY_DT_S
 
     def _window(self):
         """Ventana de muestras global (solo vista) → (lo, hi) índices inclusivos, o
@@ -427,7 +468,7 @@ class PcrAnalysisFrame(ttk.Frame):
         for exp in self.experiments:
             if not exp.visible or exp.temps.size == 0:
                 continue
-            xs = np.arange(exp.temps.size) * dt
+            xs = exp.xs(dt)
             (line,) = self.ax_temp.plot(xs, exp.temps, linewidth=1.0, label=exp.name)
             self._temp_lines[id(exp)] = line
             any_t = True
@@ -435,7 +476,7 @@ class PcrAnalysisFrame(ttk.Frame):
             # experimento, SIN leyenda (no duplica entradas). No participa del
             # picado ni de las tasas — es un cross-check visual del par.
             if exp.temps_secondary.size:
-                xs2 = np.arange(exp.temps_secondary.size) * dt
+                xs2 = exp.xs(dt, exp.temps_secondary.size)
                 self.ax_temp.plot(
                     xs2, exp.temps_secondary,
                     color=line.get_color(), linewidth=0.8, alpha=0.4,
@@ -455,7 +496,7 @@ class PcrAnalysisFrame(ttk.Frame):
             and self._pending_exp.visible
             and 0 <= self._pending_ia < self._pending_exp.temps.size
         ):
-            xa = self._pending_ia * dt
+            xa = float(self._pending_exp.xs(dt)[self._pending_ia])
             ya = float(self._pending_exp.temps[self._pending_ia])
             self.ax_temp.scatter([xa], [ya], marker="x", color="black", s=90, zorder=7)
         if any_t:
@@ -471,8 +512,8 @@ class PcrAnalysisFrame(ttk.Frame):
         # segmentos sobre una región ampliada.
         lo, hi = self._window()
         if any_t and lo is not None and hi is not None:
-            self.ax_temp.set_xlim(lo * dt, hi * dt)
             ymins, ymaxs = [], []
+            xlos, xhis = [], []
             for exp in self.experiments:
                 if not exp.visible or exp.temps.size == 0:
                     continue
@@ -480,6 +521,14 @@ class PcrAnalysisFrame(ttk.Frame):
                 if sl.size:
                     ymins.append(float(sl.min()))
                     ymaxs.append(float(sl.max()))
+                    # La ventana se expresa en MUESTRAS pero el eje va en segundos, y
+                    # cada experimento tiene su propia base de tiempo: el rango visible
+                    # es la unión de los tramos [lo, hi] de cada curva.
+                    xe = exp.xs(dt)
+                    xlos.append(float(xe[lo]))
+                    xhis.append(float(xe[min(hi, exp.temps.size - 1)]))
+            if xlos and max(xhis) > min(xlos):
+                self.ax_temp.set_xlim(min(xlos), max(xhis))
             if ymins:
                 ymin, ymax = min(ymins), max(ymaxs)
                 pad = (ymax - ymin) * 0.05 or 0.5
@@ -521,7 +570,8 @@ class PcrAnalysisFrame(ttk.Frame):
                 rate = m[6]
                 lo, hi = (seg.ia, seg.ib) if seg.ia <= seg.ib else (seg.ib, seg.ia)
                 ys = exp.temps[lo : hi + 1]
-                xs = (np.arange(lo, hi + 1) - lo) * dt
+                xe = exp.xs(dt)
+                xs = xe[lo : hi + 1] - xe[lo]
                 color = f"C{gi % 10}"
                 gi += 1
                 label = f"{exp.name}/seg{k} {rate:.3g}"
@@ -669,7 +719,7 @@ class PcrAnalysisFrame(ttk.Frame):
         n = exp.temps.size
         if n == 0:
             return None
-        xs = np.arange(n) * self._dt()
+        xs = exp.xs(self._dt(), n)
         idxs = np.arange(n)
         # Con ventana activa el picado se restringe a las muestras visibles para que
         # A/B caigan sobre lo que se ve en la región ampliada.
@@ -867,12 +917,13 @@ class PcrAnalysisFrame(ttk.Frame):
         """Serie(s) de temperatura: primera fila = prefijo/metadatos (se salta), luego
         un valor por fila (decisión Q5/executive: el prefijo no se parsea).
 
-        Devuelve `(primario, secundario)`. El CSV nuevo de PcrFrame trae dos columnas
-        `[primario, secundario]`; los CSV viejos tienen una sola y el secundario sale
-        vacío. Ambas listas quedan alineadas por muestra (una fila con primario no
-        parseable descarta también su secundario). Si ninguna muestra trajo secundario
-        (todo NaN), se devuelve `[]` para no dibujar overlay."""
-        vals, vals2 = [], []
+        Devuelve `(primario, secundario, tiempos)`. El CSV actual de PcrFrame trae tres
+        columnas `[primario, secundario, t_s]`; los anteriores tienen dos o una sola, y
+        lo ausente sale vacío. Las listas quedan alineadas por muestra (una fila con
+        primario no parseable descarta también su secundario y su tiempo). Si ninguna
+        muestra trajo secundario (todo NaN) se devuelve `[]` para no dibujar overlay; si
+        ninguna trajo tiempo, `[]` deja que el eje se sintetice con el dt de la pestaña."""
+        vals, vals2, vals3 = [], [], []
         try:
             with open(path, newline="") as f:
                 reader = csv.reader(f, skipinitialspace=True)
@@ -892,12 +943,30 @@ class PcrAnalysisFrame(ttk.Frame):
                             vals2.append(float("nan"))
                     else:
                         vals2.append(float("nan"))
+                    # 3ª columna = t_s, tiempo real de adquisición en segundos desde el
+                    # inicio de la corrida (ver docs/pcr_eje_tiempo.md).
+                    if len(row) > 2 and row[2].strip() != "":
+                        try:
+                            vals3.append(float(row[2]))
+                        except (ValueError, TypeError):
+                            vals3.append(float("nan"))
+                    else:
+                        vals3.append(float("nan"))
         except Exception as e:
             self._set_status(f"Error loading temperature: {e}")
             return None
+        if not any(v == v for v in vals3):  # todo NaN → CSV viejo, eje sintético
+            vals3 = []
+        else:
+            # Un NaN suelto solo puede venir del desfase de a lo más una muestra que
+            # cubre el zip_longest del writer: se recorta ahí y las tres series quedan
+            # alineadas, que es lo que `xs()` asume.
+            k = next((i for i, v in enumerate(vals3) if v != v), None)
+            if k is not None:
+                vals, vals2, vals3 = vals[:k], vals2[:k], vals3[:k]
         if not any(v == v for v in vals2):  # todo NaN → sin overlay
             vals2 = []
-        return vals, vals2
+        return vals, vals2, vals3
 
     def _read_photo_csv(self, path):
         vals = []
@@ -929,7 +998,7 @@ class PcrAnalysisFrame(ttk.Frame):
         result = self._read_temp_csv(path)
         if result is None:
             return
-        temps, temps2 = result
+        temps, temps2, times = result
         if not temps:
             self._set_status("No temperature data parsed from file.")
             return
@@ -947,13 +1016,22 @@ class PcrAnalysisFrame(ttk.Frame):
                 photo_note = "; no photo sibling"
         name = self._unique_name(os.path.splitext(base)[0].replace("_temperature_data", ""))
         self.experiments.append(
-            PcrExperiment(name=name, temps=temps, photo=photo, temps_secondary=temps2)
+            PcrExperiment(
+                name=name, temps=temps, photo=photo, temps_secondary=temps2, times=times
+            )
         )
         self._refresh_tree()
         self._redraw()
         sec_note = f"; +secondary {len(temps2)}" if temps2 else ""
+        # Se avisa cuál de los dos ejes se está usando: en un CSV viejo las tasas
+        # dependen del campo "Legacy dt" y eso tiene que ser visible, no implícito.
+        t_note = (
+            f"; real time axis ({times[-1] - times[0]:.1f} s)"
+            if times
+            else "; no t_s column — synthetic axis from Legacy dt"
+        )
         self._set_status(
-            f"Loaded '{name}' ({len(temps)} temp samples{sec_note}{photo_note})."
+            f"Loaded '{name}' ({len(temps)} temp samples{sec_note}{t_note}{photo_note})."
         )
 
     # --------------------------------------------------------- Export / Import
@@ -987,6 +1065,10 @@ class PcrAnalysisFrame(ttk.Frame):
                     # round-trip. Bundles viejos no lo traen → import sin overlay.
                     for i, v in enumerate(exp.temps_secondary):
                         w.writerow(["temp2", exp.name, i, "", "", f"{v:.9g}"])
+                    # Eje temporal real: registro 'time' para round-trip. Los bundles
+                    # anteriores no lo traen → el experimento importado cae al dt legado.
+                    for i, v in enumerate(exp.times):
+                        w.writerow(["time", exp.name, i, "", "", f"{v:.9g}"])
                     for i, v in enumerate(exp.photo):
                         w.writerow(["photo", exp.name, i, "", "", f"{v:.9g}"])
                     for seg in exp.segments:
@@ -1048,6 +1130,7 @@ class PcrAnalysisFrame(ttk.Frame):
         dt_val = None
         win_lo = win_hi = None
         temps, temps2, photos, segs, order = {}, {}, {}, {}, []
+        times = {}
         try:
             with open(path, newline="", encoding="utf-8") as f:
                 reader = csv.reader(f, skipinitialspace=True)
@@ -1087,6 +1170,7 @@ class PcrAnalysisFrame(ttk.Frame):
                     if name not in temps:
                         temps[name] = {}
                         temps2[name] = {}
+                        times[name] = {}
                         photos[name] = {}
                         segs[name] = []
                         order.append(name)
@@ -1098,6 +1182,11 @@ class PcrAnalysisFrame(ttk.Frame):
                     elif rec == "temp2":
                         try:
                             temps2[name][int(float(cell(row, "i")))] = float(cell(row, "value"))
+                        except (ValueError, TypeError):
+                            pass
+                    elif rec == "time":
+                        try:
+                            times[name][int(float(cell(row, "i")))] = float(cell(row, "value"))
                         except (ValueError, TypeError):
                             pass
                     elif rec == "photo":
@@ -1119,11 +1208,15 @@ class PcrAnalysisFrame(ttk.Frame):
         added = 0
         for name in order:
             tmap, pmap, t2map = temps[name], photos[name], temps2[name]
+            xmap = times.get(name, {})
             tarr = [tmap[k] for k in sorted(tmap)]
             parr = [pmap[k] for k in sorted(pmap)]
             t2arr = [t2map[k] for k in sorted(t2map)]
+            xarr = [xmap[k] for k in sorted(xmap)]
             uname = self._unique_name(name)
-            exp = PcrExperiment(name=uname, temps=tarr, photo=parr, temps_secondary=t2arr)
+            exp = PcrExperiment(
+                name=uname, temps=tarr, photo=parr, temps_secondary=t2arr, times=xarr
+            )
             for ia, ib in segs[name]:
                 exp.segments.append(PcrSegment(ia, ib))
             self.experiments.append(exp)

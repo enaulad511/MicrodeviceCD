@@ -204,18 +204,23 @@ par IR Object ↔ Termocupla: el **primario** (regula el PID) y el **secundario*
   IR Object(1) si el primario es termocupla(2), y termocupla(2) en cualquier otro caso.
 - **Secundario: mismo modelo que el primario.** `update_displayed_temperature`
   lee ambos canales, los suaviza (α=0.3) y los anexa **alineados por índice** a
-  `data_temperature` y `data_temperature_secondary` (misma longitud). Cada canal
+  `data_temperature` y `data_temperature_secondary` (misma longitud), junto con el
+  instante de recepción en `data_time`. Cada canal
   arranca en **20°** (seed) y ante sensor caído **sostiene el último valor** (igual
   que el primario para el PID). El 20° solo aparece si ese canal nunca entregó
   lectura. El PID **nunca** recibe 20°: sigue con hold-last + frescura (seguridad).
 - **Plot de dos curvas.** `init_temperature_graph` crea `self.line` (primario) y
   `self.line_secondary`, coloreadas por canal (`PCR_TEMP_CHANNEL_COLORS`: Termocupla
   rojo, IR Object naranja) con leyenda. `update_graph_temperature` refresca ambas
-  en la misma ventana deslizante.
-- **CSV de dos columnas.** `save_data_temps_file` escribe `[primario, secundario]`
-  por fila (fila 0 sigue siendo el `prefix_row`, extendido con `cols: <pri>|<sec>`).
-  El loader del análisis (`ui/analysis/pcr.py:_read_temp_csv`) lee `row[0]`
-  (primario), así que la 2ª columna es retrocompatible.
+  en la misma ventana deslizante, sobre un **eje X en segundos reales** compartido
+  (`data_time`, ver [pcr_eje_tiempo.md](pcr_eje_tiempo.md)); la ventana se sigue
+  contando en muestras.
+- **CSV de tres columnas.** `save_data_temps_file` escribe
+  `[primario, secundario, t_s]` por fila (fila 0 sigue siendo el `prefix_row`, extendido
+  con `cols: <pri>|<sec>|t_s`, `start:` y el resumen de cadencia). El loader del análisis
+  (`ui/analysis/pcr.py:_read_temp_csv`) lee por posición y tolera columnas ausentes, así
+  que las columnas 2ª y 3ª son retrocompatibles. La 3ª (`t_s`, tiempo real de
+  adquisición) se agregó en [pcr_eje_tiempo.md](pcr_eje_tiempo.md).
 - **Watchdog "ambas caídas".** Si ni el primario ni el secundario entregan lectura
   fresca por `PCR_TEMP_DEAD_S` (5 s) seguidos, `_check_temp_watchdog` (llamado desde
   `_ui_poll_loop`, hilo principal) señaliza los stop-events y el hilo del experimento

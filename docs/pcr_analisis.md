@@ -18,7 +18,8 @@ UI: [ui/analysis/pcr.py](../ui/analysis/pcr.py) → `PcrAnalysisFrame`
   `PCRFrame` tiene datos en memoria, la pestaña PCR queda **seleccionada por defecto** y
   la corrida en curso se **siembra** como un experimento `"<proyecto> (live)"`
   (`_seed_from_pcr`, decisión Q3). La siembra lee `data_temperature` /
-  `data_photodetector` (mismas listas del plot en vivo de PcrFrame).
+  `data_photodetector` / `data_time` (mismas listas del plot en vivo de PcrFrame), así
+  que la corrida sembrada trae su **eje temporal real**.
 - **Electroquímica** (`EventEmstatFrame`): pasa `pcr_frame=None`, así que la pestaña PCR
   arranca vacía y no se auto-selecciona.
 
@@ -26,29 +27,41 @@ Además de la siembra, siempre se puede **Load CSV** e **Import** para acumular 
 experimentos (como las otras pestañas). Los atajos `Ctrl+L` / `Ctrl+I` del shell se
 enrutan a la pestaña activa (`_active_load` / `_active_import`).
 
-## 2. Eje temporal sintético (dt global)
+## 2. Eje temporal (real medido, con fallback sintético)
 
-La temperatura que guarda PcrFrame **no lleva eje temporal**: `save_data_temps_file`
-escribe una fila de prefijo/metadatos y luego, por muestra, **dos columnas**
-`[primario, secundario]` (antes una sola), sin timestamp. Por eso el tiempo se
-**sintetiza** con un `dt` global editable (decisión Q1): `X = índice_de_muestra · dt`
-[s]. **No se tocó el guardado de PcrFrame** más allá de la 2ª columna; ver §8 para el
-canal secundario.
+> **Superseded.** Este doc describía un eje 100 % sintético sembrado de
+> `pidControllerRPM.ts_pcr`. Ese `ts` es el periodo del lazo PI, **nunca fue la cadencia
+> de muestreo**, y usarlo dejaba las tasas °C/s ~20 % bajas. Ver
+> [pcr_eje_tiempo.md](pcr_eje_tiempo.md) para el porqué completo y el impacto en datos
+> históricos.
 
-- Campo "Sampling dt (s)" en la barra; default desde `settings.json` →
-  `pidControllerRPM.ts_pcr` (`_default_dt`, fallback 0.05).
-- El botón "↻ Apply dt" (o Enter en el campo) recomputa todo. Un solo `dt` aplica a
-  **todos** los experimentos (decisión Q11); al importar un bundle, su `dt` restaura el
-  campo.
+`save_data_temps_file` escribe una fila de prefijo/metadatos y luego, por muestra, **tres
+columnas** `[primario, secundario, t_s]`, donde `t_s` es el **tiempo real** de recepción
+en segundos desde el inicio de la corrida. Cuando existe, el eje X sale de ahí.
+
+Los CSV anteriores no traen esa columna: para ellos el tiempo se **sintetiza** con el `dt`
+global (`X = índice_de_muestra · dt`). La resolución es **por experimento**
+(`PcrExperiment.xs()`), para que una corrida vieja y una nueva superpuestas en el mismo
+eje sigan siendo cada una honesta.
+
+- Campo **"Legacy dt (s)"** en la barra (antes "Sampling dt"): solo rige a los
+  experimentos **sin** tiempo real. Default `PCR_LEGACY_DT_S = 0.08` (cadencia nominal
+  del firmware), **no** `ts_pcr`.
+- El botón "↻ Apply dt" (o Enter en el campo) recomputa todo; los experimentos con `t_s`
+  lo ignoran. Al importar un bundle, su `dt` restaura el campo.
+- `load_csv` avisa en el status cuál de los dos ejes se está usando ("real time axis" vs
+  "no t_s column — synthetic axis from Legacy dt").
 
 ## 3. Modelo de datos
 
-- `PcrExperiment` ([pcr.py:31](../ui/analysis/pcr.py#L31)): `temps`
-  (np.array denso), `photo` (np.array, delta por ciclo), `visible`, y `segments`.
-- `PcrSegment` ([pcr.py:18](../ui/analysis/pcr.py#L18)): par de
-  **índices de muestra** `(ia, ib)`. La tasa se deriva con el `dt` global en
-  `PcrExperiment.seg_metrics` → `rate = ΔT / (Δidx·dt)` [°C/s]. Signo **positivo →
-  calentamiento**, negativo → enfriamiento (clasificación por signo, decisión Q7).
+- `PcrExperiment`: `temps` (np.array denso), `times` (eje real; vacío = sin `t_s`),
+  `photo` (np.array, delta por ciclo), `visible`, y `segments`. `xs(dt, n)` es el único
+  punto que decide entre tiempo real y sintético.
+- `PcrSegment`: par de **índices de muestra** `(ia, ib)` — no de tiempos, así que los
+  bundles exportados antes del cambio de eje siguen importando igual. La tasa se deriva
+  del eje del experimento en `PcrExperiment.seg_metrics` → `rate = ΔT / Δt` [°C/s], con
+  `Δt = t_b − t_a`. Signo **positivo → calentamiento**, negativo → enfriamiento
+  (clasificación por signo, decisión Q7).
 
 ## 4. Cuatro ejes apilados (con scroll)
 
@@ -72,7 +85,7 @@ canal secundario.
 ### 4.1 Slices extraídos (`_draw_extracted`)
 
 El corte usa índices ordenados `lo=min(ia,ib)`, `hi=max(ia,ib)` y re-zerea el tiempo al
-punto más temprano (`xs = (arange(lo,hi+1)-lo)·dt`). La clasificación calentamiento vs
+punto más temprano (`xs = exp.xs(dt)[lo:hi+1] − xs[lo]`). La clasificación calentamiento vs
 enfriamiento usa el signo de `rate` de `seg_metrics`, que es **invariante al orden de los
 dos clics** (numerador y denominador cambian de signo juntos), así que da igual si se picó
 B antes que A. Solo se dibuja la línea del corte real (sin cuerda ni marcadores). No hay
@@ -99,7 +112,9 @@ dibujando dentro de la ventana).
   limpia los campos.
 - **Eje Y reajustado a la banda visible**: en `_redraw` ([pcr.py](../ui/analysis/pcr.py))
   las curvas y **todos** los segmentos se dibujan en coordenadas absolutas; con ventana
-  activa se fija `xlim=[lo·dt, hi·dt]` y se calcula `ylim` **solo** del corte visible
+  activa el `xlim` es la **unión** de los tramos `[lo, hi]` de cada curva visible
+  (`min(xs[lo])`, `max(xs[hi])` — cada experimento puede tener su propia base de tiempo)
+  y se calcula `ylim` **solo** del corte visible
   (`temps[lo:hi+1]` de los experimentos visibles, +5 % de margen). Matplotlib recorta a la
   caja del eje, así que un segmento parcialmente fuera muestra su porción visible y el
   resto se corta (la tabla y las tasas conservan **todos** los segmentos). La ventana
@@ -142,9 +157,10 @@ Como las demás pestañas, permite cargar **múltiples** experimentos. `export_r
 escribe dos archivos (decisión Q10):
 
 - **`<name>.csv`** — bundle **re-importable**, formato largo con columna `record`:
-  `dt` (una fila global), `temp` (experimento, índice, valor), `photo` (experimento,
-  ciclo, valor) y `segment` (experimento, `a`, `b`). `import_analysis` reconstruye cada
-  experimento **con sus segmentos** y restaura el `dt`.
+  `dt` (una fila global), `temp` (experimento, índice, valor), `temp2` (secundario),
+  `time` (eje temporal real, ausente en bundles anteriores → cae al Legacy dt), `photo`
+  (experimento, ciclo, valor) y `segment` (experimento, `a`, `b`). `import_analysis`
+  reconstruye cada experimento **con sus segmentos** y restaura el `dt`.
 - **`<name>_rates.csv`** — resumen legible (solo lectura, no se reimporta): una fila por
   segmento (tiempos, temperaturas, ΔT, Δt, tasa) + `mean_/std_` por tipo y experimento.
 

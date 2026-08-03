@@ -185,6 +185,11 @@ el lazo PI (donde `error` se reordenó para computarse antes de la guarda).
 El **hold** (`hold_temperature`) queda intacto: usa su propio umbral estricto (`ts`), no el
 `m_age` difuso.
 
+> **`ts` (`pidControllerRPM.ts_pcr`) es el periodo del lazo PI y el umbral de vejez del
+> hold. NO es la cadencia de muestreo** — esa la fija el firmware del disco (`sample_ms`)
+> y el host la mide por corrida. Confundirlas dejaba las tasas °C/s del análisis ~20 %
+> bajas; ver [pcr_eje_tiempo.md](pcr_eje_tiempo.md).
+
 > **Nota de umbrales:** el docstring de `_fuzzy_gains` menciona 15°C/5°C, pero el código
 > real usa **5°C/2°C** — esos son los cortes efectivos, replicados en `_fuzzy_max_age`.
 

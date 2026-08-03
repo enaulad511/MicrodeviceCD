@@ -341,6 +341,10 @@ class PCRFrame(ttk.Frame):
         self.canvas = None  # Para almacenar el gráfico incrustado
         self.callback_generate_profile()  # Generar el gráfico inicial
         self.data_temperature = []
+        # Eje temporal real de la curva: segundos transcurridos desde el inicio de
+        # la corrida, uno por muestra (ver docs/pcr_eje_tiempo.md). Se anexa en
+        # lockstep con las dos curvas de temperatura.
+        self.data_time: list = []
         self.data_photodetector = []
         self.data_photodetector_series = []
 
@@ -953,9 +957,20 @@ class PCRFrame(ttk.Frame):
         alpha = 0.3
         self.temp = alpha * lf + (1 - alpha) * self.temp
         self.temp_secondary = alpha * s_lf + (1 - alpha) * self.temp_secondary
-        # Anexados alineados por índice (misma longitud): primario y secundario.
+        # Anexados alineados por índice (misma longitud): primario, secundario y
+        # el instante de recepción del datagrama.
+        #
+        # El tiempo sale de temps_list[3] —que estampa ClientUDP al recibir— y NO
+        # de self.temp_ts: cuando el sensor primario falla, temp_ts se fija arriba
+        # en 0.8 como centinela de "lectura antiquísima" para que el PID desconfíe,
+        # y usarlo aquí mandaría ese punto a 1970.
+        try:
+            t_rx = float(temps_list[3])
+        except (IndexError, TypeError, ValueError):
+            t_rx = time.time()
         self.data_temperature.append(self.temp)
         self.data_temperature_secondary.append(self.temp_secondary)
+        self.data_time.append(t_rx - self.start_pcr_time)
 
     def _check_temp_watchdog(self):
         """Detiene el experimento si ni el primario ni el secundario del par
@@ -1093,6 +1108,7 @@ class PCRFrame(ttk.Frame):
             self.canvas.get_tk_widget().destroy()
         self.data_temperature = []  # Datos acumulados
         self.data_temperature_secondary = []
+        self.data_time = []
         self.data_photodetector = []
         self.data_photodetector_series = []
         # Reset del estado de captura/watchdog del par para la nueva corrida.
@@ -1119,7 +1135,7 @@ class PCRFrame(ttk.Frame):
             color=PCR_TEMP_CHANNEL_COLORS.get(s_label), label=s_label,
         )
         self.ax.set_title("Temperature (°C)")
-        self.ax.set_xlabel("Samples")
+        self.ax.set_xlabel("Time (s)")
         self.ax.set_ylabel("°C")
         self.ax.legend(fontsize=7, loc="upper right")
         self.ax.grid(True)
@@ -1146,24 +1162,34 @@ class PCRFrame(ttk.Frame):
         if n == 0:
             return
 
-        # Índice inicial de la ventana
+        # Índice inicial de la ventana. La ventana sigue contándose en MUESTRAS:
+        # windows_pcr es un tope de puntos dibujados (costo de render), no una
+        # duración. Lo único que cambia respecto al eje por índice es la escala.
         start = max(0, n - window_size)
 
-        # Datos visibles
+        # Datos visibles. data_time se anexa junto a las curvas, pero el paro puede
+        # caer entre appends: se recorta al mínimo común en vez de asumir igualdad.
         y = self.data_temperature[start:n]
-        x = range(start, n)
+        x = self.data_time[start:n]
+        m = min(len(x), len(y))
+        if m == 0:
+            return
+        x, y = x[:m], y[:m]
 
         self.line.set_xdata(x)
         self.line.set_ydata(y)
 
         # Curva secundaria del par (misma ventana; se anexa alineada al primario).
         if hasattr(self, "line_secondary"):
-            ys = self.data_temperature_secondary[start:n]
-            self.line_secondary.set_xdata(range(start, start + len(ys)))
+            ys = self.data_temperature_secondary[start:n][:m]
+            self.line_secondary.set_xdata(x[: len(ys)])
             self.line_secondary.set_ydata(ys)
 
-        # Mantener ventana deslizante en X
-        self.ax.set_xlim(start, n - 1)
+        # Ventana deslizante en X: extremos de tiempo REAL del tramo visible. El
+        # guard evita el warning de matplotlib con límites idénticos (1 muestra, o
+        # dos datagramas fechados en el mismo instante).
+        if x[-1] > x[0]:
+            self.ax.set_xlim(x[0], x[-1])
 
         # Recalcular solo el eje Y
         self.ax.relim()
@@ -1190,6 +1216,27 @@ class PCRFrame(ttk.Frame):
         self.ax_photo.set_ylim(ymin - margin, ymax + margin)
         self.canvas.draw_idle()
 
+    def _cadence_summary(self):
+        """Resumen de la cadencia real de muestreo, para la fila de metadata.
+
+        La cadencia no es un parámetro del host: la fija el firmware del disco
+        (sample_ms) y la degradan las pérdidas del broadcast UDP — el cliente
+        descarta datagramas viejos a propósito (SO_RCVBUF chico en ClientUDP).
+        Se mide de la propia serie y se archiva pegada al dato para no volver a
+        suponerla. dt_max es el que delata stalls largos: si sale en segundos,
+        hay huecos reales en la curva y toca revisar el buffer de recepción.
+        """
+        t = self.data_time
+        if len(t) < 2:
+            return f"-n: {len(t)}"
+        deltas = sorted(t[i + 1] - t[i] for i in range(len(t) - 1))
+        dt_mean = (t[-1] - t[0]) / (len(t) - 1)
+        p95 = deltas[min(len(deltas) - 1, int(0.95 * len(deltas)))]
+        return (
+            f"-dt_mean: {dt_mean:.4f}-dt_p95: {p95:.4f}-dt_max: {deltas[-1]:.4f}"
+            f"-n: {len(t)}-span: {t[-1] - t[0]:.1f}"
+        )
+
     def save_data_temps_file(self):
         import csv
         from itertools import zip_longest
@@ -1203,14 +1250,23 @@ class PCRFrame(ttk.Frame):
         with open(filename, "w", newline="") as file:
             writer = csv.writer(file)
             # Fila 0: prefijo/metadata (una celda; incluye la identidad de columnas
-            # "cols: <primario>|<secundario>"). El loader del análisis la salta y
-            # lee la columna 0 (primario), así que agregar la 2ª columna es seguro.
-            writer.writerow([self.prefix_row])
-            # Dos columnas alineadas por muestra: [primario, secundario]. Se anexan
-            # juntas en update_displayed_temperature; zip_longest cubre un desfase
-            # de a lo más una muestra si el paro cayó entre ambos append.
-            for p, s in zip_longest(self.data_temperature, self.data_temperature_secondary):
-                writer.writerow([p if p is not None else "", s if s is not None else ""])
+            # "cols: <primario>|<secundario>|t_s" y el resumen de cadencia medido).
+            # El loader del análisis la salta y lee por posición, así que crecer la
+            # fila de metadata y agregar columnas al final es seguro.
+            writer.writerow([self.prefix_row + self._cadence_summary()])
+            # Tres columnas alineadas por muestra: [primario, secundario, t_s]. Se
+            # anexan juntas en update_displayed_temperature; zip_longest cubre un
+            # desfase de a lo más una muestra si el paro cayó entre los append.
+            for p, s, t in zip_longest(
+                self.data_temperature, self.data_temperature_secondary, self.data_time
+            ):
+                writer.writerow(
+                    [
+                        p if p is not None else "",
+                        s if s is not None else "",
+                        f"{t:.4f}" if t is not None else "",
+                    ]
+                )
         print(f"Data saved to {filename}")
         filename_photo = f"{save_dir}/{slug}_photodetector_data_{ts}.csv"
         with open(filename_photo, "w", newline="") as file:
@@ -1289,6 +1345,14 @@ class PCRFrame(ttk.Frame):
             f" initial spin {initia_spin_time} s",
         )
         print(msg)
+        # Origen único del eje temporal (plot, label de estado y estimación de
+        # tiempo restante comparten este reloj). Se fija AQUÍ, en el hilo principal
+        # y antes de que existan el hilo del experimento y el cliente UDP: si se
+        # fijara dentro de experiment_pcr —que arranca el cliente antes— un
+        # datagrama que llegara en esa ventana se fecharía contra el origen de la
+        # corrida anterior y dejaría un punto a miles de segundos, ya grabado en
+        # el CSV. Ver docs/pcr_eje_tiempo.md.
+        self.start_pcr_time = time.time()
         self.init_temperature_graph()
         self._ui_poll_graph_counter = 0
         self._ui_poll_active = True
@@ -1703,13 +1767,18 @@ class PCRFrame(ttk.Frame):
         # Identidad de columnas del CSV de temperatura: col0=primario, col1=secundario.
         primary_label = temp_source_label(self.temp_source)
         secondary_label = temp_source_label_by_index(self._secondary_idx())
+        # OJO: "ts" es el periodo del lazo PI, NO la cadencia de muestreo (esa la
+        # manda el firmware del disco y ahora se mide: ver _cadence_summary).
+        # "start" ancla el eje t_s —que es relativo— al reloj de pared, para poder
+        # correlacionar esta corrida con otros logs sin pagar una columna por muestra.
         prefix_col = (
             f"project: {project_label}"
             f"-high_temp: {high_temp}-low_temp: {low_temp}-time_high: {time_high}"
             f"-time_low: {time_low}-cycles: {cycles}-rpm: {rpm}"
             f"-denat_temp: {denat_temp}-denat_time: {denat_time}-ts: {ts}"
             f"-temp_source: {primary_label}"
-            f"-cols: {primary_label}|{secondary_label}"
+            f"-start: {datetime.fromtimestamp(self.start_pcr_time).isoformat(timespec='seconds')}"
+            f"-cols: {primary_label}|{secondary_label}|t_s"
         )
         self.temp = 20.0
         self.client_temperature = UdpClient(
@@ -1729,7 +1798,8 @@ class PCRFrame(ttk.Frame):
         self.fase = "Initial"
         from Drivers.DriverStepperSys import DriverStepperSys, spinMotorRPM_ramped
 
-        self.start_pcr_time = time.time()
+        # start_pcr_time NO se fija aquí: lo hace callback_start_experiment antes
+        # de crear este hilo y el cliente UDP (ver allí el porqué).
 
         try:
             # Start-gate: no arrancar el ciclado si al inicio ninguno de los dos
