@@ -45,6 +45,7 @@ resources/pcr_projects.json
 files_test/
 test_*.py
 **.csv
+files/**.xlsx
 CLAUDE.md
 *draft.md
 

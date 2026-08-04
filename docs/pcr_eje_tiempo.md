@@ -66,6 +66,22 @@ que cambió es el `set_xlim`, que ahora toma los extremos de tiempo del tramo vi
 Si algún día se quiere "los últimos N segundos", la puerta limpia es una clave nueva
 (`window_pcr_s`), no reciclar esta.
 
+### 4.1 La ventana deslizante gana al zoom (compromiso aceptado)
+
+La gráfica en vivo tiene ahora una barra de navegación de matplotlib debajo del canvas
+(`_mount_canvas`, montada también en la preview del perfil para que el panel no salte de
+alto al cambiar de figura). **Durante la corrida el zoom no sobrevive**: cada muestra
+`update_graph_temperature` reimpone `set_xlim` sobre el tramo visible y reautoescala la Y,
+así que la vista vuelve al instante.
+
+Se decidió **no** mitigarlo. La alternativa evaluada era congelar `set_xlim`/autoscale
+mientras `toolbar.mode` no estuviera vacío (hay precedente en `ui/analysis/eis.py`, que ya
+consulta ese atributo), pero se prefirió no meter una gráfica que se queda quieta según un
+estado de botón poco visible. La barra sirve para la preview, para inspeccionar al terminar
+la corrida y para `Save`; para analizar a fondo está la pestaña de análisis, con su ventana
+de muestras y su propio toolbar. Si el zoom en vivo llega a hacer falta, el guard por
+`toolbar.mode` es el cambio de dos líneas que lo resuelve.
+
 ## 5. Unidades: segundos
 
 `set_xlabel("Time (s)")`, igual que la preview teórica del perfil. Es la unidad de las

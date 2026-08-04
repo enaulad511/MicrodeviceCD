@@ -221,6 +221,26 @@ par IR Object ↔ Termocupla: el **primario** (regula el PID) y el **secundario*
   (`ui/analysis/pcr.py:_read_temp_csv`) lee por posición y tolera columnas ausentes, así
   que las columnas 2ª y 3ª son retrocompatibles. La 3ª (`t_s`, tiempo real de
   adquisición) se agregó en [pcr_eje_tiempo.md](pcr_eje_tiempo.md).
+- **Checkbox "Show secondary" (solo vista).** Un `ttk.Checkbutton` junto al combobox
+  de fuente (`_build_source_selector`, `row=0, column=2`) esconde la curva secundaria
+  sin tocar nada más: el canal se sigue leyendo, suavizando, mostrando en el status
+  label y escribiendo en la columna 1 del CSV — el loader del análisis lee esa columna
+  **por posición**, así que dejar de escribirla desalinearía `t_s`. Arranca visible
+  (comportamiento de siempre) y **no se persiste**; a diferencia del combobox **no se
+  deshabilita durante la corrida** (es vista, y corriendo es cuando más se usa).
+  Tres detalles que no son opcionales:
+  - `init_temperature_graph` **recrea** las `Line2D` en cada Start, así que re-aplica
+    `set_visible(self.show_secondary.get())` — si no, la curva reaparecería al arrancar.
+  - `relim()` cuenta las líneas ocultas por defecto: tanto el callback como
+    `update_graph_temperature` usan **`relim(visible_only=True)`**, o el eje Y seguiría
+    estirado por la curva escondida (IR Ambient ~25 °C vs primario ~95 °C). Reescalar
+    es justamente el motivo de esconderla.
+  - La leyenda se reconstruye con solo los handles visibles (`_refresh_temp_legend`):
+    anunciar un canal que no se dibuja confunde más que ayuda.
+  A la curva oculta se le siguen poniendo datos, para que volver a mostrarla sea
+  instantáneo y no espere a la siguiente muestra. El overlay equivalente en la pestaña
+  de análisis tiene su propio checkbox, independiente
+  ([pcr_analisis.md](pcr_analisis.md) §8).
 - **Watchdog "ambas caídas".** Si ni el primario ni el secundario entregan lectura
   fresca por `PCR_TEMP_DEAD_S` (5 s) seguidos, `_check_temp_watchdog` (llamado desde
   `_ui_poll_loop`, hilo principal) señaliza los stop-events y el hilo del experimento

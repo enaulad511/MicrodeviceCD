@@ -169,7 +169,7 @@ class PcrAnalysisFrame(ttk.Frame):
             toolbar_b, text="👁 Show/Hide", bootstyle="info", command=self.toggle_visibility
         ).pack(side=ttk.LEFT, padx=3)
 
-        # --- Toolbar fila 2: dt global + edición de segmentos ---
+        # --- Toolbar fila 2: dt global + vista (ventana de muestras, secundario) ---
         toolbar2 = ttk.Frame(self)
         toolbar2.pack(side=ttk.TOP, fill=ttk.X, padx=6, pady=(0, 6))
         # Solo rige a los experimentos sin tiempo real (CSV anteriores a la columna
@@ -201,25 +201,48 @@ class PcrAnalysisFrame(ttk.Frame):
             toolbar2, text="⤢ Full", bootstyle="secondary-outline", command=self._clear_window
         ).pack(side=ttk.LEFT, padx=(4, 0))
 
-        ttk.Separator(toolbar2, orient=ttk.VERTICAL).pack(side=ttk.LEFT, fill=ttk.Y, padx=8)
-
-        self.btn_add = ttk.Button(
+        # Overlay del canal secundario (global, solo vista): una sola bandera para
+        # todos los experimentos. Los datos se conservan y se siguen exportando en
+        # el bundle ("temp2"); esto solo decide si se dibuja.
+        self.show_secondary = ttk.BooleanVar(value=True)
+        ttk.Checkbutton(
             toolbar2,
+            text="Show secondary",
+            variable=self.show_secondary,
+            command=self._redraw,
+            style="Custom.TCheckbutton",
+        ).pack(side=ttk.LEFT, padx=(10, 0))
+
+        # Lectura por hover (tiempo / temperatura del eje de temperatura).
+        self.lbl_cross = ttk.Label(toolbar2, text="", anchor="e")
+        self.lbl_cross.pack(side=ttk.RIGHT, padx=6)
+
+        # --- Toolbar fila 3: edición de segmentos ---
+        toolbar3 = ttk.Frame(self)
+        toolbar3.pack(side=ttk.TOP, fill=ttk.X, padx=6, pady=(0, 6))
+        self.btn_add = ttk.Button(
+            toolbar3,
             text="➕ Add segment",
             bootstyle="secondary-outline",
             command=self._toggle_add_mode,
         )
         self.btn_add.pack(side=ttk.LEFT, padx=3)
         ttk.Button(
-            toolbar2, text="➖ Remove segment", bootstyle="warning-outline", command=self.remove_segment
+            toolbar3, text="➖ Remove segment", bootstyle="warning-outline", command=self.remove_segment
         ).pack(side=ttk.LEFT, padx=3)
         ttk.Button(
-            toolbar2, text="🧹 Clear segments", bootstyle="warning-outline", command=self.clear_segments
+            toolbar3, text="🧹 Clear segments", bootstyle="warning-outline", command=self.clear_segments
         ).pack(side=ttk.LEFT, padx=3)
 
-        # Lectura por hover (tiempo / temperatura del eje de temperatura).
-        self.lbl_cross = ttk.Label(toolbar2, text="", anchor="e")
-        self.lbl_cross.pack(side=ttk.RIGHT, padx=6)
+        # Barra de navegación de matplotlib (zoom/pan/home/save). Vive FUERA del
+        # área con scroll: la figura mide ~1700 px y, colgada bajo el canvas,
+        # obligaba a recorrer los 6 ejes para alcanzar el zoom y volver a subir.
+        # Aquí queda siempre a la vista, pegada al eje de temperatura (el primero),
+        # y sirve a cualquier eje —el zoom actúa sobre aquel donde se arrastra—.
+        # El contenedor es persistente: _reset_plot_canvas destruye el toolbar en
+        # cada redibujo y lo recrea dentro.
+        self._mpl_toolbar_host = ttk.Frame(self)
+        self._mpl_toolbar_host.pack(side=ttk.TOP, fill=ttk.X, padx=6, pady=(0, 4))
 
         # Status bar (fijo abajo, fuera del scroll)
         self.lbl_status = ttk.Label(self, text="Ready.", anchor="w")
@@ -335,7 +358,10 @@ class PcrAnalysisFrame(ttk.Frame):
         self.ax_cool.grid(True)
         self.canvas = FigureCanvasTkAgg(self.fig, self._plot_host)
         self.canvas.get_tk_widget().pack(fill=ttk.BOTH, expand=True)
-        self.toolbar_mpl = NavigationToolbar2Tk(self.canvas, self._plot_host, pack_toolbar=False)
+        # El toolbar cuelga del contenedor fijo, no del área con scroll.
+        self.toolbar_mpl = NavigationToolbar2Tk(
+            self.canvas, self._mpl_toolbar_host, pack_toolbar=False
+        )
         self.toolbar_mpl.pack(fill=ttk.X)
         self.canvas.mpl_connect("motion_notify_event", self._on_hover)
         # Re-arma la captura de clics si "Add segment" seguía activo (el canvas se
@@ -474,8 +500,9 @@ class PcrAnalysisFrame(ttk.Frame):
             any_t = True
             # Overlay del secundario (solo lectura): tenue, mismo color que su
             # experimento, SIN leyenda (no duplica entradas). No participa del
-            # picado ni de las tasas — es un cross-check visual del par.
-            if exp.temps_secondary.size:
+            # picado ni de las tasas — es un cross-check visual del par. El
+            # checkbox solo lo esconde: los datos siguen en el experimento.
+            if self.show_secondary.get() and exp.temps_secondary.size:
                 xs2 = exp.xs(dt, exp.temps_secondary.size)
                 self.ax_temp.plot(
                     xs2, exp.temps_secondary,

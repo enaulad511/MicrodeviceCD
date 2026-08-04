@@ -8,7 +8,7 @@ from tkinter import filedialog
 
 import matplotlib.pyplot as plt
 import ttkbootstrap as ttk
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 from ttkbootstrap.scrolled import ScrolledFrame
 
 from Drivers.ClientUDP import UdpClient
@@ -265,6 +265,11 @@ class PCRFrame(ttk.Frame):
         # ante sensor caído sostiene el último valor (igual que el primario).
         self.temp_secondary = 20.0
         self.data_temperature_secondary: list = []
+        # Visibilidad de la curva secundaria: SOLO vista. El canal se sigue
+        # leyendo, suavizando y escribiendo en la columna 1 del CSV aunque esté
+        # oculto (el lector del análisis lee esa columna por posición). Arranca
+        # visible —el comportamiento de siempre— y no se persiste.
+        self.show_secondary = ttk.BooleanVar(value=True)
         # Timestamp de la última lectura VÁLIDA por canal (para el watchdog de
         # "ambas caídas") y bandera de que ya llegó al menos una lectura buena.
         self._chan_last_good: list = [0.0, 0.0, 0.0]
@@ -338,7 +343,13 @@ class PCRFrame(ttk.Frame):
         self.profile_frame.grid(row=3, column=0, padx=(2, 20), pady=10, sticky="nswe")
         self.profile_frame.configure(style="Custom.TLabelframe")
 
-        self.canvas = None  # Para almacenar el gráfico incrustado
+        self.canvas: "FigureCanvasTkAgg | None" = None  # Para almacenar el gráfico incrustado
+        # Barra de navegación de matplotlib (zoom/pan/save) y las dos curvas del
+        # eje de temperatura. Las curvas solo existen mientras esté montada la
+        # figura EN VIVO: la preview del perfil no las tiene (ver _mount_canvas).
+        self.toolbar: "NavigationToolbar2Tk | None" = None
+        self.line: "plt.Line2D | None" = None
+        self.line_secondary: "plt.Line2D | None" = None
         self.callback_generate_profile()  # Generar el gráfico inicial
         self.data_temperature = []
         # Eje temporal real de la curva: segundos transcurridos desde el inicio de
@@ -376,6 +387,16 @@ class PCRFrame(ttk.Frame):
         self.cbo_temp_source.set(temp_source_label(self.temp_source))
         self.cbo_temp_source.grid(row=0, column=1, padx=5, pady=2, sticky="w")
         self.cbo_temp_source.bind("<<ComboboxSelected>>", self._on_temp_source_changed)
+        # Visibilidad de la curva secundaria, pegada al selector porque primario y
+        # secundario son el mismo par. A diferencia del combobox, NO se deshabilita
+        # durante la corrida: es vista, y corriendo es cuando más se usa.
+        ttk.Checkbutton(
+            frame,
+            text="Show secondary",
+            variable=self.show_secondary,
+            command=self._on_show_secondary_changed,
+            style="Custom.TCheckbutton",
+        ).grid(row=0, column=2, padx=(15, 5), pady=2, sticky="w")
 
     def _on_temp_source_changed(self, event=None):
         if self.cbo_temp_source is None:
@@ -390,6 +411,56 @@ class PCRFrame(ttk.Frame):
         self.temp_source_idx = temp_source_index(self.temp_source)
         self.temp_source_bad = False
         write_temp_source(self.temp_source)
+
+    def _on_show_secondary_changed(self):
+        """Muestra/oculta la curva secundaria del eje de temperatura.
+
+        Es puramente vista: el canal se sigue leyendo, suavizando, mostrando en
+        el status label y guardando en el CSV. Solo aplica sobre la figura EN
+        VIVO (la preview del perfil no tiene curvas de datos).
+        """
+        if self.canvas is None or self.line_secondary is None:
+            return
+        self.line_secondary.set_visible(self.show_secondary.get())
+        self._refresh_temp_legend()
+        # Ver la nota de update_graph_temperature: sin visible_only la curva
+        # escondida seguiría fijando el rango del eje Y.
+        self.ax.relim(visible_only=True)
+        self.ax.autoscale_view(scalex=False, scaley=True)
+        self.canvas.draw_idle()
+
+    def _refresh_temp_legend(self):
+        """Leyenda del eje de temperatura, solo con las curvas visibles: anunciar
+        un canal que no se está dibujando confunde más que ayuda."""
+        handles = [
+            ln for ln in (self.line, self.line_secondary) if ln is not None and ln.get_visible()
+        ]
+        if handles:
+            self.ax.legend(handles=handles, fontsize=7, loc="upper right")
+
+    def _mount_canvas(self, fig):
+        """Monta `fig` en el panel de la gráfica, reemplazando lo que hubiera.
+
+        `self.canvas` lo comparten dos figuras —la preview teórica del perfil y
+        la gráfica en vivo— y cada una destruía el widget de la otra por su
+        cuenta. Centralizarlo aquí evita que la barra de navegación quede
+        huérfana al cambiar de figura (destruir el canvas no destruye su
+        toolbar) y da un único sitio donde montar ambos widgets.
+        """
+        if self.toolbar is not None:
+            self.toolbar.destroy()
+            self.toolbar = None
+        if self.canvas is not None:
+            self.canvas.get_tk_widget().destroy()
+        self.canvas = FigureCanvasTkAgg(fig, master=self.profile_frame)
+        self.canvas.get_tk_widget().pack(fill="both", expand=True)
+        # Barra debajo del canvas (mismo orden que EventEmstatFrame). OJO: durante
+        # la corrida el zoom se pierde en la siguiente muestra, porque
+        # update_graph_temperature reimpone la ventana deslizante en cada tick;
+        # es un compromiso aceptado (ver docs/pcr_eje_tiempo.md).
+        self.toolbar = NavigationToolbar2Tk(self.canvas, self.profile_frame, pack_toolbar=False)
+        self.toolbar.pack(fill="x")
+        self.canvas.draw()
 
     def _secondary_idx(self) -> int:
         """Índice del canal secundario: el complemento del par {IR Object(1),
@@ -898,12 +969,12 @@ class PCRFrame(ttk.Frame):
             ax.set_title(f"PCR Profile ({cycles} cycles)")
             ax.grid(True)
 
-            if self.canvas:
-                self.canvas.get_tk_widget().destroy()
-
-            self.canvas = FigureCanvasTkAgg(fig, master=self.profile_frame)
-            self.canvas.draw()
-            self.canvas.get_tk_widget().pack(fill="both", expand=True)
+            # La preview no tiene curvas de datos: soltar las referencias evita
+            # que el checkbox o el poll de la gráfica toquen Line2D de una figura
+            # ya destruida.
+            self.line = None
+            self.line_secondary = None
+            self._mount_canvas(fig)
 
         except ValueError:
             print("Error: Verifique los valores ingresados.")
@@ -1104,8 +1175,6 @@ class PCRFrame(ttk.Frame):
         return max(0.0, remaining)
 
     def init_temperature_graph(self):
-        if self.canvas is not None:
-            self.canvas.get_tk_widget().destroy()
         self.data_temperature = []  # Datos acumulados
         self.data_temperature_secondary = []
         self.data_time = []
@@ -1134,10 +1203,13 @@ class PCRFrame(ttk.Frame):
             [], [], marker="o", markersize=2,
             color=PCR_TEMP_CHANNEL_COLORS.get(s_label), label=s_label,
         )
+        # Las Line2D se recrean en cada corrida: hay que re-aplicarles el estado
+        # del checkbox o la secundaria reaparecería al pulsar Start.
+        self.line_secondary.set_visible(self.show_secondary.get())
         self.ax.set_title("Temperature (°C)")
         self.ax.set_xlabel("Time (s)")
         self.ax.set_ylabel("°C")
-        self.ax.legend(fontsize=7, loc="upper right")
+        self._refresh_temp_legend()
         self.ax.grid(True)
 
         (self.line_photo,) = self.ax_photo.plot([], [], marker="o", color="purple", linewidth=1.2)
@@ -1146,16 +1218,17 @@ class PCRFrame(ttk.Frame):
         self.ax_photo.set_ylabel("V")
         self.ax_photo.grid(True)
 
-        self.canvas = FigureCanvasTkAgg(self.fig, master=self.profile_frame)
-        self.canvas.get_tk_widget().pack(fill="both", expand=True)
-        self.canvas.draw()
+        self._mount_canvas(self.fig)
 
     def update_graph_temperature(self, window_size=None):
         if window_size is None:
             settings = read_settings_from_file()
             windows_pcr = settings.get("windows_pcr", 2500)
             window_size = int(windows_pcr)
-        if self.canvas is None:
+        # self.line es None mientras esté montada la preview del perfil (que no
+        # tiene curvas de datos): regenerarla a media corrida no debe reventar
+        # el poll de la gráfica.
+        if self.canvas is None or self.line is None:
             return
 
         n = len(self.data_temperature)
@@ -1180,7 +1253,9 @@ class PCRFrame(ttk.Frame):
         self.line.set_ydata(y)
 
         # Curva secundaria del par (misma ventana; se anexa alineada al primario).
-        if hasattr(self, "line_secondary"):
+        # Se le siguen poniendo datos aunque esté oculta: así el checkbox la
+        # devuelve al instante, sin esperar a la siguiente muestra.
+        if self.line_secondary is not None:
             ys = self.data_temperature_secondary[start:n][:m]
             self.line_secondary.set_xdata(x[: len(ys)])
             self.line_secondary.set_ydata(ys)
@@ -1191,8 +1266,10 @@ class PCRFrame(ttk.Frame):
         if x[-1] > x[0]:
             self.ax.set_xlim(x[0], x[-1])
 
-        # Recalcular solo el eje Y
-        self.ax.relim()
+        # Recalcular solo el eje Y. visible_only=True porque relim() cuenta por
+        # defecto las líneas ocultas: sin esto, esconder la secundaria dejaría
+        # el eje estirado por ella (IR Ambient ~25 °C vs primario ~95 °C).
+        self.ax.relim(visible_only=True)
         self.ax.autoscale_view(scalex=False, scaley=True)
 
         # Eje Y fijo

@@ -94,6 +94,23 @@ datos nuevos en el export: los slices se reconstruyen de `temps` + índices de s
 Como las otras pestañas, el canvas se **recrea** entero en cada redibujo (`_reset_plot_canvas`),
 lo que re-arma el modo "Add segment" si seguía activo.
 
+### 4.3 Barra de navegación de matplotlib (fuera del scroll)
+
+El `NavigationToolbar2Tk` **no** cuelga del canvas: vive en `self._mpl_toolbar_host`, un
+frame propio empaquetado bajo `toolbar2` y **fuera del área con scroll**. Colgado bajo el
+canvas —como en las otras pestañas— quedaba al pie de una figura de ~1700 px: había que
+recorrer los 6 ejes para alcanzar el zoom y volver a subir al de temperatura, que es el
+primero. Fijo arriba queda siempre a la vista y sirve a **cualquier** eje, porque el zoom
+actúa sobre aquel donde se arrastra. Cuesta ~35 px permanentes (una 4ª fila de barra en la
+pantalla del Pi), aceptados a cambio de eso.
+
+El contenedor es **persistente**; lo que se destruye y recrea en cada redibujo es el
+toolbar (`_reset_plot_canvas` → `_create_plot_canvas`), dentro de él. El atributo sigue
+llamándose `self.toolbar_mpl`, así que el guard del picado (`_on_add_click` ignora los
+clics mientras `toolbar_mpl.mode` no esté vacío: pan/zoom activo no debe añadir segmentos)
+no cambia. Las demás pestañas de análisis (SQWV, EIS, Peaks) conservan el patrón viejo:
+sus figuras son más bajas y el problema no aparece.
+
 ## 4.2 Ventana de muestras (solo vista, global)
 
 Campos **"Show samples: [start]–[end]"** + botón **"⤢ Full"** en la barra `toolbar2`
@@ -193,6 +210,17 @@ instrumento regula es la que define las tasas de calentamiento/enfriamiento).
   índice, valor) por muestra del secundario; `import_analysis` lo reconstruye en
   `temps_secondary`. Bundles viejos sin `temp2` → experimento sin overlay (sin romper).
   El resumen `_rates.csv` **no** cambia (solo mide tasas del primario).
+- **Checkbox "Show secondary"** (`toolbar2`, `command=self._redraw`). Bandera **global**,
+  una sola para todos los experimentos: el secundario es un cross-check de solo lectura,
+  o lo quieres ver o estorba — rara vez "solo el del exp 3". Por eso **no** entra al
+  árbol de experimentos (que ya tiene su 👁/🚫 por experimento) ni al bundle: es vista,
+  no estado del experimento, así que tampoco se persiste ni sobrevive a export→import.
+  Arranca visible. La condición vive en `_redraw`
+  (`if self.show_secondary.get() and exp.temps_secondary.size`): al ocultarlo la curva
+  simplemente no se dibuja, así que el eje Y se reajusta solo — el bloque de la ventana
+  de muestras ya calculaba la Y solo del primario y no cambia. Es independiente del
+  checkbox homónimo de la gráfica en vivo
+  ([temp_source_selector.md](temp_source_selector.md) §9).
 
 ## Orden de decisiones nuevas
 
@@ -200,6 +228,10 @@ instrumento regula es la que define las tasas de calentamiento/enfriamiento).
 - **Round-trip:** el secundario se persiste en el bundle (`temp2`) para sobrevivir export→import.
 - **Estilo:** tenue (mismo color, alpha 0.4, sin leyenda) para no ensuciar el plot con
   varios experimentos superpuestos.
+- **Visibilidad del overlay:** un checkbox **global** (no por experimento, no persistido):
+  es vista, no estado del experimento.
+- **Toolbar de matplotlib:** fijo fuera del área con scroll, no colgado del canvas —
+  alcanzable desde cualquier posición de scroll a cambio de ~35 px permanentes (§4.3).
 
 __author__ = "Edisson A. Naula"
 __date__ = "2026-07-08"
