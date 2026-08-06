@@ -7,7 +7,7 @@
 //   b = capture baseline on blank (stores ON-OFF avg)
 //   c = clear baseline
 //   s = show settings
-// A 16x2 LCD mirrors the result (line 1) and the blank state (line 2).
+// An HD44780 LCD (16x4 or 16x2) mirrors the result and the blank state.
 
 const int LED_GATE = 2;          // MOSFET gate driving your 470 nm LEDs
 const int ADC_PIN  = A0;         // TIA output to ADC
@@ -27,7 +27,7 @@ const int   CYCLES_MEASURE    = 256;  // cycles for each reading
 #define LCD_I2C   1
 #define LCD_ADDR  0x27           // 0x27 o 0x3F según el backpack
 #define LCD_COLS  16
-#define LCD_ROWS  2
+#define LCD_ROWS  4              // 4 = 16x4; 2 = 16x2 (el layout se adapta solo)
 
 #if LCD_I2C
   #include <Wire.h>
@@ -37,6 +37,24 @@ const int   CYCLES_MEASURE    = 256;  // cycles for each reading
   #include <LiquidCrystal.h>
   // RS, E, D4, D5, D6, D7 — D2 queda libre porque lo usa LED_GATE
   LiquidCrystal lcd(3, 4, 5, 6, 7, 8);
+#endif
+
+// El estado del blanco va en la ÚLTIMA fila: 1 en 16x2, 3 en 16x4.
+#define LCD_ROW_STATUS (LCD_ROWS - 1)
+
+// --- Parche de direcciones de fila para 16x4 por I2C ---
+// LiquidCrystal_I2C (fork de F. de Brabander, el que instala
+// `arduino-cli lib install "LiquidCrystal I2C"`) lleva las direcciones de fila
+// FIJAS a un módulo de 20 columnas: {0x00, 0x40, 0x14, 0x54}. En un 16x4 las
+// filas 3 y 4 arrancan en 0x10 y 0x50, así que saldrían corridas 4 caracteres.
+// La librería paralela (LiquidCrystal del core) sí las calcula desde `cols`,
+// por eso el parche solo aplica al camino I2C.
+// Si las filas 3-4 te salen ENCIMADAS sobre las 1-2, tu fork ya calculaba bien:
+// pon esto a 0.
+#if LCD_I2C && (LCD_COLS == 16) && (LCD_ROWS == 4)
+  #define LCD_I2C_ROW_FIX 1
+#else
+  #define LCD_I2C_ROW_FIX 0
 #endif
 // ----------------------------------------------------
 
@@ -49,29 +67,49 @@ bool  baseline_ready  = false;   // 'b' lo activa, 'c' lo apaga. Bandera aparte
 // Ninguna de estas funciones se llama dentro de measureDeltaCounts: una
 // escritura I2C cuesta ~1-2 ms y el chopping ON-OFF depende del temporizado.
 
+void lcdSetCursor(uint8_t col, uint8_t row){
+#if LCD_I2C_ROW_FIX
+  if(row >= 2){
+    // La librería calculará (col + 0x14) / (col + 0x54); restando 4 aterriza en
+    // 0x10 / 0x50, que es donde empiezan de verdad las filas de un 16x4. Se usa
+    // setCursor (público en todos los forks) y no command(), que no lo es.
+    lcd.setCursor((uint8_t)(col - 4), row);
+    return;
+  }
+#endif
+  lcd.setCursor(col, row);
+}
+
 void lcdLine(uint8_t row, const char* text){
   // Escribe y RELLENA con espacios hasta el final: la HD44780 no borra sola,
   // sin el padding queda la cola del mensaje anterior ("Blank: OK" sobre
   // "Blank: NONE" dejaría "Blank: OKNE").
-  lcd.setCursor(0, row);
+  lcdSetCursor(0, row);
   uint8_t n = 0;
   while(text[n] != '\0' && n < LCD_COLS){ lcd.write(text[n]); n++; }
   for(; n < LCD_COLS; n++) lcd.write(' ');
 }
 
-void lcdBlankStatus(){
-  lcdLine(1, baseline_ready ? "Blank: OK" : "Blank: NONE");
-}
-
-void lcdValue(const char* prefix, float value, const char* unit){
+void lcdValue(uint8_t row, const char* prefix, float value, uint8_t dec, const char* unit){
   // Sin sprintf("%f"): Print::print(float, dec) evita el soporte de float en
   // printf, que no es fiable entre cores.
-  lcd.setCursor(0, 0);
+  lcdSetCursor(0, row);
   int n = 0;
   n += lcd.print(prefix);
-  n += lcd.print(value, 2);
+  n += lcd.print(value, dec);
   n += lcd.print(unit);
   for(; n < LCD_COLS; n++) lcd.write(' ');
+}
+
+void lcdBlankStatus(){
+  lcdLine(LCD_ROW_STATUS, baseline_ready ? "Blank: OK" : "Blank: NONE");
+}
+
+void lcdClearDetail(){
+  // Filas intermedias (solo existen en 16x4): se limpian al capturar/borrar el
+  // blanco para no dejar el detalle de la medida anterior junto a un estado
+  // nuevo. En 16x2 el bucle no llega a iterar.
+  for(uint8_t r = 1; (uint8_t)(r + 1) < LCD_ROWS; r++) lcdLine(r, "");
 }
 
 uint16_t readAvg(int n){
@@ -99,10 +137,11 @@ float measureDeltaCounts(int cycles){
 void captureBaseline(){
   Serial.println(F("Capturing baseline... keep BLANK in place."));
   lcdLine(0, "Blank...");
+  lcdClearDetail();
   baseline_counts = measureDeltaCounts(CYCLES_BASELINE);
   baseline_ready  = true;
   Serial.print(F("Baseline (counts): ")); Serial.println(baseline_counts, 2);
-  lcdValue("BL ", baseline_counts, " ct");
+  lcdValue(0, "BL ", baseline_counts, 2, " ct");
   lcdBlankStatus();
 }
 
@@ -119,7 +158,11 @@ void printReading(){
   Serial.print(F("   ΔI = ")); Serial.print(dI*1e9, 2); Serial.println(F(" nA"));
 
   // La LCD no tiene 'Δ' (juego de caracteres HD44780): se queda en Serial.
-  lcdValue("I= ", dI*1e9, " nA");
+  lcdValue(0, "I= ", dI*1e9, 2, " nA");
+#if LCD_ROWS >= 4
+  lcdValue(1, "N= ", net_counts, 2, " ct");   // neto en counts
+  lcdValue(2, "V= ", dV, 5, " V");            // tensión a la salida del TIA
+#endif
 }
 
 void setup(){
@@ -135,6 +178,7 @@ void setup(){
   lcd.begin(LCD_COLS, LCD_ROWS);
 #endif
   lcdLine(0, "FluorReader");
+  lcdClearDetail();
   lcdBlankStatus();
 
   Serial.begin(115200);
@@ -151,6 +195,7 @@ void loop(){
       if(!baseline_ready){
         Serial.println(F("No baseline. Capture it first with 'b'."));
         lcdLine(0, "Need blank (b)");
+        lcdClearDetail();
         lcdBlankStatus();
       } else {
         printReading();
@@ -162,6 +207,7 @@ void loop(){
       baseline_ready  = false;
       Serial.println(F("Baseline cleared."));
       lcdLine(0, "Blank cleared");
+      lcdClearDetail();
       lcdBlankStatus();
     }
     else if(cmd=='s'){

@@ -1,7 +1,7 @@
 # FluorReader — lectura de fluorescencia bajo demanda (Arduino MKR Zero)
 
 Sketch de **banco de pruebas**: mide fluorescencia **solo cuando se le pide** (`f`) y publica el
-resultado por Serial **y en una LCD 16x2**. Deriva de
+resultado por Serial **y en una LCD 16x4**. Deriva de
 [../OldDevice/OldDevice.ino](../OldDevice/OldDevice.ino) y conserva su enfoque de medición **sin
 cambios**: integración ON–OFF con chopping + resta del blanco. Ver
 [../OldDevice/README.md](../OldDevice/README.md) para el detalle del método, las escalas
@@ -25,7 +25,7 @@ cambios**: integración ON–OFF con chopping + resta del blanco. Ver
 | Comandos | `b`, `r`/`R`, `c`, `s` | `f`/`F`, `b`, `c`, `s` (se elimina `r`) |
 | Estado del blanco | Solo el valor | Valor **+ bandera** `baseline_ready` |
 | `s` | `RF`, `SETTLE_US`, `BL` | Añade `CYCLES` y `(ready)`/`(not captured)` |
-| Salida | Solo Serial | Serial **+ LCD 16x2** (§3) |
+| Salida | Solo Serial | Serial **+ LCD 16x4** (§3) |
 
 Todo lo demás es idéntico y **deliberadamente**: mismas constantes, misma cadena
 counts → V → nA, misma línea de salida en Serial.
@@ -34,9 +34,9 @@ counts → V → nA, misma línea de salida en Serial.
 
 | Comando | Efecto | LCD |
 |---|---|---|
-| `f` / `F` | Una medida (256 ciclos) y la imprime. Si no hay blanco: `No baseline. Capture it first with 'b'.` | `Measuring...` → `I= 331.71 nA` (o `Need blank (b)`) |
-| `b` | Captura el blanco (512 ciclos) con el **blanco puesto**; activa `baseline_ready` | `Blank...` → `BL 1234.56 ct` |
-| `c` | Borra el blanco y baja `baseline_ready` | `Blank cleared` |
+| `f` / `F` | Una medida (256 ciclos) y la imprime. Si no hay blanco: `No baseline. Capture it first with 'b'.` | `Measuring...` → resultado en 3 líneas (o `Need blank (b)`) |
+| `b` | Captura el blanco (512 ciclos) con el **blanco puesto**; activa `baseline_ready` | `Blank...` → `BL 1234.56 ct` (limpia el detalle) |
+| `c` | Borra el blanco y baja `baseline_ready` | `Blank cleared` (limpia el detalle) |
 | `s` | `RF`, `SETTLE_US`, `CYCLES`, blanco vigente y si está capturado | *(no toca la LCD: es para el monitor)* |
 
 Salida de `f` — **idéntica** a la del sketch antiguo, para poder contrastar medidas históricas:
@@ -49,15 +49,23 @@ El campo `Δcounts` es el **neto** (blanco ya restado).
 
 ## 3. LCD
 
-Reparto fijo de las dos líneas:
+Reparto de las cuatro líneas (16x4):
 
 ```
-línea 0:  I= 331.71 nA        <- resultado, o estado del proceso
-línea 1:  Blank: OK           <- Blank: OK | Blank: NONE
+línea 0:  I= 331.71 nA        <- resultado principal, o estado del proceso
+línea 1:  N= 1234.56 ct       <- neto en counts
+línea 2:  V= 0.99512 V        <- tensión a la salida del TIA
+línea 3:  Blank: OK           <- Blank: OK | Blank: NONE
 ```
 
-La línea 1 existe porque el bloqueo de `f` sin blanco (§4) es invisible de otro modo: dice de un
-vistazo por qué la placa se niega a medir, sin ir al monitor serie.
+Las líneas 1 y 2 son el detalle que en 16x2 no cabía: las tres magnitudes que el Serial siempre
+imprimió, ahora también en pantalla. La **última** línea lleva el estado del blanco porque el
+bloqueo de `f` sin blanco (§4) es invisible de otro modo: dice de un vistazo por qué la placa se
+niega a medir, sin ir al monitor serie.
+
+El layout **se adapta solo**: con `LCD_ROWS 2` desaparecen las líneas de detalle y el estado
+vuelve a la línea 1 (`LCD_ROW_STATUS = LCD_ROWS - 1`). Al capturar o borrar el blanco, las líneas
+de detalle se limpian (`lcdClearDetail`) para no dejar la medida anterior junto a un estado nuevo.
 
 ### Configuración (cabecera del `.ino`)
 
@@ -65,8 +73,33 @@ vistazo por qué la placa se niega a medir, sin ir al monitor serie.
 #define LCD_I2C   1     // 1 = backpack I2C (PCF8574); 0 = HD44780 en paralelo
 #define LCD_ADDR  0x27  // 0x27 o 0x3F según el backpack
 #define LCD_COLS  16
-#define LCD_ROWS  2
+#define LCD_ROWS  4     // 4 = 16x4; 2 = 16x2
 ```
+
+### ⚠️ El 16x4 por I2C necesita un parche de direcciones
+
+`LiquidCrystal_I2C` (el fork de F. de Brabander, que es el que instala
+`arduino-cli lib install "LiquidCrystal I2C"`) trae las direcciones de fila **fijas a un módulo de
+20 columnas**:
+
+```cpp
+int row_offsets[] = { 0x00, 0x40, 0x14, 0x54 };   // 0x14 = 20, 0x54 = 0x40+20
+```
+
+En un **16x4** las filas 3 y 4 empiezan en `0x10` y `0x50`, no en `0x14`/`0x54`: sin corregir,
+esas dos líneas salen **corridas 4 caracteres**. `lcdSetCursor()` lo arregla restando 4 a la
+columna en las filas ≥2 (la suma la hace la propia librería), activado por
+`#define LCD_I2C_ROW_FIX`, que se enciende solo cuando I2C + 16 columnas + 4 filas.
+
+| Síntoma | Causa | Remedio |
+|---|---|---|
+| Líneas 3-4 indentadas 4 caracteres | El parche no está activo | `LCD_I2C_ROW_FIX 1` |
+| Líneas 3-4 **encimadas** sobre las 1-2 | Tu fork ya calculaba bien y el parche sobra | `LCD_I2C_ROW_FIX 0` |
+| Líneas 3-4 en blanco o basura | No es 16x4 (¿20x4?) | Ajusta `LCD_COLS`/`LCD_ROWS` |
+
+La versión **paralela** (`LiquidCrystal` del core) no necesita nada: calcula los offsets desde
+`cols` en `begin()`. Y si nada cuadra, `LCD_ROWS 2` degrada a las dos primeras líneas, que
+direccionan bien siempre.
 
 `LiquidCrystal` (paralela) y `LiquidCrystal_I2C` (backpack) comparten la API de impresión
 (`setCursor`/`print`), así que la capa de pantalla está escrita **una sola vez** y el
@@ -131,8 +164,11 @@ Con `LCD_I2C 0` no hace falta instalar nada: `LiquidCrystal` viene con el core. 
 
 - [ ] No se ha compilado ni flasheado: falta `arduino-cli compile` y un ciclo real
       (`b` con blanco → `f` con muestra).
-- [ ] **Modelo de LCD sin confirmar**: se asumió 16x2 con backpack I2C en `0x27`. Si no enciende,
-      prueba `0x3F`; si no responde nada al bus, es paralela → `#define LCD_I2C 0`.
+- [ ] **Modelo de LCD sin confirmar**: se asumió **16x4** con backpack I2C en `0x27`. Si no
+      enciende, prueba `0x3F`; si no responde nada al bus, es paralela → `#define LCD_I2C 0`.
+- [ ] **Confirmar que son 16 columnas y no 20**: el 20x4 es mucho más común que el 16x4. Cuenta
+      los caracteres de una línea llena; si son 20, pon `LCD_COLS 20` y el parche de filas se
+      desactiva solo (con 20 columnas los offsets de la librería ya son los correctos).
 - [ ] **Fork de la librería**: se usa `lcd.init()` (fork de johnrickman). Otros forks exponen
       `lcd.begin()` — si no compila, es esa línea de `setup()`.
 - [ ] Confirmar que la `Δ` (UTF-8) se sigue viendo bien en tu monitor serie, igual que en el antiguo.
