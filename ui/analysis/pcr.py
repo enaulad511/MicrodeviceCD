@@ -25,23 +25,21 @@ from ui.analysis.common import plt
 PCR_LEGACY_DT_S = 0.08
 
 # Geometría de la figura (6 ejes apilados en una columna). `PLOT_ROW_RATIOS` reparte
-# la altura entre ellos; la "unidad" del tamaño es la altura de una celda normal
-# (ratio 2), así que la figura entera mide unidad · sum(ratios)/2.
+# la altura entre ellos y `PLOT_UNIT_IN` es la altura de una celda normal (ratio 2),
+# así que la figura mide PLOT_UNIT_IN · sum(ratios)/2.
 #
-# La altura NO puede ser una constante: en la pantalla chica del Pi el área con
-# scroll mide ~250 px y una figura fija de 17" (1700 px) deja ver una tira donde
-# ni un solo gráfico entra con su título y su eje X. El selector "Plot size" la
-# vuelve ajustable y "Fit" la resuelve contra el alto real del viewport, de modo
-# que un gráfico normal ocupe exactamente una pantalla (el de temperatura, con
-# ratio 3, ocupa 1.5 — es el que se amplía con el zoom del toolbar).
+# El tamaño es FIJO a propósito. Hubo una versión que lo derivaba del alto real del
+# área con scroll ("Fit": un gráfico = una pantalla) y en Windows daba bien, pero en
+# la Raspberry salían diminutos: allí el viewport que mide `winfo_height()` es mucho
+# más chico —las filas de toolbar son más altas con las fuentes de Linux— y la figura
+# se encogía para "caber", justo lo contrario de lo que hace falta en una pantalla
+# chica, donde lo que se quiere es un gráfico grande y hacer scroll. Un número fijo se
+# ve igual en las dos plataformas: **no volver a atar esto a la geometría en runtime**.
+# 3.6" ≈ 1.4× el tamaño histórico (2.6" = figsize 17"). Ver docs/pcr_analisis.md §4.4.
 PLOT_ROW_RATIOS = (3, 2, 2, 2, 2, 2)
-PLOT_ROWS_TOTAL = sum(PLOT_ROW_RATIOS) / 2  # figura = unidad · esto
-PLOT_UNITS_IN = {"S": 1.8, "M": 2.6, "L": 3.6, "XL": 5.0}  # M ≈ el tamaño histórico
-PLOT_SIZES = ("Fit", "S", "M", "L", "XL")
-# Límites de "Fit": abajo, para que en un viewport minúsculo el gráfico siga siendo
-# legible (aunque no entre); arriba, para que en un monitor grande la figura no se
-# vuelva un rollo de varias pantallas por gráfico.
-PLOT_FIT_MIN_IN, PLOT_FIT_MAX_IN = 1.8, 4.0
+PLOT_UNIT_IN = 3.6
+PLOT_FIG_W_IN = 8.0
+PLOT_FIG_H_IN = PLOT_UNIT_IN * sum(PLOT_ROW_RATIOS) / 2  # 23.4"
 
 
 class PcrSegment:
@@ -146,10 +144,6 @@ class PcrAnalysisFrame(ttk.Frame):
         self._pending_exp: "PcrExperiment | None" = None
         self._temp_lines = {}  # id(exp) → Line2D (para snapping del pick)
         self._rename_entry: "ttk.Entry | None" = None
-        # Alto del viewport con el que se dimensionó la figura vigente, y el `after`
-        # pendiente que la reconstruye tras un resize (ver _on_viewport_resize).
-        self._last_viewport_h = 0
-        self._resize_job: "str | None" = None
 
         self._build_ui()
         self.dt_var.set(f"{self._default_dt():.9g}")
@@ -191,20 +185,6 @@ class PcrAnalysisFrame(ttk.Frame):
         ttk.Button(
             toolbar_b, text="👁 Show/Hide", bootstyle="info", command=self.toggle_visibility
         ).pack(side=ttk.LEFT, padx=3)
-
-        # Tamaño de la figura. "Fit" la ata al alto visible del área con scroll (se
-        # recalcula sola al redimensionar la ventana); S..XL son alturas fijas por
-        # gráfico para cuando se quiere más detalle y no importa hacer scroll.
-        ttk.Label(toolbar_b, text="Plot size:").pack(side=ttk.LEFT, padx=(12, 4))
-        self.plot_size_var = ttk.StringVar(value="Fit")
-        ttk.Combobox(
-            toolbar_b,
-            textvariable=self.plot_size_var,
-            values=PLOT_SIZES,
-            state="readonly",
-            width=5,
-        ).pack(side=ttk.LEFT)
-        self.plot_size_var.trace_add("write", lambda *_a: self._redraw())
 
         # --- Toolbar fila 2: dt global + vista (ventana de muestras, secundario) ---
         toolbar2 = ttk.Frame(self)
@@ -272,15 +252,23 @@ class PcrAnalysisFrame(ttk.Frame):
         ).pack(side=ttk.LEFT, padx=3)
 
         # Barra de navegación de matplotlib (zoom/pan/home/save). Vive FUERA del
-        # área con scroll: la figura es alta y, colgada bajo el canvas, obligaba a
-        # recorrer los 6 ejes para alcanzar el zoom y volver a subir. Aquí queda
-        # siempre a la vista y sirve a cualquier eje —el zoom actúa sobre aquel
-        # donde se arrastra—. Comparte fila con los botones de segmento en vez de
-        # ocupar una propia: en la pantalla del Pi cada fila de toolbar sale del
-        # alto del área con scroll, que es justo lo que hace ilegibles las gráficas.
+        # área con scroll: la figura mide ~2340 px y, colgada bajo el canvas,
+        # obligaba a recorrer los 6 ejes para alcanzar el zoom y volver a subir.
+        # Aquí queda siempre a la vista, pegada al eje de temperatura (el primero),
+        # y sirve a cualquier eje —el zoom actúa sobre aquel donde se arrastra—.
+        #
+        # Tiene fila PROPIA. Se probó compartirla con los botones de segmento para
+        # ganar ~45 px de área visible, pero en la Raspberry las fuentes son más
+        # anchas: los botones empujan al toolbar (que se empaqueta último) fuera del
+        # borde y se pierde el zoom, que es justo lo que hace falta para picar
+        # segmentos con precisión. Con la figura de tamaño fijo esos 45 px ya no
+        # compran nada —cada gráfico supera igual el alto del viewport y se hace
+        # scroll—, así que la fila propia sale gratis.
+        #
         # El contenedor es persistente: _reset_plot_canvas destruye el toolbar en
-        # cada redibujo y lo recrea dentro, después de los botones.
-        self._mpl_toolbar_host = toolbar3
+        # cada redibujo y lo recrea dentro.
+        self._mpl_toolbar_host = ttk.Frame(self)
+        self._mpl_toolbar_host.pack(side=ttk.TOP, fill=ttk.X, padx=6, pady=(0, 4))
 
         # Status bar (fijo abajo, fuera del scroll)
         self.lbl_status = ttk.Label(self, text="Ready.", anchor="w")
@@ -302,7 +290,6 @@ class PcrAnalysisFrame(ttk.Frame):
 
         def _sync_width(event):
             self._main_sc.itemconfig(_win_id, width=event.width)
-            self._on_viewport_resize(event.height)
 
         inner.bind("<Configure>", _update_sr)
         self._main_sc.bind("<Configure>", _sync_width)
@@ -362,62 +349,19 @@ class PcrAnalysisFrame(ttk.Frame):
         self.tree_res.pack(fill=ttk.BOTH, expand=True)
         self.tree_res.bind("<Double-1>", self._begin_rename)
 
-    # --------------------------------------------------- Tamaño de la figura
-    def _fig_unit_in(self):
-        """Altura en pulgadas de un gráfico normal (celda de ratio 2) según "Plot size".
-
-        Con un tamaño fijo (S..XL) es una constante. Con "Fit" se mide el alto real
-        del área con scroll y se usa tal cual, así que un gráfico normal ocupa
-        exactamente una pantalla: es lo que hace que en el Pi se vea uno completo
-        —título y eje X incluidos— en vez de una tira de tres. Se acota por ambos
-        lados (ver PLOT_FIT_MIN_IN / PLOT_FIT_MAX_IN)."""
-        fixed = PLOT_UNITS_IN.get(self.plot_size_var.get())
-        if fixed is not None:
-            return fixed
-        try:
-            h = self._main_sc.winfo_height()
-        except Exception:
-            h = 0
-        if h < 120:
-            # Todavía sin geometría real (primer build): se dibuja con el tamaño
-            # histórico y el primer <Configure> del viewport reconstruye la figura.
-            return PLOT_UNITS_IN["M"]
-        return min(PLOT_FIT_MAX_IN, max(PLOT_FIT_MIN_IN, h / 100.0))  # dpi = 100
-
-    def _on_viewport_resize(self, height):
-        """Reconstruye la figura cuando el área con scroll cambia de alto (solo en
-        modo "Fit", donde ese alto ES el tamaño de un gráfico).
-
-        Con debounce y umbral: un `<Configure>` llega por cada píxel al arrastrar el
-        borde de la ventana y `_redraw` recrea canvas, toolbar y tabla. No hay bucle
-        —la figura crece el frame interior, no el viewport, que lo fija el pack—."""
-        if self.plot_size_var.get() in PLOT_UNITS_IN:
-            return
-        if abs(int(height) - self._last_viewport_h) < 40:
-            return
-        self._last_viewport_h = int(height)
-        if self._resize_job is not None:
-            try:
-                self.after_cancel(self._resize_job)
-            except Exception:
-                pass
-        self._resize_job = self.after(250, self._redraw_resized)
-
-    def _redraw_resized(self):
-        self._resize_job = None
-        self._redraw()
-
     # --------------------------------------------------- Canvas (recreable)
     def _create_plot_canvas(self):
         # Columna de 6 ejes: el área con scroll vertical del contenedor los recorre
         # en la pantalla pequeña del Pi (decisión Q8). Los dos ejes de "slices
         # extraídos" (calentamiento/enfriamiento) van entre el fotodetector y las
-        # tasas. El alto sale de "Plot size" (ver _fig_unit_in); el ancho es solo el
-        # pedido inicial —Tk estira el canvas al ancho del panel y matplotlib
-        # reescala la figura—, pero decide la posición inicial del sash, así que
-        # dejarlo holgado le gana ancho a la lista de experimentos.
-        unit = self._fig_unit_in()
-        self.fig = Figure(figsize=(8, unit * PLOT_ROWS_TOTAL), dpi=100, layout="constrained")
+        # tasas. El alto es la constante PLOT_FIG_H_IN (fija a propósito: ver la nota
+        # de las constantes). El ancho es solo el pedido inicial —Tk estira el canvas
+        # al ancho del panel y matplotlib reescala la figura—, pero decide la posición
+        # inicial del sash, así que dejarlo holgado le gana ancho a la lista de
+        # experimentos.
+        self.fig = Figure(
+            figsize=(PLOT_FIG_W_IN, PLOT_FIG_H_IN), dpi=100, layout="constrained"
+        )
         gs = self.fig.add_gridspec(6, 1, height_ratios=list(PLOT_ROW_RATIOS))
         self.ax_temp = self.fig.add_subplot(gs[0])
         self.ax_photo = self.fig.add_subplot(gs[1])
@@ -455,7 +399,7 @@ class PcrAnalysisFrame(ttk.Frame):
         self.toolbar_mpl = NavigationToolbar2Tk(
             self.canvas, self._mpl_toolbar_host, pack_toolbar=False
         )
-        self.toolbar_mpl.pack(side=ttk.LEFT, padx=(12, 0))
+        self.toolbar_mpl.pack(fill=ttk.X)
         self.canvas.mpl_connect("motion_notify_event", self._on_hover)
         # Re-arma la captura de clics si "Add segment" seguía activo (el canvas se
         # recrea en cada redibujo, invalidando el cid anterior).
