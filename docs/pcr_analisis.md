@@ -63,12 +63,14 @@ eje sigan siendo cada una honesta.
   `Δt = t_b − t_a`. Signo **positivo → calentamiento**, negativo → enfriamiento
   (clasificación por signo, decisión Q7).
 
-## 4. Seis ejes apilados (con scroll)
+## 4. Área con scroll + selector «View»
 
-`_create_plot_canvas` arma una `Figure` alta (6 ejes, `height_ratios=PLOT_ROW_RATIOS`
-`=[3,2,2,2,2,2]`) dentro del área con **scroll vertical** del contenedor (mismo patrón
-`_main_sc` que las otras pestañas) para caber en la pantalla chica del Pi (decisión Q8).
-El **alto** es la constante `PLOT_FIG_H_IN` = 23.4" (§4.4):
+El contenido va dentro del `Canvas` con scrollbar vertical (`_main_sc`, mismo patrón que
+Peaks/SQWV/EIS), y `_create_plot_canvas` construye **solo los ejes que pide la vista
+actual** (`PLOT_VIEWS`, §4.4); los demás quedan en `None` y el código de dibujo los saltea.
+Las dos piezas son complementarias: el scroll deja que la figura sea más alta que la
+ventana (por eso cada gráfico conserva su tamaño), y la vista decide **cuánto** hay que
+recorrer. Los seis ejes posibles son:
 
 1. **Temperatura (°C) vs tiempo** — una curva por experimento; cada segmento se dibuja
    como una recta A→B roja (calentamiento) / azul (enfriamiento) con sus dos puntos. El
@@ -95,65 +97,73 @@ datos nuevos en el export: los slices se reconstruyen de `temps` + índices de s
 Como las otras pestañas, el canvas se **recrea** entero en cada redibujo (`_reset_plot_canvas`),
 lo que re-arma el modo "Add segment" si seguía activo.
 
-### 4.3 Barra de navegación de matplotlib (fuera del scroll, fila propia)
+### 4.3 Barra de navegación de matplotlib (fila propia)
 
 El `NavigationToolbar2Tk` **no** cuelga del canvas: vive en `self._mpl_toolbar_host`, un
-frame propio empaquetado bajo `toolbar3` y **fuera del área con scroll**. Colgado bajo el
-canvas —como en las otras pestañas— quedaba al pie de una figura de ~2340 px: había que
-recorrer los 6 ejes para alcanzar el zoom y volver a subir al de temperatura, que es el
-primero. Fijo arriba queda siempre a la vista y sirve a **cualquier** eje, porque el zoom
-actúa sobre aquel donde se arrastra. Cuesta ~45 px permanentes (una 5ª fila de barra en la
-pantalla del Pi), aceptados a cambio de eso.
+frame propio empaquetado bajo `toolbar3`. Colgado bajo el canvas —como en las otras
+pestañas— quedaba al pie de la figura; arriba queda siempre a la vista y sirve a
+**cualquier** eje, porque el zoom actúa sobre aquel donde se arrastra.
 
-Se probó **compartir fila** con los tres botones de segmento para recuperar esos 45 px, y
-se descartó por dos razones. Una, de riesgo: en la Raspberry las fuentes por defecto son
-más anchas, los botones crecen y el toolbar —que se empaqueta último— se sale del borde;
-lo que se pierde es el **zoom**, justo lo que hace falta para picar segmentos con
-precisión. Otra, de beneficio: con la figura de tamaño fijo (§4.4) cada gráfico supera
-igual el alto del viewport y se hace scroll de todos modos, así que 45 px de área visible
-ya no cambian nada. Fila propia.
+Se probó **compartir fila** con los tres botones de segmento para recuperar ~45 px, y se
+descartó: en la Raspberry las fuentes por defecto son más anchas, los botones crecen y el
+toolbar —que se empaqueta último— se sale del borde. Lo que se pierde es el **zoom**, justo
+lo que hace falta para picar segmentos con precisión.
 
 El contenedor es **persistente**; lo que se destruye y recrea en cada redibujo es el
 toolbar (`_reset_plot_canvas` → `_create_plot_canvas`), dentro de él. El atributo sigue
 llamándose `self.toolbar_mpl`, así que el guard del picado (`_on_add_click` ignora los
 clics mientras `toolbar_mpl.mode` no esté vacío: pan/zoom activo no debe añadir segmentos)
-no cambia. Las demás pestañas de análisis (SQWV, EIS, Peaks) conservan el patrón viejo:
-sus figuras son más bajas y el problema no aparece.
+no cambia.
 
-### 4.4 Tamaño FIJO de la figura y ancho del panel
+### 4.4 Alto de la figura: `PLOT_IN_PER_WEIGHT` × los ejes de la vista
 
-`figsize = (PLOT_FIG_W_IN, PLOT_FIG_H_IN)` = **(8", 23.4")**, constante. La altura se
-expresa como `PLOT_UNIT_IN · sum(PLOT_ROW_RATIOS)/2`, donde `PLOT_UNIT_IN = 3.6"` es el
-alto de un gráfico **normal** (celda de ratio 2) y el de temperatura, con ratio 3, mide 1.5
-veces eso. En un panel de ~1024 px da ejes de 666×446 px (temperatura) y 666×297 px (los
-otros cinco), contra los 296/197 px del `figsize=(7,17)` histórico.
+`figsize = (PLOT_FIG_W_IN, PLOT_IN_PER_WEIGHT · Σ pesos)` con `PLOT_IN_PER_WEIGHT = 1.8"`
+y `PLOT_ROW_WEIGHT` = 3 para temperatura (el interactivo) y 2 para el resto. Da:
 
-**Por qué es una constante y no se deriva del viewport.** Hubo una versión con un selector
-«Plot size» cuyo default `Fit` resolvía la unidad contra `self._main_sc.winfo_height()`,
-con la idea de que un gráfico ocupara exactamente una pantalla. En Windows medía ~255 px de
-viewport y salía bien; **en la Raspberry los gráficos salían diminutos**. La causa no era un
-bug de cálculo sino la premisa: en Linux las filas de toolbar son más altas (fuentes por
-defecto más grandes), el viewport real queda mucho más chico, y `Fit` encogía la figura
-para «caber» en él. Es exactamente al revés de lo que se necesita en una pantalla chica,
-donde lo que se quiere es un gráfico **grande** y hacer scroll — encoger para que entre es
-el mismo resultado que no poder leer nada.
+| Vista | Ejes | Figura | Alto por eje (medido) |
+|---|---|---|---|
+| Temperature | 1 | 540 px | 472 |
+| Photodetector | 1 | 360 px | 293 |
+| Slices / Rates | 2 | 720 px | 293 / 293 |
+| All (6) | 6 | 2340 px | 448, 299 ×5 |
 
-De ahí la regla: **no volver a atar el tamaño a la geometría en runtime**. Un número fijo se
-ve igual en las dos plataformas y es el patrón que ya usaban las otras pestañas (Peaks es
-`figsize=(8,6)` fijo, y es la que el usuario reportó como legible en el Pi). Con el tamaño
-fijo desaparecieron también `_fig_unit_in`, `_on_viewport_resize` (debounce + umbral),
-`_redraw_resized` y el hook de `<Configure>` en `_sync_width`: el resize de la ventana ya no
-reconstruye la figura. Para cambiar el tamaño se edita `PLOT_UNIT_IN`.
+La propiedad que importa: **un gráfico mide lo mismo esté solo o acompañado, y en cualquier
+tamaño de ventana** (verificado en 800×480, 1024×600 y 1180×860: idénticos). La vista no
+cambia el tamaño, cambia **cuánto scroll** hay que recorrer — de una gráfica que casi entra
+en pantalla a los 2340 px de `All (6)`, que es exactamente la figura fija anterior.
 
-El **ancho** es el otro factor de legibilidad y no depende de runtime tampoco: se lo reparte
-el `PanedWindow` entre la lista de experimentos y la figura, según lo que cada panel *pide*.
-El panel izquierdo pedía ~380 px (columnas 240+120 y el título largo «Experiments
-(double-click to rename)», que también empuja el mínimo del `LabelFrame`), y en 800 px de
-pantalla dejaba la figura en 428 px. Con columnas de 150+70 (`minwidth` 80/50) y título
-«Experiments», la figura pasa a ~560 px y sus ejes de 366 a **498 px** de ancho — más
-anchos que los de Peaks. La ganancia es en píxeles, así que vale igual en Linux, donde el
-título largo habría empujado el mínimo todavía más. El nombre completo se sigue leyendo
-ensanchando la columna o arrastrando el sash; el renombrado con doble clic no cambia.
+**Historia, porque el diseño dio varias vueltas y todas dejaron una regla.**
+
+1. `figsize=(7,17)` fijo. En el Pi cada eje daba ~197 px: se veía una tira.
+2. Derivar el alto del viewport (selector «Plot size», default `Fit` =
+   `_main_sc.winfo_height()`). En Windows salía bien; **en la Raspberry salían diminutos**,
+   porque allí las filas de toolbar son más altas (fuentes de Linux), el viewport real es
+   más chico y `Fit` encogía la figura para «caber» — al revés de lo que hace falta. Regla
+   que quedó: **no atar el tamaño a la geometría en runtime**.
+3. Tamaño fijo mayor (23.4"), 498×298 px por eje. Siguió sin convencer en el Pi.
+4. Se quitó el área con scroll y se agregó el selector «View». Midió el costo exacto de no
+   tener scroll: la figura se escala al hueco disponible, así que el techo pasa a ser
+   `alto_ventana − chrome` (~272 px de chrome en 800×480) y un solo eje caía a **103 px**,
+   los seis a **26/17 px**. Regla que quedó: **el scroll es lo que permite que la figura
+   sea más alta que la ventana**; sin él no hay tamaño de gráfico que sobreviva a 480 px.
+5. **Actual: scroll + selector «View».** El scroll aporta el alto, la vista aporta que no
+   haya que recorrer seis gráficos para ver uno.
+
+**Implementación.** `PLOT_VIEWS` mapea nombre → tupla de claves de eje; `_create_plot_canvas`
+pone en `None` los seis atributos `ax_*` y solo crea los de la vista, con
+`height_ratios=[PLOT_ROW_WEIGHT[k] …]`. Todo el dibujo tolera `None` (`_redraw`,
+`_draw_extracted`, `_draw_rates_and_table`, `toggle_legend`), y `_toggle_add_mode` **avisa y
+no se activa** si el eje de temperatura no está en la vista, en vez de dejar al usuario
+clickeando sin efecto. La **tabla** de segmentos se llena siempre, esté o no el eje de
+tasas: los números no dependen de qué se grafique. `main` se empaqueta con `fill=X` (no
+`BOTH`/`expand`) a propósito: el alto lo pide la figura, y ese exceso sobre la ventana es
+justo lo que el scroll recorre.
+
+El **ancho** se reparte por lo que pide cada panel del `PanedWindow`. El izquierdo pedía
+~380 px (columnas 240+120 y el título largo «Experiments (double-click to rename)», que
+empuja el mínimo del `LabelFrame`); con columnas de 150+70 (`minwidth` 80/50) y título
+«Experiments» la figura gana ~130 px. La ganancia es en píxeles, así que vale igual en
+Linux, donde el título largo habría empujado el mínimo todavía más.
 
 ## 4.2 Ventana de muestras (solo vista, global)
 

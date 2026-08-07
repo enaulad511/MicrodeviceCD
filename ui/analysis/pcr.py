@@ -24,22 +24,36 @@ from ui.analysis.common import plt
 # Ver docs/pcr_eje_tiempo.md.
 PCR_LEGACY_DT_S = 0.08
 
-# Geometría de la figura (6 ejes apilados en una columna). `PLOT_ROW_RATIOS` reparte
-# la altura entre ellos y `PLOT_UNIT_IN` es la altura de una celda normal (ratio 2),
-# así que la figura mide PLOT_UNIT_IN · sum(ratios)/2.
+# Vistas del área de gráficas: cada entrada es la lista de ejes que se construyen, por
+# clave. Los que no están en la vista **no se crean** (`self.ax_* = None`) y todo el
+# código de dibujo lo tolera. "All (6)" reproduce la vista histórica de los 6 apilados.
+PLOT_VIEWS = {
+    "Temperature": ("temp",),
+    "Photodetector": ("photo",),
+    "Slices": ("ext_heat", "ext_cool"),
+    "Rates": ("heat", "cool"),
+    "All (6)": ("temp", "photo", "ext_heat", "ext_cool", "heat", "cool"),
+}
+PLOT_VIEW_NAMES = tuple(PLOT_VIEWS)
+PLOT_VIEW_DEFAULT = "Temperature"
+
+# Peso relativo de cada eje (el de temperatura, que es el interactivo, se lleva 1.5
+# veces lo de los demás) y pulgadas de figura por unidad de peso.
 #
-# El tamaño es FIJO a propósito. Hubo una versión que lo derivaba del alto real del
-# área con scroll ("Fit": un gráfico = una pantalla) y en Windows daba bien, pero en
-# la Raspberry salían diminutos: allí el viewport que mide `winfo_height()` es mucho
-# más chico —las filas de toolbar son más altas con las fuentes de Linux— y la figura
-# se encogía para "caber", justo lo contrario de lo que hace falta en una pantalla
-# chica, donde lo que se quiere es un gráfico grande y hacer scroll. Un número fijo se
-# ve igual en las dos plataformas: **no volver a atar esto a la geometría en runtime**.
-# 3.6" ≈ 1.4× el tamaño histórico (2.6" = figsize 17"). Ver docs/pcr_analisis.md §4.4.
-PLOT_ROW_RATIOS = (3, 2, 2, 2, 2, 2)
-PLOT_UNIT_IN = 3.6
+# El alto de la figura es `PLOT_IN_PER_WEIGHT · Σ pesos de los ejes de la vista`, dentro
+# del área con scroll. De ahí sale la propiedad que hace que las dos cosas conviyan: un
+# gráfico mide **lo mismo** esté solo o acompañado (temperatura ≈ 540 px, los otros
+# ≈ 360 px), y lo que cambia la vista es **cuánto hay que hacer scroll**, no el tamaño.
+# "All (6)" da 23.4", exactamente la figura fija anterior.
+#
+# Es una constante a propósito: hubo una versión que derivaba el alto de
+# `_main_sc.winfo_height()` y en la Raspberry salían diminutos —las filas de toolbar son
+# más altas con las fuentes de Linux, el viewport real es más chico y la figura se
+# encogía para "caber"—. **No volver a atar esto a la geometría en runtime**; para
+# cambiar el tamaño se edita PLOT_IN_PER_WEIGHT. Ver docs/pcr_analisis.md §4.4.
+PLOT_ROW_WEIGHT = {"temp": 3, "photo": 2, "ext_heat": 2, "ext_cool": 2, "heat": 2, "cool": 2}
+PLOT_IN_PER_WEIGHT = 1.8
 PLOT_FIG_W_IN = 8.0
-PLOT_FIG_H_IN = PLOT_UNIT_IN * sum(PLOT_ROW_RATIOS) / 2  # 23.4"
 
 
 class PcrSegment:
@@ -186,6 +200,20 @@ class PcrAnalysisFrame(ttk.Frame):
             toolbar_b, text="👁 Show/Hide", bootstyle="info", command=self.toggle_visibility
         ).pack(side=ttk.LEFT, padx=3)
 
+        # Qué ejes se dibujan. Cada gráfico mide siempre lo mismo (ver PLOT_IN_PER_WEIGHT),
+        # así que esto no cambia el tamaño sino cuánto scroll hay que recorrer: una sola
+        # gráfica queda casi a la vista, "All (6)" son ~2340 px de figura.
+        ttk.Label(toolbar_b, text="View:").pack(side=ttk.LEFT, padx=(12, 4))
+        self.view_var = ttk.StringVar(value=PLOT_VIEW_DEFAULT)
+        ttk.Combobox(
+            toolbar_b,
+            textvariable=self.view_var,
+            values=PLOT_VIEW_NAMES,
+            state="readonly",
+            width=14,
+        ).pack(side=ttk.LEFT)
+        self.view_var.trace_add("write", lambda *_a: self._redraw())
+
         # --- Toolbar fila 2: dt global + vista (ventana de muestras, secundario) ---
         toolbar2 = ttk.Frame(self)
         toolbar2.pack(side=ttk.TOP, fill=ttk.X, padx=6, pady=(0, 6))
@@ -274,13 +302,17 @@ class PcrAnalysisFrame(ttk.Frame):
         self.lbl_status = ttk.Label(self, text="Ready.", anchor="w")
         self.lbl_status.pack(side=ttk.BOTTOM, fill=ttk.X, padx=6, pady=(0, 4))
 
-        # --- Área scrollable (árbol + figura + resultados), igual que las otras pestañas ---
+        # --- Área scrollable (lista + figura + tabla), igual que las otras pestañas ---
+        # El scroll es lo que permite que la figura sea MÁS ALTA que la ventana: sin él
+        # los ejes se escalan al hueco disponible y en 800×480 un gráfico cae a ~103 px
+        # (y los seis a ~26 px). Con scroll cada gráfico conserva su tamaño y el
+        # selector "View" decide cuánto hay que recorrer.
         _wrap = ttk.Frame(self)
         _wrap.pack(fill=ttk.BOTH, expand=True, padx=6, pady=(0, 4))
         _vsb_main = ttk.Scrollbar(_wrap, orient="vertical")
         _vsb_main.pack(side=ttk.RIGHT, fill=ttk.Y)
         self._main_sc = ttk.Canvas(_wrap, bd=0, highlightthickness=0, yscrollcommand=_vsb_main.set)
-        self._main_sc.pack(side=ttk.LEFT, fill=ttk.BOTH, expand=True, padx=(5,20))
+        self._main_sc.pack(side=ttk.LEFT, fill=ttk.BOTH, expand=True, padx=(5, 20))
         _vsb_main.configure(command=self._main_sc.yview)
         inner = ttk.Frame(self._main_sc)
         _win_id = self._main_sc.create_window((0, 0), window=inner, anchor="nw")
@@ -300,7 +332,9 @@ class PcrAnalysisFrame(ttk.Frame):
         self._main_sc.bind("<MouseWheel>", _on_wheel)
         inner.bind("<MouseWheel>", _on_wheel)
 
-        # --- Split árbol | figura ---
+        # --- Split lista | figura ---
+        # fill=X (no BOTH/expand): el alto lo pide la figura, y ese exceso sobre la
+        # ventana es justamente lo que el scroll recorre.
         main = ttk.PanedWindow(inner, orient=ttk.HORIZONTAL)
         main.pack(fill=ttk.X, padx=0, pady=(0, 6))
 
@@ -332,6 +366,8 @@ class PcrAnalysisFrame(ttk.Frame):
         self._create_plot_canvas()
 
         # --- Tabla de resultados (un segmento por fila + agregados por experimento) ---
+        # Va DENTRO del área con scroll, debajo de la figura: no compite por el alto con
+        # la gráfica, se llega a ella bajando.
         bottom = ttk.LabelFrame(inner, text="Rate segments (visible only)")
         bottom.pack(fill=ttk.BOTH, pady=(0, 6))
         cols_r = ("type", "dtemp", "dtime", "rate")
@@ -350,49 +386,54 @@ class PcrAnalysisFrame(ttk.Frame):
         self.tree_res.bind("<Double-1>", self._begin_rename)
 
     # --------------------------------------------------- Canvas (recreable)
+    # Título / etiquetas por eje, indexados por la misma clave que PLOT_VIEWS.
+    AX_SPECS = {
+        "temp": ("Temperature (°C) — click-pick two points to add a segment", "Time (s)", "°C"),
+        "photo": ("Photodetector (Δ V) vs cycle", "Cycle", "Δ V"),
+        "ext_heat": (
+            "Extracted heating slices (T vs time from A)",
+            "Time from start of segment (s)",
+            "°C",
+        ),
+        "ext_cool": (
+            "Extracted cooling slices (T vs time from A)",
+            "Time from start of segment (s)",
+            "°C",
+        ),
+        "heat": ("Heating rate (°C/s)", "Experiment", "°C/s"),
+        "cool": ("Cooling rate (°C/s)", "Experiment", "°C/s"),
+    }
+
+    def _current_view(self):
+        """Claves de los ejes que pide la vista actual (cae al default si es inválida)."""
+        return PLOT_VIEWS.get(self.view_var.get(), PLOT_VIEWS[PLOT_VIEW_DEFAULT])
+
     def _create_plot_canvas(self):
-        # Columna de 6 ejes: el área con scroll vertical del contenedor los recorre
-        # en la pantalla pequeña del Pi (decisión Q8). Los dos ejes de "slices
-        # extraídos" (calentamiento/enfriamiento) van entre el fotodetector y las
-        # tasas. El alto es la constante PLOT_FIG_H_IN (fija a propósito: ver la nota
-        # de las constantes). El ancho es solo el pedido inicial —Tk estira el canvas
-        # al ancho del panel y matplotlib reescala la figura—, pero decide la posición
-        # inicial del sash, así que dejarlo holgado le gana ancho a la lista de
-        # experimentos.
+        # Alto proporcional a los ejes de la vista, de modo que cada gráfico mida lo
+        # mismo esté solo o acompañado; la vista decide cuánto scroll hace falta, no el
+        # tamaño. El ancho es solo el pedido inicial —Tk estira el canvas al ancho del
+        # panel y matplotlib reescala—, pero fija la posición inicial del sash, así que
+        # dejarlo holgado le gana ancho a la lista de experimentos.
+        keys = self._current_view()
+        weights = [PLOT_ROW_WEIGHT[k] for k in keys]
         self.fig = Figure(
-            figsize=(PLOT_FIG_W_IN, PLOT_FIG_H_IN), dpi=100, layout="constrained"
+            figsize=(PLOT_FIG_W_IN, PLOT_IN_PER_WEIGHT * sum(weights)),
+            dpi=100,
+            layout="constrained",
         )
-        gs = self.fig.add_gridspec(6, 1, height_ratios=list(PLOT_ROW_RATIOS))
-        self.ax_temp = self.fig.add_subplot(gs[0])
-        self.ax_photo = self.fig.add_subplot(gs[1])
-        self.ax_ext_heat = self.fig.add_subplot(gs[2])
-        self.ax_ext_cool = self.fig.add_subplot(gs[3])
-        self.ax_heat = self.fig.add_subplot(gs[4])
-        self.ax_cool = self.fig.add_subplot(gs[5])
-        self.ax_temp.set_title("Temperature (°C) — click-pick two points to add a segment")
-        self.ax_temp.set_xlabel("Time (s)")
-        self.ax_temp.set_ylabel("°C")
-        self.ax_temp.grid(True)
-        self.ax_photo.set_title("Photodetector (Δ V) vs cycle")
-        self.ax_photo.set_xlabel("Cycle")
-        self.ax_photo.set_ylabel("Δ V")
-        self.ax_photo.grid(True)
-        self.ax_ext_heat.set_title("Extracted heating slices (T vs time from A)")
-        self.ax_ext_heat.set_xlabel("Time from start of segment (s)")
-        self.ax_ext_heat.set_ylabel("°C")
-        self.ax_ext_heat.grid(True)
-        self.ax_ext_cool.set_title("Extracted cooling slices (T vs time from A)")
-        self.ax_ext_cool.set_xlabel("Time from start of segment (s)")
-        self.ax_ext_cool.set_ylabel("°C")
-        self.ax_ext_cool.grid(True)
-        self.ax_heat.set_title("Heating rate (°C/s)")
-        self.ax_heat.set_xlabel("Experiment")
-        self.ax_heat.set_ylabel("°C/s")
-        self.ax_heat.grid(True)
-        self.ax_cool.set_title("Cooling rate (°C/s)")
-        self.ax_cool.set_xlabel("Experiment")
-        self.ax_cool.set_ylabel("°C/s")
-        self.ax_cool.grid(True)
+        gs = self.fig.add_gridspec(len(keys), 1, height_ratios=weights)
+        # Todos arrancan en None: los ejes fuera de la vista no existen y el resto del
+        # código los saltea (`_axis_visible`) en vez de dibujar sobre un eje fantasma.
+        self.ax_temp = self.ax_photo = self.ax_ext_heat = None
+        self.ax_ext_cool = self.ax_heat = self.ax_cool = None
+        for row, key in enumerate(keys):
+            ax = self.fig.add_subplot(gs[row])
+            title, xlabel, ylabel = self.AX_SPECS[key]
+            ax.set_title(title)
+            ax.set_xlabel(xlabel)
+            ax.set_ylabel(ylabel)
+            ax.grid(True)
+            setattr(self, f"ax_{key}", ax)
         self.canvas = FigureCanvasTkAgg(self.fig, self._plot_host)
         self.canvas.get_tk_widget().pack(fill=ttk.BOTH, expand=True)
         # El toolbar cuelga del contenedor fijo, no del área con scroll.
@@ -521,14 +562,17 @@ class PcrAnalysisFrame(ttk.Frame):
 
     # ----------------------------------------------------- Dibujo + tabla
     def _redraw(self):
-        """Recrea el canvas y redibuja los 4 ejes + la tabla de segmentos/tasas."""
+        """Recrea el canvas y redibuja los ejes de la vista + la tabla de segmentos.
+
+        La tabla se llena SIEMPRE (`_draw_rates_and_table`), esté o no visible el eje
+        de tasas: los números no dependen de qué se esté graficando."""
         self._reset_plot_canvas()
         dt = self._dt()
         self._temp_lines = {}
 
-        # --- Eje 1: temperatura + segmentos ---
+        # --- Temperatura + segmentos ---
         any_t = False
-        for exp in self.experiments:
+        for exp in self.experiments if self.ax_temp is not None else ():
             if not exp.visible or exp.temps.size == 0:
                 continue
             xs = exp.xs(dt)
@@ -555,7 +599,8 @@ class PcrAnalysisFrame(ttk.Frame):
                 self.ax_temp.scatter([t_a, t_b], [T_a, T_b], color=col, s=28, zorder=6)
         # Marcador del punto A pendiente (primer clic a la espera del segundo).
         if (
-            self._pending_ia is not None
+            self.ax_temp is not None
+            and self._pending_ia is not None
             and self._pending_exp is not None
             and self._pending_exp.visible
             and 0 <= self._pending_ia < self._pending_exp.temps.size
@@ -575,7 +620,7 @@ class PcrAnalysisFrame(ttk.Frame):
         # tabla y las tasas lo conservan). La ventana es necesaria para seleccionar
         # segmentos sobre una región ampliada.
         lo, hi = self._window()
-        if any_t and lo is not None and hi is not None:
+        if any_t and self.ax_temp is not None and lo is not None and hi is not None:
             ymins, ymaxs = [], []
             xlos, xhis = [], []
             for exp in self.experiments:
@@ -598,9 +643,9 @@ class PcrAnalysisFrame(ttk.Frame):
                 pad = (ymax - ymin) * 0.05 or 0.5
                 self.ax_temp.set_ylim(ymin - pad, ymax + pad)
 
-        # --- Eje 2: fotodetector (delta por ciclo) ---
+        # --- Fotodetector (delta por ciclo) ---
         any_p = False
-        for exp in self.experiments:
+        for exp in self.experiments if self.ax_photo is not None else ():
             if not exp.visible or exp.photo.size == 0:
                 continue
             xs = np.arange(1, exp.photo.size + 1)
@@ -611,17 +656,21 @@ class PcrAnalysisFrame(ttk.Frame):
             if leg is not None:
                 leg.set_visible(self._legend_visible)
 
-        # --- Ejes 3 y 4: slices extraídos (real, tiempo re-zeroado a A) ---
+        # --- Slices extraídos (real, tiempo re-zeroado a A) ---
         self._draw_extracted(dt)
 
-        # --- Ejes 5 y 6: tasas + tabla ---
+        # --- Tasas + tabla (la tabla se llena aunque los ejes no estén en la vista) ---
         self._draw_rates_and_table(dt)
         self.canvas.draw_idle()
 
     def _draw_extracted(self, dt):
         """Dibuja el corte real de temperatura de cada segmento (temps[lo:hi+1]) con el
         tiempo re-zeroado al punto A, separando calentamiento y enfriamiento en dos ejes.
-        Color por índice de segmento (ciclado); leyenda 'exp/segK/rate' (decisión Q5)."""
+        Color por índice de segmento (ciclado); leyenda 'exp/segK/rate' (decisión Q5).
+
+        No hace nada si la vista actual no incluye ninguno de los dos ejes."""
+        if self.ax_ext_heat is None and self.ax_ext_cool is None:
+            return
         gi = 0  # índice global de segmento → color
         any_h = any_c = False
         for exp in self.experiments:
@@ -640,16 +689,18 @@ class PcrAnalysisFrame(ttk.Frame):
                 gi += 1
                 label = f"{exp.name}/seg{k} {rate:.3g}"
                 if rate >= 0:
-                    self.ax_ext_heat.plot(xs, ys, color=color, linewidth=1.4, label=label)
-                    any_h = True
+                    if self.ax_ext_heat is not None:
+                        self.ax_ext_heat.plot(xs, ys, color=color, linewidth=1.4, label=label)
+                        any_h = True
                 else:
-                    self.ax_ext_cool.plot(xs, ys, color=color, linewidth=1.4, label=label)
-                    any_c = True
-        if any_h:
+                    if self.ax_ext_cool is not None:
+                        self.ax_ext_cool.plot(xs, ys, color=color, linewidth=1.4, label=label)
+                        any_c = True
+        if any_h and self.ax_ext_heat is not None:
             leg = self.ax_ext_heat.legend(loc="best", fontsize=7, ncol=2)
             if leg is not None:
                 leg.set_visible(self._legend_visible)
-        if any_c:
+        if any_c and self.ax_ext_cool is not None:
             leg = self.ax_ext_cool.legend(loc="best", fontsize=7, ncol=2)
             if leg is not None:
                 leg.set_visible(self._legend_visible)
@@ -718,32 +769,48 @@ class PcrAnalysisFrame(ttk.Frame):
                     values=("mean", "", "", f"{cm:.4g} ± {cs:.2g}"),
                 )
 
-        # Scatter de cada segmento + media±std por experimento (decisión Q8).
-        if heat_sx:
-            self.ax_heat.scatter(heat_sx, heat_sy, color="tab:red", alpha=0.45, s=30, label="segments")
-        if heat_mx:
-            self.ax_heat.errorbar(
-                heat_mx, heat_m, yerr=heat_s, marker="o", linestyle="-",
-                color="tab:red", capsize=4, label="mean ± std",
-            )
-        if cool_sx:
-            self.ax_cool.scatter(cool_sx, cool_sy, color="tab:blue", alpha=0.45, s=30, label="segments")
-        if cool_mx:
-            self.ax_cool.errorbar(
-                cool_mx, cool_m, yerr=cool_s, marker="o", linestyle="-",
-                color="tab:blue", capsize=4, label="mean ± std",
-            )
+        # Scatter de cada segmento + media±std por experimento (decisión Q8). La tabla
+        # de arriba ya quedó llena; esto es solo el dibujo, que se saltea si la vista
+        # actual no trae los ejes de tasas.
+        if self.ax_heat is not None:
+            if heat_sx:
+                self.ax_heat.scatter(
+                    heat_sx, heat_sy, color="tab:red", alpha=0.45, s=30, label="segments"
+                )
+            if heat_mx:
+                self.ax_heat.errorbar(
+                    heat_mx, heat_m, yerr=heat_s, marker="o", linestyle="-",
+                    color="tab:red", capsize=4, label="mean ± std",
+                )
+        if self.ax_cool is not None:
+            if cool_sx:
+                self.ax_cool.scatter(
+                    cool_sx, cool_sy, color="tab:blue", alpha=0.45, s=30, label="segments"
+                )
+            if cool_mx:
+                self.ax_cool.errorbar(
+                    cool_mx, cool_m, yerr=cool_s, marker="o", linestyle="-",
+                    color="tab:blue", capsize=4, label="mean ± std",
+                )
         if xticks:
             for ax in (self.ax_heat, self.ax_cool):
+                if ax is None:
+                    continue
                 ax.set_xticks(xticks)
                 ax.set_xticklabels(xlabels, rotation=20, ha="right", fontsize=7)
-        if heat_sx or heat_mx:
+        if (heat_sx or heat_mx) and self.ax_heat is not None:
             self.ax_heat.legend(fontsize=7)
-        if cool_sx or cool_mx:
+        if (cool_sx or cool_mx) and self.ax_cool is not None:
             self.ax_cool.legend(fontsize=7)
 
     # ----------------------------------------------------- Picking segmentos
     def _toggle_add_mode(self):
+        # Los segmentos se pican sobre la curva de temperatura: sin ese eje en la vista
+        # el modo no tendría dónde recibir los clics. Se avisa en vez de activarlo y
+        # dejar al usuario clickeando sin efecto.
+        if not self._add_mode and self.ax_temp is None:
+            self._set_status("Switch View to 'Temperature' (or 'All') to add segments.")
+            return
         self._add_mode = not self._add_mode
         if self._add_mode:
             self._pending_ia = None
@@ -781,7 +848,7 @@ class PcrAnalysisFrame(ttk.Frame):
 
     def _nearest_temp_index(self, exp, event):
         n = exp.temps.size
-        if n == 0:
+        if n == 0 or self.ax_temp is None:
             return None
         xs = exp.xs(self._dt(), n)
         idxs = np.arange(n)
@@ -954,7 +1021,10 @@ class PcrAnalysisFrame(ttk.Frame):
 
     def toggle_legend(self):
         self._legend_visible = not self._legend_visible
+        # Solo los ejes que la vista actual construyó (el resto es None).
         for ax in (self.ax_temp, self.ax_photo, self.ax_ext_heat, self.ax_ext_cool):
+            if ax is None:
+                continue
             leg = ax.get_legend()
             if leg is not None:
                 leg.set_visible(self._legend_visible)
