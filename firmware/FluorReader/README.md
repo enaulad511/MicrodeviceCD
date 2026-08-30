@@ -37,7 +37,9 @@ counts → V → nA, misma línea de salida en Serial.
 | `f` / `F` | Una medida (256 ciclos) y la imprime. Si no hay blanco: `No baseline. Capture it first with 'b'.` | `Measuring...` → resultado en 3 líneas (o `Need blank (b)`) |
 | `b` | Captura el blanco (512 ciclos) con el **blanco puesto**; activa `baseline_ready` | `Blank...` → `BL 1234.56 ct` (limpia el detalle) |
 | `c` | Borra el blanco y baja `baseline_ready` | `Blank cleared` (limpia el detalle) |
-| `s` | `RF`, `SETTLE_US`, `CYCLES`, blanco vigente y si está capturado | *(no toca la LCD: es para el monitor)* |
+| `l` / `L` | **Enciende/apaga el LED a mano** (alterna). Para alinear la óptica, comprobar el MOSFET o medir la potencia del LED | `LED ON` / `LED OFF` + bandera `L` fija en la fila de estado |
+| `h` / `H` | **Enciende/apaga el relé del calefactor** (alterna), `HEATER_PIN = 4` | `HEATER ON` / `HEATER OFF` + bandera `H` fija en la fila de estado |
+| `s` | `RF`, `SETTLE_US`, `CYCLES`, estado de LED y calefactor, blanco vigente y si está capturado | *(no toca la LCD: es para el monitor)* |
 
 Salida de `f` — **idéntica** a la del sketch antiguo, para poder contrastar medidas históricas:
 
@@ -55,8 +57,12 @@ Reparto de las cuatro líneas (16x4):
 línea 0:  I= 331.71 nA        <- resultado principal, o estado del proceso
 línea 1:  N= 1234.56 ct       <- neto en counts
 línea 2:  V= 0.99512 V        <- tensión a la salida del TIA
-línea 3:  Blank: OK           <- Blank: OK | Blank: NONE
+línea 3:  Blank: OK  LH       <- Blank: OK | Blank: NONE, + banderas de actuadores
 ```
+
+Banderas de la fila de estado: **`L`** = LED encendido a mano, **`H`** = calefactor activo. Van
+abreviadas a una letra por espacio: `Blank: NONE` + ` LED` + ` HTR` son 19 caracteres y solo hay
+16; así el peor caso (`Blank: NONE  LH`) son 15.
 
 Las líneas 1 y 2 son el detalle que en 16x2 no cabía: las tres magnitudes que el Serial siempre
 imprimió, ahora también en pantalla. La **última** línea lleva el estado del blanco porque el
@@ -139,6 +145,29 @@ módulos pierden contraste; se compensa con el potenciómetro) o intercala un tr
 - **Feedback de proceso en `f` y en `b`** (`Measuring...` / `Blank...`): con la LCD como salida
   principal, un `f` que devuelve un valor parecido al anterior es indistinguible de "no registró
   la tecla".
+- **El LED manual (`l`) no toca `measureDeltaCounts`.** El chopping se quedó **byte a byte** como
+  en el antiguo; `l` solo hace un `digitalWrite` fuera de toda medida. Consecuencias:
+  - Lanzar `f` o `b` con el LED encendido a mano **no corrompe la medida**: `measureDeltaCounts`
+    conmuta el pin él mismo y termina en LOW. Por eso no se bloquea la medida, solo se baja la
+    bandera (`led_manual = false`) al acabar — si no, la marca de la pantalla mentiría.
+  - La marca `LED` de la fila de estado es **permanente** mientras esté encendido, no un mensaje
+    pasajero: un LED de 470 nm olvidado en ON calienta y blanquea la muestra.
+  - El estado se sostiene en una bandera porque en la MKR Zero `digitalRead` sobre un pin de
+    salida no devuelve el valor del latch (el core no habilita el buffer de entrada).
+- **Calefactor (`h`, `HEATER_PIN = 4`): manual y sin automatismos.** Alterna el relé y se queda
+  como lo dejes hasta el siguiente `h` o un reset. Tres cosas que sí lleva:
+  - **`HEATER_ACTIVE_LOW`**: muchos módulos de relé optoacoplados activan con LOW. Si el tuyo es
+    de esos y el define está a 0, el relé arranca **cerrado, calentando**, que es lo contrario de
+    lo que parece decir el código. Confírmalo por el chasquido antes de dejarlo desatendido.
+  - **Arranque sin pulso**: en `setup()` se fija el nivel de reposo **antes** de `pinMode(OUTPUT)`.
+    Al pasar de entrada a salida el pin toma el valor que ya haya en el registro de salida, así
+    que en este orden no hay un destello de activación al encender la placa.
+  - **La bandera no se desincroniza**: a diferencia del LED, ninguna medida toca `HEATER_PIN`, así
+    que `heater_on` siempre dice la verdad.
+  - ⚠️ **No hay corte por tiempo ni lazo de control**: ni termopar, ni consigna, ni apagado
+    automático. Es un interruptor remoto para banco, no un control de temperatura.
+  - Medir con el calefactor encendido es posible, pero el relé conmutando cerca del TIA mete ruido
+    justo en la banda del chopping: para medidas finas, apágalo antes de `f`.
 - **Sin detección de saturación** (fidelidad al antiguo). Sigue vigente el riesgo: con `RF` fijo
   de 3 MΩ, si el ADC pega en 4095 o en 0 la medida sale subestimada y nada lo delata.
 - **Se conserva `while(!Serial)`**: los comandos siguen llegando por teclado, así que un host USB
@@ -171,6 +200,9 @@ Con `LCD_I2C 0` no hace falta instalar nada: `LiquidCrystal` viene con el core. 
       desactiva solo (con 20 columnas los offsets de la librería ya son los correctos).
 - [ ] **Fork de la librería**: se usa `lcd.init()` (fork de johnrickman). Otros forks exponen
       `lcd.begin()` — si no compila, es esa línea de `setup()`.
+- [ ] **Polaridad del relé sin confirmar**: se asumió activo en ALTO (`HEATER_ACTIVE_LOW 0`). Al
+      alimentar la placa, el relé debe quedar **abierto** y chasquear solo al mandar `h`. Si
+      chasquea al arrancar o `h` lo abre en vez de cerrarlo, pon `HEATER_ACTIVE_LOW 1`.
 - [ ] Confirmar que la `Δ` (UTF-8) se sigue viendo bien en tu monitor serie, igual que en el antiguo.
 
 ---

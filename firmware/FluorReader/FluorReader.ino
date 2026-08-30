@@ -6,11 +6,28 @@
 //   f = measure fluorescence once (needs a baseline)
 //   b = capture baseline on blank (stores ON-OFF avg)
 //   c = clear baseline
+//   l = toggle the excitation LED by hand (alignment / frontend checks)
+//   h = toggle the heater relay
 //   s = show settings
 // An HD44780 LCD (16x4 or 16x2) mirrors the result and the blank state.
 
 const int LED_GATE = 2;          // MOSFET gate driving your 470 nm LEDs
 const int ADC_PIN  = A0;         // TIA output to ADC
+const int HEATER_PIN  = 4;         // HEATER REALY PIN ACTIVATOR
+
+// ---- Relé del calefactor ----
+// ⚠️ Muchos módulos de relé optoacoplados son ACTIVOS EN BAJO (activan con LOW).
+// Si el tuyo lo es, pon 1 aquí. Equivocarse no es un detalle estético: el relé
+// quedaría CERRADO (calentando) desde el arranque, justo lo contrario de lo que
+// parece decir el código. Compruébalo con el chasquido antes de dejarlo solo.
+#define HEATER_ACTIVE_LOW 0
+#if HEATER_ACTIVE_LOW
+  #define HEATER_ON_LEVEL  LOW
+  #define HEATER_OFF_LEVEL HIGH
+#else
+  #define HEATER_ON_LEVEL  HIGH
+  #define HEATER_OFF_LEVEL LOW
+#endif
 
 // ---- Adjust these to your hardware ----
 const float VREF = 3.3;          // MKR Zero analog reference (~3.3 V)
@@ -62,6 +79,12 @@ float baseline_counts = 0.0f;    // stored baseline in ADC counts (ON-OFF)
 bool  baseline_ready  = false;   // 'b' lo activa, 'c' lo apaga. Bandera aparte
                                  // porque un blanco válido puede valer 0.0 o
                                  // negativo: el valor no delata si se capturó.
+bool  led_manual      = false;   // LED encendido a mano con 'l'. En la MKR no se
+                                 // puede releer un pin de salida, así que el
+                                 // estado se sostiene en esta bandera.
+bool  heater_on       = false;   // relé del calefactor, alternado con 'h'. A
+                                 // diferencia del LED, ninguna medida lo toca:
+                                 // la bandera nunca se desincroniza sola.
 
 // ---- Pantalla ----
 // Ninguna de estas funciones se llama dentro de measureDeltaCounts: una
@@ -102,7 +125,20 @@ void lcdValue(uint8_t row, const char* prefix, float value, uint8_t dec, const c
 }
 
 void lcdBlankStatus(){
-  lcdLine(LCD_ROW_STATUS, baseline_ready ? "Blank: OK" : "Blank: NONE");
+  // Última fila: estado del blanco + banderas de los actuadores encendidos,
+  //   L = LED manual   H = calefactor
+  // Son PERMANENTES a propósito: lo que se queda encendido por olvido tiene que
+  // verse sin depender de un mensaje pasajero. Se abrevian a una letra porque
+  // "Blank: NONE" + " LED" + " HTR" son 19 caracteres y solo hay 16; así el peor
+  // caso es "Blank: NONE  LH" = 15.
+  char buf[LCD_COLS + 1];
+  strcpy(buf, baseline_ready ? "Blank: OK" : "Blank: NONE");
+  if(led_manual || heater_on){
+    strcat(buf, "  ");
+    if(led_manual) strcat(buf, "L");
+    if(heater_on)  strcat(buf, "H");
+  }
+  lcdLine(LCD_ROW_STATUS, buf);
 }
 
 void lcdClearDetail(){
@@ -110,6 +146,33 @@ void lcdClearDetail(){
   // blanco para no dejar el detalle de la medida anterior junto a un estado
   // nuevo. En 16x2 el bucle no llega a iterar.
   for(uint8_t r = 1; (uint8_t)(r + 1) < LCD_ROWS; r++) lcdLine(r, "");
+}
+
+// ---- LED de excitación ----
+
+void ledManual(bool on){
+  // Encendido fijo, FUERA de cualquier medida: alinear la óptica, comprobar el
+  // MOSFET o medir la potencia del LED. No toca measureDeltaCounts, que sigue
+  // conmutando el pin por su cuenta.
+  led_manual = on;
+  digitalWrite(LED_GATE, on ? HIGH : LOW);
+  Serial.println(on ? F("LED ON (manual).") : F("LED OFF."));
+  lcdLine(0, on ? "LED ON" : "LED OFF");
+  lcdClearDetail();
+  lcdBlankStatus();
+}
+
+// ---- Calefactor ----
+
+void heaterSet(bool on){
+  // Ningún automatismo detrás: se queda como lo dejes hasta el siguiente 'h' o
+  // un reset. Ver la nota de seguridad del README (no hay corte por tiempo).
+  heater_on = on;
+  digitalWrite(HEATER_PIN, on ? HEATER_ON_LEVEL : HEATER_OFF_LEVEL);
+  Serial.println(on ? F("HEATER ON.") : F("HEATER OFF."));
+  lcdLine(0, on ? "HEATER ON" : "HEATER OFF");
+  lcdClearDetail();
+  lcdBlankStatus();
 }
 
 uint16_t readAvg(int n){
@@ -140,6 +203,8 @@ void captureBaseline(){
   lcdClearDetail();
   baseline_counts = measureDeltaCounts(CYCLES_BASELINE);
   baseline_ready  = true;
+  led_manual      = false;       // el chopping deja el pin en LOW: el ON manual
+                                 // ya no está vigente (si no, la marca mentiría)
   Serial.print(F("Baseline (counts): ")); Serial.println(baseline_counts, 2);
   lcdValue(0, "BL ", baseline_counts, 2, " ct");
   lcdBlankStatus();
@@ -148,6 +213,7 @@ void captureBaseline(){
 void printReading(){
   lcdLine(0, "Measuring...");
   float d_counts = measureDeltaCounts(CYCLES_MEASURE);
+  led_manual = false;            // idem: measureDeltaCounts termina con el LED apagado
   float net_counts = d_counts - baseline_counts;               // subtract LED leak
   float dV = net_counts * VREF / 4095.0f;                      // volts of fluorescence only
   float dI = dV / RF;                                          // amperes at photodiode
@@ -163,11 +229,20 @@ void printReading(){
   lcdValue(1, "N= ", net_counts, 2, " ct");   // neto en counts
   lcdValue(2, "V= ", dV, 5, " V");            // tensión a la salida del TIA
 #endif
+  lcdBlankStatus();              // repinta la fila de estado: quita la marca LED
 }
 
 void setup(){
   pinMode(LED_GATE, OUTPUT);
   digitalWrite(LED_GATE, LOW);
+
+  // Relé: se fija el nivel de reposo ANTES de pinMode. Al pasar de entrada a
+  // salida el pin toma el valor que ya haya en el registro de salida, así que
+  // haciéndolo en este orden no hay un pulso de activación al arrancar.
+  digitalWrite(HEATER_PIN, HEATER_OFF_LEVEL);
+  pinMode(HEATER_PIN, OUTPUT);
+  digitalWrite(HEATER_PIN, HEATER_OFF_LEVEL);
+
   analogReadResolution(12);        // 0..4095 over ~0..3.3 V
 
   // LCD antes del Serial: así muestra estado mientras se espera al USB.
@@ -183,7 +258,7 @@ void setup(){
 
   Serial.begin(115200);
   while(!Serial){}                 // wait for USB
-  Serial.println(F("Ready. Commands: f=measure, b=baseline, c=clear, s=status"));
+  Serial.println(F("Ready. Commands: f=measure, b=baseline, c=clear, l=LED, h=heater, s=status"));
 }
 
 void loop(){
@@ -210,10 +285,14 @@ void loop(){
       lcdClearDetail();
       lcdBlankStatus();
     }
+    else if(cmd=='l' || cmd=='L'){ ledManual(!led_manual); }
+    else if(cmd=='h' || cmd=='H'){ heaterSet(!heater_on); }
     else if(cmd=='s'){
       Serial.print(F("RF=")); Serial.print(RF,0);
       Serial.print(F("  SETTLE_US=")); Serial.print(SETTLE_US);
       Serial.print(F("  CYCLES=")); Serial.print(CYCLES_MEASURE);
+      Serial.print(F("  LED=")); Serial.print(led_manual ? F("ON") : F("OFF"));
+      Serial.print(F("  HEATER=")); Serial.print(heater_on ? F("ON") : F("OFF"));
       Serial.print(F("  BL=")); Serial.print(baseline_counts,2);
       Serial.println(baseline_ready ? F(" (ready)") : F(" (not captured)"));
     }
