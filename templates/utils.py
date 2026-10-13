@@ -70,6 +70,9 @@ DEFAULT_SETTINGS = {
         "min": 14.0,
         "acceleration_spin": 300.0,
         "ts_pcr": 0.1,
+        # Ventana del watchdog "ambas caídas" de PCR (s sin lectura fresca de
+        # ninguno de los dos sensores del par → detener). Ver PcrFrame.
+        "temp_stale_s": 10.0,
     },
     "ads_fsr": 0.256,
     "photoreceptor": {"use_diff": 1.0},

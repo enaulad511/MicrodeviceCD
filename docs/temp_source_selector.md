@@ -242,9 +242,15 @@ par IR Object ↔ Termocupla: el **primario** (regula el PID) y el **secundario*
   de análisis tiene su propio checkbox, independiente
   ([pcr_analisis.md](pcr_analisis.md) §8).
 - **Watchdog "ambas caídas".** Si ni el primario ni el secundario entregan lectura
-  fresca por `PCR_TEMP_DEAD_S` (5 s) seguidos, `_check_temp_watchdog` (llamado desde
+  fresca por `temp_dead_s` segundos seguidos, `_check_temp_watchdog` (llamado desde
   `_ui_poll_loop`, hilo principal) señaliza los stop-events y el hilo del experimento
-  desmonta ordenadamente (idempotente vía `_temp_abort_triggered`). Al inicio, un
+  desmonta ordenadamente (idempotente vía `_temp_abort_triggered`). La ventana es
+  configurable: `settings.json` → `pidControllerRPM.temp_stale_s` (default **10 s**,
+  también en `DEFAULT_SETTINGS`, así que el *seeder* la siembra tras un update). Se lee
+  **una vez por corrida** en `callback_start_experiment` (`_read_temp_dead_s`), no en
+  el watchdog, que corre a ritmo de UI: editarla en el ConfigFrame aplica desde la
+  siguiente corrida. Un valor no numérico o `<= 0` cae a `PCR_TEMP_DEAD_S` (10 s) para
+  que un tecleo erróneo nunca desarme el watchdog. (Era 5 s fijo hasta el 13/10/2026.) Al inicio, un
   **start-gate** en `experiment_pcr` espera hasta `PCR_TEMP_START_WAIT_S` (3 s) una
   primera lectura válida de cualquiera de los dos (`_temp_ever_valid`); si no llega,
   no arranca (retorna dentro del `try`, el `finally` desmonta). Un glitch UDP puntual

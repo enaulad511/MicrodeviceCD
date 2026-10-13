@@ -71,7 +71,46 @@ PCR_TEMP_CHANNEL_COLORS = {
 
 # Ventanas del watchdog de sensores (par IR Object/Termocupla) en PCR.
 PCR_TEMP_START_WAIT_S = 3.0  # espera máxima al inicio por una lectura válida
-PCR_TEMP_DEAD_S = 10.0  # sin lectura fresca de ninguno de los dos → detener
+# Sin lectura fresca de ninguno de los dos → detener. Es solo el DEFAULT: el valor
+# efectivo es pidControllerRPM.temp_stale_s de settings.json (_read_temp_dead_s).
+PCR_TEMP_DEAD_S = 10.0
+
+
+def _read_temp_dead_s():
+    """Ventana del watchdog 'ambas caídas' desde settings.json (temp_stale_s).
+
+    Cae a PCR_TEMP_DEAD_S si la clave falta o no es un número > 0, para que un
+    valor mal tecleado en el ConfigFrame nunca desarme el watchdog.
+    """
+    pid = read_settings_from_file().get("pidControllerRPM", {})
+    try:
+        value = float(pid.get("temp_stale_s", PCR_TEMP_DEAD_S))
+    except (TypeError, ValueError):
+        return PCR_TEMP_DEAD_S
+    return value if value > 0 else PCR_TEMP_DEAD_S
+
+
+# Fases del experimento: código estable → etiqueta del label de estado. El código
+# se graba por muestra en la columna `phase` del CSV de temperatura (ancla para
+# estadística posterior), así que NO se renombra; la etiqueta sí se puede retocar.
+# Toda transición pasa por _enter_phase para que etiqueta y código no diverjan.
+PCR_PHASE_LABELS = {
+    "initial": "Initial",
+    "denat_ramp": "Denaturation",
+    "denat_hold": "Denaturation Hold",
+    "high_ramp": "Reach High temp",
+    "high_hold": "Hold High temp",
+    "cooling": "Cooling",
+    "low_hold": "LOW temp Hold",
+    "ext_ramp": "Reach ext temp",
+    "ext_hold": "extension temp Hold ",
+    "fluor_read": "Reading Fluorescence",
+    "final_ext": "Extension",
+    "final_read": "Reading final fluorescence",
+    "done": "Final",
+    "aborted_start": "Aborted: temp sensors unavailable at start",
+    "aborted_sensors": "Aborted: both temp sensors unavailable",
+}
 
 
 def check_temp_higher(temp, target_temp):
@@ -275,10 +314,17 @@ class PCRFrame(ttk.Frame):
         self._chan_last_good: list = [0.0, 0.0, 0.0]
         self._temp_ever_valid = False
         self._temp_abort_triggered = False
+        # Ventana del watchdog; se relee de settings.json al arrancar cada corrida.
+        self.temp_dead_s = PCR_TEMP_DEAD_S
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=1)
         self.ads = ads_reader
         self.fase = "Initial"
+        # Ancla por muestra (columnas cycle/phase del CSV): código de la fase en
+        # curso (PCR_PHASE_LABELS) y ciclo en curso — 1..N dentro del ciclado, 0
+        # fuera de él (antes: initial/denat_*; después: final_*/done).
+        self.phase_code = "initial"
+        self.cycle_current = 0
         self.ts_display = 0.5
         self.last_display = time.time()
         self.start_pcr_time = time.time()
@@ -356,6 +402,9 @@ class PCRFrame(ttk.Frame):
         # la corrida, uno por muestra (ver docs/pcr_eje_tiempo.md). Se anexa en
         # lockstep con las dos curvas de temperatura.
         self.data_time: list = []
+        # Ciclo y fase en curso al recibir cada muestra (lockstep con las de arriba).
+        self.data_cycle: list = []
+        self.data_phase: list = []
         self.data_photodetector = []
         self.data_photodetector_series = []
 
@@ -1042,10 +1091,24 @@ class PCRFrame(ttk.Frame):
         self.data_temperature.append(self.temp)
         self.data_temperature_secondary.append(self.temp_secondary)
         self.data_time.append(t_rx - self.start_pcr_time)
+        # Etiqueta de la muestra con lo que el hilo del experimento declaró en
+        # curso al llegar el datagrama (lecturas atómicas de atributos).
+        self.data_cycle.append(self.cycle_current)
+        self.data_phase.append(self.phase_code)
+
+    def _enter_phase(self, code):
+        """Declara la fase en curso: código grabado por muestra + etiqueta visible.
+
+        Se invoca desde el hilo del experimento (y desde el watchdog, hilo
+        principal); update_displayed_temperature lee phase_code al anexar cada
+        muestra. Asignaciones simples de atributo: atómicas bajo el GIL.
+        """
+        self.phase_code = code
+        self.fase = PCR_PHASE_LABELS[code]
 
     def _check_temp_watchdog(self):
         """Detiene el experimento si ni el primario ni el secundario del par
-        entregan lectura fresca por PCR_TEMP_DEAD_S seguidos ('ambas caídas').
+        entregan lectura fresca por temp_dead_s seguidos ('ambas caídas').
 
         Solo se arma tras la primera lectura válida (_temp_ever_valid); antes de
         eso es el start-gate quien decide no arrancar. Idempotente: dispara una
@@ -1063,11 +1126,11 @@ class PCRFrame(ttk.Frame):
             self._chan_last_good[self.temp_source_idx],
             self._chan_last_good[self._secondary_idx()],
         )
-        if time.time() - last_fresh > PCR_TEMP_DEAD_S:
+        if time.time() - last_fresh > self.temp_dead_s:
             self._temp_abort_triggered = True
-            self.fase = "Aborted: both temp sensors unavailable"
+            self._enter_phase("aborted_sensors")
             print(
-                f"Aborting PCR: both pair sensors stale > {PCR_TEMP_DEAD_S}s "
+                f"Aborting PCR: both pair sensors stale > {self.temp_dead_s}s "
                 "— stopping experiment"
             )
             if self.stop_udp_listenner is not None:
@@ -1088,7 +1151,7 @@ class PCRFrame(ttk.Frame):
         remaining = self._estimate_remaining_time(elapsed_pcr_time)
         msg_elapsed_time += f" -- Estimated finish: {int(remaining / 60)}m {remaining % 60:.1f}s"
         # Watchdog de "ambas caídas": si ni el primario ni el secundario del par
-        # entregan lectura fresca por PCR_TEMP_DEAD_S seguidos, detener ordenadamente.
+        # entregan lectura fresca por temp_dead_s seguidos, detener ordenadamente.
         # Solo se arma tras la primera lectura válida (_temp_ever_valid) — antes de
         # eso el start-gate de experiment_pcr es quien decide no arrancar. Señaliza
         # los stop-events y deja que el hilo del experimento desmonte; el propio
@@ -1178,6 +1241,8 @@ class PCRFrame(ttk.Frame):
         self.data_temperature = []  # Datos acumulados
         self.data_temperature_secondary = []
         self.data_time = []
+        self.data_cycle = []
+        self.data_phase = []
         self.data_photodetector = []
         self.data_photodetector_series = []
         # Reset del estado de captura/watchdog del par para la nueva corrida.
@@ -1185,6 +1250,8 @@ class PCRFrame(ttk.Frame):
         self._chan_last_good = [0.0, 0.0, 0.0]
         self._temp_ever_valid = False
         self._temp_abort_triggered = False
+        self.cycle_current = 0
+        self._enter_phase("initial")
 
         # Dos subplots apilados: arriba temperatura (denso), abajo fotodetector (1/ciclo)
         self.fig, (self.ax, self.ax_photo) = plt.subplots(
@@ -1327,21 +1394,28 @@ class PCRFrame(ttk.Frame):
         with open(filename, "w", newline="") as file:
             writer = csv.writer(file)
             # Fila 0: prefijo/metadata (una celda; incluye la identidad de columnas
-            # "cols: <primario>|<secundario>|t_s" y el resumen de cadencia medido).
-            # El loader del análisis la salta y lee por posición, así que crecer la
-            # fila de metadata y agregar columnas al final es seguro.
+            # "cols: <primario>|<secundario>|t_s|cycle|phase" y el resumen de
+            # cadencia medido). El loader del análisis la salta y lee por posición,
+            # así que crecer la fila de metadata y agregar columnas al final es seguro.
             writer.writerow([self.prefix_row + self._cadence_summary()])
-            # Tres columnas alineadas por muestra: [primario, secundario, t_s]. Se
-            # anexan juntas en update_displayed_temperature; zip_longest cubre un
-            # desfase de a lo más una muestra si el paro cayó entre los append.
-            for p, s, t in zip_longest(
-                self.data_temperature, self.data_temperature_secondary, self.data_time
+            # Cinco columnas alineadas por muestra: [primario, secundario, t_s,
+            # cycle, phase]. Se anexan juntas en update_displayed_temperature;
+            # zip_longest cubre un desfase de a lo más una muestra si el paro cayó
+            # entre los append.
+            for p, s, t, c, ph in zip_longest(
+                self.data_temperature,
+                self.data_temperature_secondary,
+                self.data_time,
+                self.data_cycle,
+                self.data_phase,
             ):
                 writer.writerow(
                     [
                         p if p is not None else "",
                         s if s is not None else "",
                         f"{t:.4f}" if t is not None else "",
+                        c if c is not None else "",
+                        ph if ph is not None else "",
                     ]
                 )
         print(f"Data saved to {filename}")
@@ -1430,6 +1504,10 @@ class PCRFrame(ttk.Frame):
         # corrida anterior y dejaría un punto a miles de segundos, ya grabado en
         # el CSV. Ver docs/pcr_eje_tiempo.md.
         self.start_pcr_time = time.time()
+        # Una lectura por corrida (no en el watchdog, que corre a ritmo de UI): un
+        # cambio en el ConfigFrame aplica a partir de la siguiente corrida.
+        self.temp_dead_s = _read_temp_dead_s()
+        print(f"Temp watchdog window: {self.temp_dead_s} s")
         self.init_temperature_graph()
         self._ui_poll_graph_counter = 0
         self._ui_poll_active = True
@@ -1690,6 +1768,9 @@ class PCRFrame(ttk.Frame):
         if self.stop_udp_listenner is None:
             self.stop_udp_listenner = threading.Event()
         self.start_cycle_time = time.time()
+        # Columna cycle del CSV: 1-based, igual que photodetector_raw y que la
+        # fila k del photodetector_data (lectura de fin del ciclo k).
+        self.cycle_current = idx + 1
 
         # Reach High temp: feed-forward a potencia plena hasta ff_frac_high*setpoint
         # y luego PI (tolerancia 0.5). En el ciclo 0 (break_if_below) se omite el
@@ -1697,7 +1778,7 @@ class PCRFrame(ttk.Frame):
         # que la desnaturalización se haya omitido (denat_skipped): en ese caso
         # arrancamos en frío y hay que alcanzar High de verdad.
         if not _skip(time_high):
-            self.fase = "Reach High temp"
+            self._enter_phase("high_ramp")
             self.pin_heating.write(True)  # pyrefly: ignore
             self._reach_temperature_pi(
                 high_temp,
@@ -1709,7 +1790,7 @@ class PCRFrame(ttk.Frame):
             print(f"Temperature reached: {self.temp} °C")
 
             # Hold High
-            self.fase = "Hold High temp"
+            self._enter_phase("high_hold")
             print(f"Holding temperature for {time_high} seconds")
             self._hold_phase("h_high", high_temp, time_high, ts)
         else:
@@ -1725,7 +1806,7 @@ class PCRFrame(ttk.Frame):
         )
         if cool_target is not None and self.temp > cool_target + 0.5:
             print(f"Cooling down to {cool_target} °C with motor spin")
-            self.fase = "Cooling"
+            self._enter_phase("cooling")
             self.stop_event_motor.clear()  # pyrefly: ignore
             spinMotorRPM_ramped(
                 direction,
@@ -1751,7 +1832,7 @@ class PCRFrame(ttk.Frame):
 
         # Hold Low
         if not _skip(time_low):
-            self.fase = "LOW temp Hold"
+            self._enter_phase("low_hold")
             print(f"Holding LOW temperature for {time_low} seconds")
             self._hold_phase("h_low", low_temp, time_low, ts)
         else:
@@ -1759,7 +1840,7 @@ class PCRFrame(ttk.Frame):
 
         # Reach Ext temp (PI, tolerancia 0.5) + Hold Ext
         if not _skip(ext_time):
-            self.fase = "Reach ext temp"
+            self._enter_phase("ext_ramp")
             self.pin_heating.write(True)  # pyrefly: ignore
             self._reach_temperature_pi(
                 ext_temp,
@@ -1771,16 +1852,18 @@ class PCRFrame(ttk.Frame):
             print(f"Temperature reached: {self.temp} °C")
 
             # Hold Ext
-            self.fase = "extension temp Hold "
+            self._enter_phase("ext_hold")
             print(f"Holding extension temperature for {ext_time} seconds")
             self._hold_phase("h_ext", ext_temp, ext_time, ts)
             print(f"Hold ext complete, end of cycle {idx}")
         else:
             print("Skipping Extension phase: time <= 0")
 
-        # Lectura de fluorescencia
+        # Lectura de fluorescencia. La fase se declara ANTES de la espera previa:
+        # esos FLUOR_PRE_SLEEP_S ya no son hold (el lazo terminó y la temperatura
+        # deriva), y etiquetarlos ext_hold ensuciaría la estadística del hold.
+        self._enter_phase("fluor_read")
         time.sleep(FLUOR_PRE_SLEEP_S)
-        self.fase = "Reading Fluorescence"
         print("Reading fluorescence...")
         v_fluo = self._read_fluorescence(ads)
         print(f"fluorescence delta voltage: {v_fluo}")
@@ -1855,7 +1938,7 @@ class PCRFrame(ttk.Frame):
             f"-denat_temp: {denat_temp}-denat_time: {denat_time}-ts: {ts}"
             f"-temp_source: {primary_label}"
             f"-start: {datetime.fromtimestamp(self.start_pcr_time).isoformat(timespec='seconds')}"
-            f"-cols: {primary_label}|{secondary_label}|t_s"
+            f"-cols: {primary_label}|{secondary_label}|t_s|cycle|phase"
         )
         self.temp = 20.0
         self.client_temperature = UdpClient(
@@ -1872,7 +1955,7 @@ class PCRFrame(ttk.Frame):
         )
         self.prefix_row = prefix_col
         self.client_temperature.start()
-        self.fase = "Initial"
+        self._enter_phase("initial")
         from Drivers.DriverStepperSys import DriverStepperSys, spinMotorRPM_ramped
 
         # start_pcr_time NO se fija aquí: lo hace callback_start_experiment antes
@@ -1890,7 +1973,7 @@ class PCRFrame(ttk.Frame):
                     return
                 time.sleep(0.05)
             if not self._temp_ever_valid:
-                self.fase = "Aborted: temp sensors unavailable at start"
+                self._enter_phase("aborted_start")
                 print("PCR not started: both pair sensors unavailable at start")
                 return
 
@@ -1942,7 +2025,7 @@ class PCRFrame(ttk.Frame):
             # caso el primer ciclo debe alcanzar High de verdad (denat_skipped).
             denat_skipped = _skip(denat_time)
             if not denat_skipped:
-                self.fase = "Denaturation"
+                self._enter_phase("denat_ramp")
                 self.pin_heating.write(True)  # pyrefly: ignore
                 self._reach_temperature_pi(
                     denat_temp,
@@ -1953,7 +2036,7 @@ class PCRFrame(ttk.Frame):
                 )
 
                 # ----- Denaturation Hold
-                self.fase = "Denaturation Hold"
+                self._enter_phase("denat_hold")
                 self._hold_phase("h_denat", denat_temp, denat_time, ts)
                 print(f"Denaturation complete, temperature: {self.temp} °C")
             else:
@@ -1985,7 +2068,9 @@ class PCRFrame(ttk.Frame):
             # fluorescencia final SIEMPRE se realiza (la medición no se salta).
             if not self.stop_udp_listenner.is_set():
                 print("PCR cycles complete, reading fluorescence")
-                self.fase = "Extension"
+                # Fuera del ciclado: cycle vuelve a 0 (la fase dice que es el cierre).
+                self.cycle_current = 0
+                self._enter_phase("final_ext")
                 # Ancla del cronómetro del segmento final (hold + lectura final).
                 # Se pone siempre, incluso si el hold se omite (ext_time_final<=0),
                 # para que la lectura final igual cuente hacia abajo.
@@ -1994,10 +2079,11 @@ class PCRFrame(ttk.Frame):
                     self._hold_phase("h_ext", ext_temp, ext_time_final, ts)
                 else:
                     print("Skipping Final Extension hold: time <= 0")
+                self._enter_phase("final_read")
                 time.sleep(FLUOR_PRE_SLEEP_S)
                 v_fluo_final = self._read_fluorescence(ads)
                 print(f"Final fluorescence delta voltage: {v_fluo_final}")
-                self.fase = "Final"
+                self._enter_phase("done")
 
             self.save_data_temps_file()
 

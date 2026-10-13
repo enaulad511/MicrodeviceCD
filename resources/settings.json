@@ -52,7 +52,8 @@
         "max": 35.0,
         "min": 14.0,
         "acceleration_spin": 300.0,
-        "ts_pcr": 0.1
+        "ts_pcr": 0.1,
+        "temp_stale_s": 10.0
     },
     "ads_fsr": 0.256,
     "photoreceptor": {

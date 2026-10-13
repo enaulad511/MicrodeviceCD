@@ -99,7 +99,8 @@ La fila 0 (metadata, que **nadie parsea** — el loader hace `next(reader, None)
 
 - `start: <ISO>` — ancla el eje relativo al reloj de pared sin pagar una columna por
   muestra, para poder correlacionar la corrida con otros logs.
-- `cols: <pri>|<sec>|t_s` — identidad de columnas.
+- `cols: <pri>|<sec>|t_s` — identidad de columnas. (Desde el 13/10/2026 el CSV suma
+  dos columnas más al final, `cycle|phase`; ver [pcr_csv_ciclo_fase.md](pcr_csv_ciclo_fase.md).)
 - El resumen de cadencia **medido** (`_cadence_summary`): `dt_mean`, `dt_p95`, `dt_max`,
   `n`, `span`.
 
