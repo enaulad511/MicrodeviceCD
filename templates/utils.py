@@ -48,6 +48,16 @@ DEFAULT_SETTINGS = {
         "KI_h_low": 0.2,
         "imax_h_low": 0.5,
         "tband_h_low": 0.02,
+        # Rampa PI hacia ext_temp (fase "ext"). Valores = los fallbacks de
+        # _load_phase_pid que regían cuando estas claves no existían.
+        "KP_ext": 0.15,
+        "win_ext": 0.09,
+        "m_age_min_ext": 0.02,
+        "m_age_max_ext": 0.2,
+        "tband_ext": 0.05,
+        "KI_ext": 0.5,
+        "ff_frac_ext": 0.0,
+        "imax_ext": 0.5,
         "KP_h_ext": 0.1,
         "win_h_ext": 0.09,
         "KI_h_ext": 0.5,

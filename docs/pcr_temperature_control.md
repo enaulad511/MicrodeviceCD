@@ -75,11 +75,29 @@ La pre-rampa se **omite** cuando `break_if_below` es verdadero.
 | `ff_frac_denat` | `0.8` | Ídem para la rampa de desnaturalización. |
 | `KP_high`, `KI_high`, `imax_high`, `tband_high`, `win_high`, `m_age_high` | — | Lazo PI de la fase high. |
 | `KP_denat`, `KI_denat`, `imax_denat`, `tband_denat`, `win_denat`, `m_age_denat` | — | Lazo PI de la fase denat (las claves `KI/imax/tband` se añadieron para que denat use PI real, espejando los valores de high). |
+| `KP_ext`, `KI_ext`, `imax_ext`, `tband_ext`, `win_ext`, `m_age_min_ext`, `m_age_max_ext`, `ff_frac_ext` | `0.15`, `0.5`, `0.5`, `0.05`, `0.09`, `0.02`, `0.2`, `0.0` | Rampa PI de low → `ext_temp` en cada ciclo (`_run_cycle`, "Reach ext temp"). Distinta del *hold* (`*_h_ext`, que también usa la extensión final). |
 
 `_load_phase_pid` devuelve `FF_FRAC = ff_frac_<phase>` con **default `0.0`**, por lo que
-cualquier fase sin la clave (low, ext, …) conserva el comportamiento PI puro previo.
-**Activar el blast en otra fase no requiere tocar Python**: basta añadir, p. ej.,
-`ff_frac_ext` a `settings.json`.
+cualquier fase sin la clave conserva el comportamiento PI puro previo.
+**Activar el blast en otra fase no requiere tocar Python**: basta añadir la clave
+`ff_frac_<phase>` (o, en ext, subir `ff_frac_ext`) en `settings.json`.
+
+> **Claves `*_ext` explícitas (13/10/2026):** hasta esta fecha la rampa hacia `ext_temp`
+> no tenía ninguna clave en `settings.json` y corría con los *fallbacks* hardcodeados de
+> `_load_phase_pid`. Se añadieron (también a `DEFAULT_SETTINGS`, para que el *seeder* las
+> siembre en el `settings.json` local del Pi) con **exactamente esos valores**, así que el
+> comportamiento no cambia; solo quedan editables. Única diferencia: `win_ext` antes era
+> `ts_pcr·0.9` y ahora es un `0.09` fijo (idéntico con `ts_pcr=0.1`), igual que el `win_`
+> explícito de las demás fases. No se añadió `m_age_ext`: `MAX_AGE` no lo consume nadie
+> (ver §"Parámetros" de la edad máxima).
+>
+> **Supervivencia a la restauración de `update_repo`:** el paso de restauración copia el
+> `settings.json` previo al update, que aún no tiene estas claves. Las devuelve
+> `seed_default_settings` (solo agrega claves ausentes, nunca pisa valores locales), que
+> ahora corre en dos sitios: al final de `update_repo` (paso 4, no fatal) y al arrancar
+> `main.py`. Una vez en el archivo, el guardado del `ConfigFrame` las conserva: reconstruye
+> `pidControllerRPM` entero a partir del propio archivo. Restaurar un *snapshot* viejo sí
+> revierte un `*_ext` ya afinado a su default (lo mismo que cualquier otra clave).
 
 > **Tuning pendiente:** `KI_denat/imax_denat/tband_denat` se inicializaron espejando high
 > (`0.6 / 0.5 / 0.05`). Conviene una pasada de tuning en hardware, ya que denat parte de
@@ -202,7 +220,7 @@ El **hold** (`hold_temperature`) queda intacto: usa su propio umbral estricto (`
 | `m_age_<phase>` | — | Clave estática antigua. **Ya no se usa como umbral directo** en la rampa; sobrevive solo como *fallback* de `m_age_max_<phase>`. |
 
 `_load_phase_pid` devuelve `MAX_AGE_MIN`/`MAX_AGE_MAX`. Cualquier fase sin las claves nuevas
-(p. ej. `ext`) cae a `0.02`/`0.2`. Los límites son absolutos (no escalan el valor base),
+cae a `0.02`/`0.2` (`ext` las declara explícitas con esos mismos valores). Los límites son absolutos (no escalan el valor base),
 acotados a `[m_age_min, m_age_max]` por construcción del interpolador.
 
 __author__ = "Edisson A. Naula"

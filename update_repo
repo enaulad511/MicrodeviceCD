@@ -102,6 +102,22 @@ else
     fi
   done
 fi
+echo ""
+
+# ---------------------------------------------------------------------------
+# 4) Sembrar en settings.json las claves NUEVAS que trajo el update.
+#    El snapshot restaurado es anterior al update y no las tiene; esto las
+#    agrega con su valor por defecto (DEFAULT_SETTINGS) SIN tocar ningún valor
+#    local. main.py hace lo mismo al arrancar; aquí se adelanta para que ya
+#    estén en el archivo al terminar el update. No fatal: si falla, el
+#    arranque de la app lo repara igual.
+# ---------------------------------------------------------------------------
+echo "Sembrando claves nuevas de configuración en resources/settings.json ..."
+if python3 -c "from templates.utils import seed_default_settings as s; print('  claves agregadas' if s() else '  sin claves nuevas')"; then
+  :
+else
+  echo "  AVISO: no se pudo sembrar; se hará al arrancar la app."
+fi
 
 chmod +x runAA
 chmod +x update_repo
