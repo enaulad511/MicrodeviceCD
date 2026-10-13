@@ -37,15 +37,15 @@ unsigned long lastRelayToggleMs = 0;
 bool relayState = false;
 
 // === Simulated stage durations — EDIT HERE (bench-test defaults, ms) ===
-const unsigned long InitialHeatTime = 10000;  // replaces: ramp until 96 C
-const unsigned long InitialHoldTime = 15000;  // real run: 180000
-const unsigned long HeatTime        = 8000;   // replaces: ramp until 93 C
-const unsigned long HoldTimeHigh    = 10000;  // real value
-const unsigned long HoldTimeLow     = 10000;  // real value
+const unsigned long InitialHeatTime = 3000;  // replaces: ramp until 96 C
+const unsigned long InitialHoldTime = 1000;  // real run: 180000
+const unsigned long HeatTime        = 1000;   // replaces: ramp until 93 C
+const unsigned long HoldTimeHigh    = 3000;  // real value
+const unsigned long HoldTimeLow     = 3000;  // real value
 const unsigned long FinalHoldTime   = 15000;  // real run: 60000
 const unsigned long PauseTime       = 100;
 
-const int MaxCycles = 5;                      // real run: 40
+const int MaxCycles = 10;                      // real run: 40
 
 // === Nominal temperatures (CSV/plot column only — nothing is measured) ===
 const double TempAmbient   = 25.0;

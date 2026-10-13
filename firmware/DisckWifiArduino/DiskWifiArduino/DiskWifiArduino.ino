@@ -2,8 +2,8 @@
 #include "Adafruit_MAX31855.h"
 
 #define RelayPin 5
-#define MAXDO 6
-#define MAXCS 12
+#define MAXDO 9
+#define MAXCS 8
 #define MAXCLK 7
 
 const char* ssid = "MasoudiPhone";  // Your Hotspot Name
@@ -11,10 +11,25 @@ const char* password = "27Ggaabb";  // Your Hotspot Password
 
 WiFiServer server(80);
 WiFiUDP udp;
-const char* receiverIP = "10.55.63.151";  // MKR Receiver IP (Update if needed)
-const int receiverPort = 5005;
+const int udpPort = 5005;                   // Every receiver listens here (OldDevice, ClientUDP)
+IPAddress broadcastIP(255, 255, 255, 255);  // Recomputed from the subnet once connected
 
 Adafruit_MAX31855 thermocouple(MAXCLK, MAXCS, MAXDO);
+
+// Directed broadcast address of the current subnet: (ip & mask) | ~mask.
+// Falls back to the limited broadcast 255.255.255.255 if the mask is unknown.
+IPAddress computeBroadcastIP() {
+    IPAddress ip = WiFi.localIP();
+    IPAddress mask = WiFi.subnetMask();
+    if (mask == IPAddress(0, 0, 0, 0)) {
+        return IPAddress(255, 255, 255, 255);
+    }
+    uint8_t b[4];
+    for (int i = 0; i < 4; i++) {
+        b[i] = (ip[i] & mask[i]) | (uint8_t)(~mask[i]);
+    }
+    return IPAddress(b[0], b[1], b[2], b[3]);
+}
 
 void setup() {
     Serial.begin(9600);
@@ -34,12 +49,19 @@ void setup() {
     Serial.print("Sender MKR IP Address: ");
     Serial.println(WiFi.localIP());
 
+    broadcastIP = computeBroadcastIP();
+    Serial.print("Broadcasting to ");
+    Serial.print(broadcastIP);
+    Serial.print(":");
+    Serial.println(udpPort);
+
     server.begin();
-    udp.begin(receiverPort);
+    udp.begin(udpPort);
 }
 
 void loop() {
     double temperature = thermocouple.readCelsius();
+    //double temperature = 33;
 
     if (isnan(temperature)) {
         Serial.println("Error: Failed to read from thermocouple");
@@ -60,13 +82,15 @@ void loop() {
         client.stop();
     }
 
-    // **Send data to another MKR via UDP**
-    udp.beginPacket(receiverIP, receiverPort);
+    // **Broadcast the temperature via UDP to every receiver on the subnet**
+    // Payload stays a plain float as text, so OldDevice's atof() and the
+    // Raspberry's ClientUDP.latest_float() keep parsing it unchanged.
+    udp.beginPacket(broadcastIP, udpPort);
     udp.print(temperature);
     udp.endPacket();
 
-    Serial.print("Sent temperature to ");
-    Serial.print(receiverIP);
+    Serial.print("Broadcast temperature to ");
+    Serial.print(broadcastIP);
     Serial.print(": ");
     Serial.println(temperature);
 

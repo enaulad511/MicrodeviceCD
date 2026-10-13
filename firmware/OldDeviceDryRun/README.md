@@ -79,9 +79,9 @@ V (`ADC_VREF = 1.7`) → nA, con baseline oscuro (LED OFF, 200 lecturas) restado
 ≥ 0 — idéntico a [../FlourReaderV2/FluorReaderV2.ino](../FlourReaderV2/FluorReaderV2.ino)
 y a la versión actual de OldDevice.
 
-A diferencia de OldDevice, este sketch **sí llama `analogReadResolution(12)`** en
-`setup()` (como FluorReaderV2). OldDevice divide entre 4095 pero deja el ADC en los
-10 bits default del SAMD21 — bug latente de escala ~4× que aquí no se replicó.
+Igual que FluorReaderV2 (y que OldDevice desde el fix del 30/08/2026), el `setup()`
+llama `analogReadResolution(12)` — el SAMD21 arranca en 10 bits y la conversión divide
+entre 4095, así que sin esa línea las lecturas saldrían con escala ~4× baja.
 
 ## 4. Protocolo serial
 

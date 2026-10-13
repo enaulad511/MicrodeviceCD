@@ -72,28 +72,28 @@ double lastInputForSlope = 0.0;
 unsigned long lastSlopeMs = 0;
 
 // === PCR Program Parameters ===
-const double TempInitial   = 96.0;  // Initial heating stage
-const double TempCycleHigh = 93.0;  // Denaturation
+const double TempInitial   = 95.0;  // Initial heating stage
+const double TempCycleHigh = 95.0;  // Denaturation
 const double TempCycleLow  = 63.0;  // Annealing
 const double TempFinalHold = 63.0;  // Final hold
 
-const unsigned long InitialHoldTime = 180000;
-const unsigned long HoldTimeHigh    = 10000;
-const unsigned long HoldTimeLow     = 10000;
-const unsigned long FinalHoldTime   = 60000;
+const unsigned long InitialHoldTime = 1000;
+const unsigned long HoldTimeHigh    = 1000;
+const unsigned long HoldTimeLow     = 1000;
+const unsigned long FinalHoldTime   = 1000;
 const unsigned long PauseTime       = 100;
 
-const int MaxCycles = 40;
+const int MaxCycles = 6;
 
 // --- Cooling via motor ---
-const double MotorRPM = 1800.0;
+const double MotorRPM = 4800.0;
 const int    MotorRevs = 40;
 // *** allow more corrective bursts if needed
 const int    MaxCoolingBursts = 1;
 
 // --- Pre-Spin ---
 const double PreSpinRPM = 800.0;
-const int    PreSpinRevs = 100;
+const int    PreSpinRevs = 0;
 
 // === Runtime Variables ===
 int cycleCount = 0;
@@ -233,6 +233,8 @@ void setup() {
   pinMode(WifiLedPin, OUTPUT);       digitalWrite(WifiLedPin, LOW);
   pinMode(SenderLedPin, OUTPUT);     digitalWrite(SenderLedPin, LOW);
   pinMode(LED_Fluorescence, OUTPUT); digitalWrite(LED_Fluorescence, LOW);
+
+  analogReadResolution(ADC_BITS);   // FluorReaderV2 method: 12-bit ADC (SAMD21 defaults to 10)
 
   Wire.begin();
   lcd.init(); delay(50);
@@ -489,7 +491,8 @@ void loop() {
         float timeSeconds = millis() / 1000.0;
         Serial.print(timeSeconds, 2); Serial.print(","); Serial.print(Input);
         Serial.print(","); Serial.print(lastFluor_nA, 6);
-        Serial.print(","); Serial.println(lastRaw, 6);
+        Serial.print(","); Serial.print(lastRaw, 6);
+        Serial.print(", "); Serial.println(cycleCount, 1);
         delay(50);
       }
       currentStage = HOLD_LOW;
@@ -569,7 +572,8 @@ void loop() {
   float timeSeconds = millis() / 1000.0;
   Serial.print(timeSeconds, 2); Serial.print(", "); Serial.print(Input);
   Serial.print(", "); Serial.print(lastFluor_nA, 6);
-  Serial.print(", "); Serial.println(lastRaw, 6);
+  Serial.print(", "); Serial.print(lastRaw, 6);
+  Serial.print(", "); Serial.println(cycleCount, 1);
 
   delay(50);
 }

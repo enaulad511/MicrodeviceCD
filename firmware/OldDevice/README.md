@@ -66,6 +66,10 @@ y la suaviza con EMA (`ALPHA = 0.20`, [OldDevice.ino:44](OldDevice.ino#L44)). Es
 filtrado es la entrada del PID. `SenderLedPin` se enciende cuando llegan paquetes con
 valor > 0.
 
+El emisor de referencia es [../DisckWifiArduino/](../DisckWifiArduino/) (MKR + MAX31855):
+desde el 02/09/2026 **emite en broadcast** a la dirección dirigida de la subred (puerto
+5005), así que no hay que configurar la IP de esta placa en el emisor.
+
 ## 4. Control térmico
 
 Relay mecánico protegido y PID por ventana de tiempo:
@@ -110,6 +114,11 @@ simple + baseline en nA), con el LED automatizado; ya **no hay chopping ON–OFF
 
 Cadena: `readAvgCounts` → `countsToVolts` → `voltsToCurrentA` → ×1e9 =
 `readCurrentRaw_nA()` ([OldDevice.ino:177](OldDevice.ino#L177)), en nA sin baseline.
+
+> 📌 **30/08/2026** — se agregó `analogReadResolution(12)` al `setup()`
+> ([OldDevice.ino:237](OldDevice.ino#L237)): la conversión divide entre 4095 pero el
+> SAMD21 arranca en 10 bits, así que las lecturas previas a este fix salían con escala
+> **~4× baja**. FluorReaderV2 siempre lo llamó; la migración del método lo había omitido.
 
 - **Baseline oscuro** (`captureBaseline()`, [OldDevice.ino:183](OldDevice.ino#L183)):
   con el primer `f` del gate, LED OFF y detector a oscuras; `delay(1000)` + 200 lecturas

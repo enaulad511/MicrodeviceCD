@@ -71,7 +71,7 @@ PCR_TEMP_CHANNEL_COLORS = {
 
 # Ventanas del watchdog de sensores (par IR Object/Termocupla) en PCR.
 PCR_TEMP_START_WAIT_S = 3.0  # espera máxima al inicio por una lectura válida
-PCR_TEMP_DEAD_S = 5.0  # sin lectura fresca de ninguno de los dos → detener
+PCR_TEMP_DEAD_S = 10.0  # sin lectura fresca de ninguno de los dos → detener
 
 
 def check_temp_higher(temp, target_temp):
