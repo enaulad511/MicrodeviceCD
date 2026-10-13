@@ -3,6 +3,7 @@
 import re
 import threading
 import time
+from collections import deque
 from datetime import datetime
 from tkinter import filedialog
 
@@ -70,7 +71,9 @@ PCR_TEMP_CHANNEL_COLORS = {
 }
 
 # Ventanas del watchdog de sensores (par IR Object/Termocupla) en PCR.
-PCR_TEMP_START_WAIT_S = 3.0  # espera máxima al inicio por una lectura válida
+# Espera máxima al inicio por una lectura válida. DEFAULT: el efectivo es
+# pidControllerRPM.temp_start_wait_s (se lee en experiment_pcr; <= 0 → default).
+PCR_TEMP_START_WAIT_S = 3.0
 # Sin lectura fresca de ninguno de los dos → detener. Es solo el DEFAULT: el valor
 # efectivo es pidControllerRPM.temp_stale_s de settings.json (_read_temp_dead_s).
 PCR_TEMP_DEAD_S = 10.0
@@ -110,7 +113,117 @@ PCR_PHASE_LABELS = {
     "done": "Final",
     "aborted_start": "Aborted: temp sensors unavailable at start",
     "aborted_sensors": "Aborted: both temp sensors unavailable",
+    "aborted_timeouts": "Aborted: too many consecutive cycles with phase timeouts",
 }
+
+# Salvaguarda de fases que esperan una temperatura (denat_ramp, high_ramp,
+# ext_ramp, cooling): sin ella, un disco que no llega (problema mecánico que el
+# ciclo siguiente suele resolver solo) colgaba la corrida. Si la fase dura más de
+# max(piso, factor × estimado) se abandona y se pasa a la siguiente. Estos son
+# DEFAULTS; los efectivos vienen de settings.json → pidControllerRPM
+# (_phase_timeout_cfg). Ver docs/pcr_timeout_fases.md.
+PCR_TIMEOUT_FACTOR = 3.0  # phase_timeout_factor (<= 0 desactiva la salvaguarda)
+PCR_TIMEOUT_FLOOR_S = 20.0  # phase_timeout_floor_s: cubre la cola de asentamiento del PI
+PCR_RAMP_S_PER_C = 0.2  # ramp_s_per_c: estimado de calentamiento (≈5 °C/s); también la preview
+# cool_s_per_c: estimado de enfriamiento = ΔT real × s/°C, medido en la corrida Newn1
+# (94→60 °C a 700 rpm: 34 s, 1.02 s/°C de mediana, máx 1.19). La cola pasiva tras
+# parar el motor (target+9.5 → target+0.5) es ~2/3 de ese tiempo, por eso se dejó
+# la vieja fórmula por rpm (10000 / rpm), que solo veía el giro y se quedaba 2.4×
+# corta: con factor 3 dejaba un margen de 7 % y daría timeouts falsos. La preview
+# y la ETA usan esta misma tasa (_estimate_cycle_s).
+PCR_COOL_S_PER_C = 1.0
+PCR_MAX_FAILED_CYCLES = 3  # max_failed_cycles: consecutivos con timeout → abortar (0 = nunca)
+# Pausa de los lazos de espera que antes giraban sin dormir. La temperatura llega
+# cada ~80 ms, así que 10 ms no cambian la reacción y liberan el núcleo.
+PCR_POLL_S = 0.01
+
+
+# Frescura de la temperatura RELATIVA A LA CADENCIA MEDIDA: una lectura sigue
+# siendo confiable hasta que la siguiente llega fresh_dt_factor veces tarde. Los
+# umbrales absolutos (m_age_* de las rampas, ts_pcr de los holds) quedan como piso.
+# Sin esto, con lecturas cada 0.3 s (Newn1) contra umbrales de 0.02–0.2 s, el heater
+# quedaba forzado a OFF ~2/3 del tiempo en holds y cerca del setpoint (medido en
+# simulación del código: 35 % de duty donde el PI pedía 100 %). Ver
+# docs/pcr_temperature_control.md §9 y docs/pcr_pendientes.md punto 1.
+PCR_FRESH_DT_FACTOR = 1.5  # fresh_dt_factor (0 desactiva: solo umbrales absolutos)
+PCR_FRESH_AGE_CAP_S = 1.0  # fresh_age_cap_s: tope; más allá ya es un stall, no cadencia
+PCR_CADENCE_WIN = 15  # lecturas en la mediana móvil del periodo de recepción
+PCR_CADENCE_MIN_N = 5  # periodos medidos antes de relajar nada
+
+
+def _cfg_num(pid, key, default):
+    """float de settings; no numérico o negativo → default (tecleo en ConfigFrame)."""
+    try:
+        value = float(pid.get(key, default))
+    except (TypeError, ValueError):
+        return default
+    return value if value >= 0 else default
+
+
+def _phase_timeout_cfg(pid):
+    """Parámetros de la salvaguarda desde el dict pidControllerRPM, validados.
+
+    Un valor no numérico o negativo cae a su default (un tecleo erróneo en el
+    ConfigFrame no debe desarmar ni volver absurda la salvaguarda). factor 0
+    la desactiva a propósito; max_failed 0 = nunca abortar por timeouts.
+    """
+    return {
+        "factor": _cfg_num(pid, "phase_timeout_factor", PCR_TIMEOUT_FACTOR),
+        "floor_s": _cfg_num(pid, "phase_timeout_floor_s", PCR_TIMEOUT_FLOOR_S),
+        "s_per_c": _cfg_num(pid, "ramp_s_per_c", PCR_RAMP_S_PER_C),
+        "cool_s_per_c": _cfg_num(pid, "cool_s_per_c", PCR_COOL_S_PER_C),
+        "max_failed": int(_cfg_num(pid, "max_failed_cycles", PCR_MAX_FAILED_CYCLES)),
+    }
+
+
+def _freshness_cfg(pid):
+    """Frescura relativa a la cadencia: factor (0 = desactivada) y tope en s."""
+    return {
+        "factor": _cfg_num(pid, "fresh_dt_factor", PCR_FRESH_DT_FACTOR),
+        "cap_s": _cfg_num(pid, "fresh_age_cap_s", PCR_FRESH_AGE_CAP_S),
+    }
+
+
+# Temperatura de partida que asumen la preview y la ETA (no hay lectura todavía).
+PCR_ROOM_TEMP_C = 20.0
+
+
+def _estimate_cycle_s(high_temp, low_temp, ext_temp, time_high, time_low, ext_time, cfg):
+    """Duración estimada de UN ciclo en régimen, con el mismo modelo que la
+    salvaguarda de fases (ΔT × ramp_s_per_c al subir, ΔT × cool_s_per_c al bajar)
+    y las mismas reglas de omisión que _run_cycle. Incluye la lectura de
+    fluorescencia. Contra Newn1: 80.3 s estimados vs ~83 s medidos.
+    """
+    # Un ciclo arranca donde terminó el anterior: en ext, o en la última fase activa.
+    cur = ext_temp if not _skip(ext_time) else (low_temp if not _skip(time_low) else high_temp)
+    total = 0.0
+    if not _skip(time_high):
+        total += abs(high_temp - cur) * cfg["s_per_c"] + time_high
+        cur = high_temp
+    cool_target = low_temp if not _skip(time_low) else (ext_temp if not _skip(ext_time) else None)
+    if cool_target is not None and cur > cool_target:
+        total += (cur - cool_target) * cfg["cool_s_per_c"]
+        cur = cool_target
+    if not _skip(time_low):
+        total += time_low
+        cur = low_temp
+    if not _skip(ext_time):
+        total += abs(ext_temp - cur) * cfg["s_per_c"] + ext_time
+    return total + FLUOR_READ_TOTAL_S
+
+
+def _estimate_total_s(
+    high_temp, low_temp, ext_temp, time_high, time_low, ext_time,
+    cycles, denat_temp, denat_time, ext_time_final, initial_spin_time, cfg,
+):
+    """Duración estimada de la corrida completa (ETA antes del primer ciclo)."""
+    total = max(0.0, initial_spin_time)
+    if not _skip(denat_time):
+        total += abs(denat_temp - PCR_ROOM_TEMP_C) * cfg["s_per_c"] + denat_time
+    total += cycles * _estimate_cycle_s(
+        high_temp, low_temp, ext_temp, time_high, time_low, ext_time, cfg
+    )
+    return total + max(0.0, ext_time_final) + FLUOR_READ_TOTAL_S
 
 
 def check_temp_higher(temp, target_temp):
@@ -144,28 +257,37 @@ def _project_slug(name):
     return slug or "last_run"
 
 
+# Cortes del gain scheduling en |error| (°C), compartidos con _fuzzy_max_age. Las
+# interpolaciones se escriben EN FUNCIÓN de estas constantes a propósito: el bug
+# corregido el 13/10/2026 fue mover los cortes (15/5 → 7/3 → 5/2 °C, mayo-junio) sin
+# reescalar las t, que quedaron negativas en la zona media con un salto en el corte
+# alto. Ver docs/pcr_pendientes.md punto 10.
+FUZZY_NEAR_C = 2.0
+FUZZY_FAR_C = 5.0
+
+
 def _fuzzy_gains(error: float, base_kp: float, base_ki: float) -> tuple:
     """Escala KP/KI dinámicamente según la magnitud del error (fuzzy gain scheduling).
 
-    Tres zonas con interpolación lineal para transiciones suaves:
-      |e| >= 15°C  → agresivo (kp×2.0, ki×0.2): rampas largas sin windup
-      5 <= |e| < 15 → intermedio: transición suave
-      |e| < 5°C    → preciso  (kp×0.5, ki×1.3): regulación cerca del setpoint
+    Tres zonas, continuas, con interpolación lineal:
+      |e| >= FAR (5°C)     → agresivo (kp×2.0, ki×0.2): rampas largas sin windup
+      NEAR <= |e| < FAR    → intermedio: kp 1.0→2.0, ki 1.0→0.2
+      |e| < NEAR (2°C)     → preciso: kp 0.5→1.0, ki 1.3→1.0 (en el setpoint, 0.5/1.3)
 
     Los factores de escala operan sobre las ganancias base leídas de settings.json,
     por lo que el punto de operación nominal sigue siendo configurable allí.
     """
     abs_error = abs(error)
-    if abs_error >= 5.0:
+    if abs_error >= FUZZY_FAR_C:
         kp_s, ki_s = 2.0, 0.2
-    elif abs_error >= 2.0:
-        t = (abs_error - 5.0) / 10.0  # 0..1 de 3°C a 7°C
+    elif abs_error >= FUZZY_NEAR_C:
+        t = (abs_error - FUZZY_NEAR_C) / (FUZZY_FAR_C - FUZZY_NEAR_C)  # 0..1 de NEAR a FAR
         kp_s = 1.0 + t * 1.0  # 1.0 → 2.0
-        ki_s = 1.0 - t * 0.8  # 0.2 → 1.0
+        ki_s = 1.0 - t * 0.8  # 1.0 → 0.2
     else:
-        t = abs_error / 5.0  # 0..1 de 0°C a 3°C
+        t = abs_error / FUZZY_NEAR_C  # 0..1 de 0 °C a NEAR
         kp_s = 0.5 + t * 0.5  # 0.5 → 1.0
-        ki_s = 1.3 - t * 0.3  # 1.0 → 1.3
+        ki_s = 1.3 - t * 0.3  # 1.3 → 1.0
     return base_kp * kp_s, base_ki * ki_s
 
 
@@ -182,11 +304,11 @@ def _fuzzy_max_age(error: float, m_age_min: float, m_age_max: float) -> float:
     por fase (m_age_min_<phase> / m_age_max_<phase>).
     """
     abs_error = abs(error)
-    if abs_error >= 5.0:
+    if abs_error >= FUZZY_FAR_C:
         return m_age_max
-    if abs_error < 2.0:
+    if abs_error < FUZZY_NEAR_C:
         return m_age_min
-    t = (abs_error - 2.0) / 3.0  # 0..1 de 2°C a 5°C
+    t = (abs_error - FUZZY_NEAR_C) / (FUZZY_FAR_C - FUZZY_NEAR_C)  # 0..1 de NEAR a FAR
     return m_age_min + t * (m_age_max - m_age_min)
 
 
@@ -316,6 +438,21 @@ class PCRFrame(ttk.Frame):
         self._temp_abort_triggered = False
         # Ventana del watchdog; se relee de settings.json al arrancar cada corrida.
         self.temp_dead_s = PCR_TEMP_DEAD_S
+        # Salvaguarda de fases: config (se relee en experiment_pcr) y registro por
+        # corrida (se reinicia en init_temperature_graph).
+        self.timeout_cfg = _phase_timeout_cfg({})
+        self.phase_timeouts: list = []  # (cycle, phase, elapsed_s, limit_s, temp, target)
+        self._cycle_timeouts: list = []  # códigos de fase con timeout del ciclo en curso
+        self.failed_cycles: list = []
+        self.consec_failed_cycles = 0
+        self.data_photo_timeouts: list = []  # lockstep con data_photodetector
+        # Frescura relativa a la cadencia (_note_rx): periodos recientes entre
+        # lecturas válidas del primario y el umbral derivado que leen los lazos.
+        # 0.0 = sin medición aún → solo rigen los umbrales absolutos.
+        self.fresh_cfg = _freshness_cfg({})
+        self._rx_dts: deque = deque(maxlen=PCR_CADENCE_WIN)
+        self._last_good_rx: "float | None" = None
+        self.fresh_age_s = 0.0
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=1)
         self.ads = ads_reader
@@ -332,7 +469,7 @@ class PCRFrame(ttk.Frame):
         self.start_cycle_time = time.time()
         self.time_end_cycle = time.time()
         self.total_cycles = 0
-        self.teorical_time_pcr = 0
+        self.teorical_time_pcr = 0.0
         self.last_cycle_duration = 0.0
         self.avg_cycle_duration = 0.0
         self.ext_time_final = 0.0
@@ -783,7 +920,8 @@ class PCRFrame(ttk.Frame):
             time_high = float(self.entries[2].get())
             time_low = float(self.entries[3].get())
             cycles = int(self.entries[4].get())
-            rpm = float(self.entries[5].get())
+            # RPM solo se valida: el enfriamiento ya se estima por ΔT, no por rpm.
+            float(self.entries[5].get())
             denat_time = float(self.entries[6].get())
             denat_temp = float(self.entries[7].get())
             ext_time = float(self.entries[8].get())
@@ -791,27 +929,27 @@ class PCRFrame(ttk.Frame):
             ext_time_final = float(self.entries[10].get())
             initial_spin_time = float(self.entries[11].get())
 
-            room_temp = 20.0
-            transition_const = 10000
-            transition_time_down = transition_const / max(rpm, 1)
-            # La rampa de calentamiento es proporcional al salto de temperatura
-            # (s/°C). Antes era fija (15 s); ahora escala con |ΔT|.
-            heating_rate_up = 0.2
+            room_temp = PCR_ROOM_TEMP_C
+            # Rampas y enfriamiento proporcionales al salto de temperatura (s/°C),
+            # con las MISMAS tasas que la salvaguarda de fases (ramp_s_per_c,
+            # cool_s_per_c): perfil dibujado, ETA y plazo de cada fase salen del
+            # mismo modelo. El enfriamiento antes era 10000 / rpm, que solo
+            # ve el giro y lo dibujaba 2.4× más corto que el real (Newn1).
+            est_cfg = _phase_timeout_cfg(read_settings_from_file().get("pidControllerRPM", {}))
+            heating_rate_up = est_cfg["s_per_c"]
 
             def transition_time_up(t_from, t_to):
                 return abs(t_to - t_from) * heating_rate_up
+
+            def transition_time_down(t_from, t_to):
+                return abs(t_from - t_to) * est_cfg["cool_s_per_c"]
 
             # Recorte visual de holds largos (denat inicial / ext final): si su
             # duración real supera 1.5x la de un ciclo, se dibujan comprimidos a
             # ese tope para no aplastar los ciclos. Es solo visual: el tiempo real
             # se conserva en la anotación de cada tramo recortado.
-            cycle_dur = (
-                transition_time_up(ext_temp, high_temp)
-                + time_high
-                + transition_time_down
-                + time_low
-                + transition_time_up(low_temp, ext_temp)
-                + ext_time
+            cycle_dur = _estimate_cycle_s(
+                high_temp, low_temp, ext_temp, time_high, time_low, ext_time, est_cfg
             )
             clip_cap = 1.5 * cycle_dur if cycle_dur > 0 else float("inf")
 
@@ -904,17 +1042,18 @@ class PCRFrame(ttk.Frame):
                     else (ext_temp if not _skip(ext_time) else None)
                 )
                 if cool_target is not None and current_temp > cool_target:
+                    ramp_down = transition_time_down(current_temp, cool_target)
                     phase_segments.append(
                         (
                             current_time,
-                            current_time + transition_time_down,
+                            current_time + ramp_down,
                             current_temp,
                             cool_target,
                             "Cooling",
                             "green",
                         )
                     )
-                    current_time += transition_time_down
+                    current_time += ramp_down
                     current_temp = cool_target
 
                 # Hold Low (omitible)
@@ -1059,6 +1198,7 @@ class PCRFrame(ttk.Frame):
             lf = p_val
             self.temp_ts = temps_list[3]
             self.temp_source_bad = False
+            self._note_rx(temps_list[3])
 
         # Secundario: float válido o sostener último valor (seed 20°, solo aparece
         # si nunca llegó lectura de ese canal).
@@ -1095,6 +1235,28 @@ class PCRFrame(ttk.Frame):
         # curso al llegar el datagrama (lecturas atómicas de atributos).
         self.data_cycle.append(self.cycle_current)
         self.data_phase.append(self.phase_code)
+
+    def _note_rx(self, rx_ts):
+        """Actualiza el umbral de frescura con el periodo real entre lecturas válidas.
+
+        Mediana móvil (no media): un stall aislado o un datagrama perdido es un
+        outlier que no la mueve, así que un hueco real sigue apagando el heater;
+        solo una degradación SOSTENIDA de la cadencia relaja el umbral, y nunca
+        más allá de fresh_age_cap_s. Corre en el hilo UDP, una vez por lectura.
+        """
+        try:
+            rx = float(rx_ts)
+        except (TypeError, ValueError):
+            return
+        if self._last_good_rx is not None and rx > self._last_good_rx:
+            self._rx_dts.append(rx - self._last_good_rx)
+        self._last_good_rx = rx
+        k = self.fresh_cfg["factor"]
+        if k > 0 and len(self._rx_dts) >= PCR_CADENCE_MIN_N:
+            median_dt = sorted(self._rx_dts)[len(self._rx_dts) // 2]
+            self.fresh_age_s = min(self.fresh_cfg["cap_s"], k * median_dt)
+        else:
+            self.fresh_age_s = 0.0
 
     def _enter_phase(self, code):
         """Declara la fase en curso: código grabado por muestra + etiqueta visible.
@@ -1175,6 +1337,15 @@ class PCRFrame(ttk.Frame):
             except (TypeError, ValueError):
                 amb_shown = "N/A"
         extras = f"  ({sec_label} {self.temp_secondary:.1f}, IR Ambient {amb_shown})"
+        # Fases abandonadas por la salvaguarda: visibles todo el resto de la corrida
+        # (no solo un instante), con la última para saber dónde está fallando.
+        timeout_note = ""
+        if self.phase_timeouts:
+            cyc, code = self.phase_timeouts[-1][0], self.phase_timeouts[-1][1]
+            timeout_note = (
+                f"  ⚠ {len(self.phase_timeouts)} phase timeout(s), "
+                f"last: {code} (cycle {cyc})"
+            )
         # Reconstruir el status completo cada tick: este loop es el único escritor
         # de svar_status durante la corrida, así que no hace falta leer/partir el
         # valor previo. El patrón anterior (get().split("\n") + parchar índices)
@@ -1182,7 +1353,7 @@ class PCRFrame(ttk.Frame):
         # viejas dejaban de sobreescribirse y el label crecía sin límite.
         self.svar_status.set(
             f"Temperature: {self.temp:.2f} °C [{src_label}]{extras}{warn}\n"
-            f"State: {self.fase}\n"
+            f"State: {self.fase}{timeout_note}\n"
             f"{msg_elapsed_time}"
         )
 
@@ -1252,6 +1423,15 @@ class PCRFrame(ttk.Frame):
         self._temp_abort_triggered = False
         self.cycle_current = 0
         self._enter_phase("initial")
+        self.phase_timeouts = []
+        self._cycle_timeouts = []
+        self.failed_cycles = []
+        self.consec_failed_cycles = 0
+        self.data_photo_timeouts = []
+        # La cadencia se mide de nuevo en cada corrida (la de la anterior no aplica).
+        self._rx_dts.clear()
+        self._last_good_rx = None
+        self.fresh_age_s = 0.0
 
         # Dos subplots apilados: arriba temperatura (denso), abajo fotodetector (1/ciclo)
         self.fig, (self.ax, self.ax_photo) = plt.subplots(
@@ -1381,6 +1561,29 @@ class PCRFrame(ttk.Frame):
             f"-n: {len(t)}-span: {t[-1] - t[0]:.1f}"
         )
 
+    def _timeouts_summary(self):
+        """Salvaguarda de fases para la fila de metadata: config efectiva + cada
+        timeout (ciclo, fase, duración/límite, temperatura alcanzada/objetivo).
+
+        Archivar el límite junto a lo que de verdad tardó es lo que permite
+        reajustar factor/piso con datos en vez de a ojo.
+        """
+        cfg = self.timeout_cfg
+        out = (
+            f"-timeout_cfg: x{cfg['factor']:g} floor {cfg['floor_s']:g}s "
+            f"{cfg['s_per_c']:g}s/C cool {cfg['cool_s_per_c']:g}s/C "
+            f"max_failed {cfg['max_failed']}"
+            f"-failed_cycles: {'|'.join(str(c) for c in self.failed_cycles) or 'none'}"
+        )
+        events = "|".join(
+            f"c{c} {code} {el:.1f}/{lim:.1f}s {temp:.1f}/{target:g}C"
+            for c, code, el, lim, temp, target in self.phase_timeouts
+        )
+        # Frescura: config + último umbral efectivo (0 = no llegó a medirse cadencia).
+        fc = self.fresh_cfg
+        fresh = f"-fresh: x{fc['factor']:g} cap {fc['cap_s']:g}s eff {self.fresh_age_s:.3f}s"
+        return out + f"-timeouts: {events or 'none'}" + fresh
+
     def save_data_temps_file(self):
         import csv
         from itertools import zip_longest
@@ -1397,7 +1600,9 @@ class PCRFrame(ttk.Frame):
             # "cols: <primario>|<secundario>|t_s|cycle|phase" y el resumen de
             # cadencia medido). El loader del análisis la salta y lee por posición,
             # así que crecer la fila de metadata y agregar columnas al final es seguro.
-            writer.writerow([self.prefix_row + self._cadence_summary()])
+            writer.writerow(
+                [self.prefix_row + self._cadence_summary() + self._timeouts_summary()]
+            )
             # Cinco columnas alineadas por muestra: [primario, secundario, t_s,
             # cycle, phase]. Se anexan juntas en update_displayed_temperature;
             # zip_longest cubre un desfase de a lo más una muestra si el paro cayó
@@ -1422,9 +1627,12 @@ class PCRFrame(ttk.Frame):
         filename_photo = f"{save_dir}/{slug}_photodetector_data_{ts}.csv"
         with open(filename_photo, "w", newline="") as file:
             writer = csv.writer(file)
-            writer.writerow(["photodetector"])
-            for phot in self.data_photodetector:
-                writer.writerow([phot])
+            # 2ª columna: fases abandonadas por la salvaguarda en el ciclo de esa
+            # lectura ("high_ramp|cooling"; vacía = ciclo limpio). Fila k = ciclo k,
+            # la última = lectura final. El loader del análisis lee solo la col 0.
+            writer.writerow(["photodetector", "timeouts"])
+            for phot, tos in zip_longest(self.data_photodetector, self.data_photo_timeouts):
+                writer.writerow([phot if phot is not None else "", tos or ""])
         # Serie temporal cruda en formato largo (una fila por muestra)
         filename_raw = f"{save_dir}/{slug}_photodetector_raw_{ts}.csv"
         with open(filename_raw, "w", newline="") as file:
@@ -1545,13 +1753,15 @@ class PCRFrame(ttk.Frame):
         TEMP_BAND,
         WINDOW,
     ):
-        MAX_TEMP_AGE = ts  # si es más vieja → no confiar
+        MAX_TEMP_AGE = ts  # si es más vieja → no confiar (piso; ver _note_rx)
         integral = 0.0
         start_time = time.time()
         while time.time() - start_time <= time_hold and not stop_func.is_set():
-            # Verificar edad de la temperatura
+            # Verificar edad de la temperatura contra el umbral efectivo: el piso
+            # absoluto o 1.5× la cadencia medida, lo mayor (se relee cada vuelta:
+            # la cadencia puede cambiar a mitad del hold).
             temp_age = time.time() - self.temp_ts
-            if temp_age > MAX_TEMP_AGE:
+            if temp_age > max(MAX_TEMP_AGE, self.fresh_age_s):
                 # Temperatura vieja → apagar por seguridad
                 pin_heating.write(False)
                 time.sleep(WINDOW / 2)
@@ -1606,11 +1816,63 @@ class PCRFrame(ttk.Frame):
             "FF_FRAC": pid.get(f"ff_frac_{phase}", 0.0),
         }
 
+    def _phase_deadline(self, est_s):
+        """(t_inicio, deadline, límite) de una fase que espera una temperatura.
+
+        límite = max(piso, factor × estimado). Con factor 0 la salvaguarda está
+        desactivada y deadline es None (la fase espera sin límite, como antes).
+        """
+        cfg = self.timeout_cfg
+        t0 = time.time()
+        if cfg["factor"] <= 0:
+            return t0, None, None
+        limit = max(cfg["floor_s"], cfg["factor"] * est_s)
+        return t0, t0 + limit, limit
+
+    def _record_timeout(self, code, t0, limit, target):
+        """Registra una fase abandonada; el ciclo en curso cuenta como fallido."""
+        elapsed = time.time() - t0
+        self.phase_timeouts.append(
+            (self.cycle_current, code, elapsed, limit, self.temp, target)
+        )
+        self._cycle_timeouts.append(code)
+        print(
+            f"Phase timeout: {code} (cycle {self.cycle_current}) {elapsed:.1f}s > "
+            f"{limit:.1f}s at {self.temp:.1f} °C (target {target} °C) — skipping to next phase"
+        )
+
+    def _reach_phase(self, code, setpoint, pid_phase, ts, break_if_below):
+        """Rampa de calentamiento (denat/high/ext_ramp) con salvaguarda de tiempo.
+
+        El estimado sale del salto REAL al entrar a la fase (no del nominal): si
+        la fase anterior se abandonó y el disco quedó lejos, el plazo crece con
+        él. Si vence, se sigue al hold, que continúa empujando hacia el setpoint
+        durante su propio tiempo.
+        """
+        self._enter_phase(code)
+        est = abs(setpoint - self.temp) * self.timeout_cfg["s_per_c"]
+        t0, deadline, limit = self._phase_deadline(est)
+        self.pin_heating.write(True)  # pyrefly: ignore
+        reached = self._reach_temperature_pi(
+            setpoint,
+            self._load_phase_pid(pid_phase, ts),
+            self.stop_udp_listenner,
+            break_if_below=break_if_below,
+            tolerance=0.5,
+            deadline=deadline,
+        )
+        if not reached:
+            self._record_timeout(code, t0, limit, setpoint)
+        elif not self.stop_udp_listenner.is_set():  # pyrefly: ignore
+            print(f"Temperature reached: {self.temp} °C")
+
     def _reach_temperature_pi(
-        self, setpoint, params, stop_event, break_if_below=False, tolerance=0.5
+        self, setpoint, params, stop_event, break_if_below=False, tolerance=0.5, deadline=None
     ):
         # Rampa PI hacia setpoint con anti-windup y descarte de temperatura vieja.
         # El heater debe estar pre-armado por el caller; este método modula on/off.
+        # deadline (time.time() absoluto, None = sin límite): si vence, apaga el
+        # heater y devuelve False. True en cualquier otro final (llegó o stop).
         KP = params["KP"]
         KI = params["KI"]
         I_MAX = params["I_MAX"]
@@ -1627,26 +1889,42 @@ class PCRFrame(ttk.Frame):
         # A diferencia de la rampa de denaturación, aquí el blast también
         # descarta temperatura vieja: si la lectura UDP envejece, apaga el
         # heater y re-arma en cada lectura fresca para evitar runaway térmico.
+        #
+        # Ambos lazos chequean el mismo deadline (un reloj por fase), y sus ramas
+        # sin trabajo duermen PCR_POLL_S: antes giraban sin pausa (un núcleo al
+        # 100 % durante el blast, y también mientras la lectura estaba vieja).
         if FF_FRAC > 0.0 and not break_if_below:
             ceiling = setpoint * FF_FRAC
             while self.temp < ceiling and not stop_event.is_set():
+                if deadline is not None and time.time() > deadline:
+                    self.pin_heating.write(False)  # pyrefly: ignore
+                    return False
                 age = time.time() - self.temp_ts
-                max_age = _fuzzy_max_age(setpoint - self.temp, MAX_AGE_MIN, MAX_AGE_MAX)
+                max_age = max(
+                    _fuzzy_max_age(setpoint - self.temp, MAX_AGE_MIN, MAX_AGE_MAX),
+                    self.fresh_age_s,
+                )
                 if age > max_age:
                     # Temperatura vieja → no confiar; corta y reintenta.
                     self.pin_heating.write(False)  # pyrefly: ignore
+                    time.sleep(PCR_POLL_S)
                     continue
                 self.pin_heating.write(True)  # pyrefly: ignore
+                time.sleep(PCR_POLL_S)
 
         integral = 0.0
         while tolerance < abs(setpoint - self.temp) and not stop_event.is_set():
+            if deadline is not None and time.time() > deadline:
+                self.pin_heating.write(False)  # pyrefly: ignore
+                return False
             if break_if_below and self.temp < setpoint:
                 break
             age = time.time() - self.temp_ts
             error = setpoint - self.temp
-            if age > _fuzzy_max_age(error, MAX_AGE_MIN, MAX_AGE_MAX):
+            if age > max(_fuzzy_max_age(error, MAX_AGE_MIN, MAX_AGE_MAX), self.fresh_age_s):
                 # Temperatura vieja → no confiar
                 self.pin_heating.write(False)  # pyrefly: ignore
+                time.sleep(PCR_POLL_S)
                 continue
             kp_dyn, ki_dyn = _fuzzy_gains(error, KP, KI)
             integral += error * WINDOW
@@ -1662,6 +1940,7 @@ class PCRFrame(ttk.Frame):
                 time.sleep(on_time)
             self.pin_heating.write(False)  # pyrefly: ignore
             time.sleep(WINDOW - on_time)
+        return True
 
     def _hold_phase(self, phase, setpoint, duration, ts):
         params = self._load_phase_pid(phase, ts)
@@ -1743,6 +2022,8 @@ class PCRFrame(ttk.Frame):
         # Acumulación (fuente única de verdad)
         self.data_photodetector.append(delta)
         self.data_photodetector_series.append(samples)
+        # Ancla para estadística: fases abandonadas en el ciclo de esta lectura.
+        self.data_photo_timeouts.append("|".join(self._cycle_timeouts))
         self.after(1, lambda: self.update_graph_photodetector())
         return delta
 
@@ -1771,6 +2052,8 @@ class PCRFrame(ttk.Frame):
         # Columna cycle del CSV: 1-based, igual que photodetector_raw y que la
         # fila k del photodetector_data (lectura de fin del ciclo k).
         self.cycle_current = idx + 1
+        # Timeouts de ESTE ciclo (un timeout de denat_ramp no cuenta para el 1).
+        self._cycle_timeouts = []
 
         # Reach High temp: feed-forward a potencia plena hasta ff_frac_high*setpoint
         # y luego PI (tolerancia 0.5). En el ciclo 0 (break_if_below) se omite el
@@ -1778,16 +2061,9 @@ class PCRFrame(ttk.Frame):
         # que la desnaturalización se haya omitido (denat_skipped): en ese caso
         # arrancamos en frío y hay que alcanzar High de verdad.
         if not _skip(time_high):
-            self._enter_phase("high_ramp")
-            self.pin_heating.write(True)  # pyrefly: ignore
-            self._reach_temperature_pi(
-                high_temp,
-                self._load_phase_pid("high", ts),
-                self.stop_udp_listenner,
-                break_if_below=(idx == 0 and not denat_skipped),
-                tolerance=0.5,
+            self._reach_phase(
+                "high_ramp", high_temp, "high", ts, break_if_below=(idx == 0 and not denat_skipped)
             )
-            print(f"Temperature reached: {self.temp} °C")
 
             # Hold High
             self._enter_phase("high_hold")
@@ -1807,6 +2083,17 @@ class PCRFrame(ttk.Frame):
         if cool_target is not None and self.temp > cool_target + 0.5:
             print(f"Cooling down to {cool_target} °C with motor spin")
             self._enter_phase("cooling")
+            # Un solo reloj para giro + espera pasiva. Aquí casi nunca vence (solo
+            # con un objetivo inalcanzable por mala configuración): es una red, no
+            # el caso principal. Estimado por ΔT real, como las rampas (ver
+            # PCR_COOL_S_PER_C: la fórmula por rpm de la preview se queda corta).
+            t0, deadline, limit = self._phase_deadline(
+                abs(self.temp - cool_target) * self.timeout_cfg["cool_s_per_c"]
+            )
+
+            def _expired():
+                return deadline is not None and time.time() > deadline
+
             self.stop_event_motor.clear()  # pyrefly: ignore
             spinMotorRPM_ramped(
                 direction,
@@ -1819,16 +2106,22 @@ class PCRFrame(ttk.Frame):
                 None,
                 stop_func=lambda: self.stop_udp_listenner.is_set()  # pyrefly: ignore
                 or self.temp <= cool_target
-                or self.temp < cool_target + 9.5,
+                or self.temp < cool_target + 9.5
+                or _expired(),
                 stop_event=self.stop_event_motor,
             )
 
             print(self.temp, "cool target....dis")
             while (
-                self.temp > cool_target + 0.5 and not self.stop_udp_listenner.is_set()
-            ):  # pyrefly: ignore
-                time.sleep(0.001)
-            print(f"Temperature reached: {self.temp} °C")
+                self.temp > cool_target + 0.5
+                and not self.stop_udp_listenner.is_set()  # pyrefly: ignore
+                and not _expired()
+            ):
+                time.sleep(PCR_POLL_S)
+            if self.temp > cool_target + 0.5 and _expired():
+                self._record_timeout("cooling", t0, limit, cool_target)
+            else:
+                print(f"Temperature reached: {self.temp} °C")
 
         # Hold Low
         if not _skip(time_low):
@@ -1840,16 +2133,11 @@ class PCRFrame(ttk.Frame):
 
         # Reach Ext temp (PI, tolerancia 0.5) + Hold Ext
         if not _skip(ext_time):
-            self._enter_phase("ext_ramp")
-            self.pin_heating.write(True)  # pyrefly: ignore
-            self._reach_temperature_pi(
-                ext_temp,
-                self._load_phase_pid("ext", ts),
-                self.stop_udp_listenner,
-                break_if_below=(idx == 0),
-                tolerance=0.5,
-            )
-            print(f"Temperature reached: {self.temp} °C")
+            # Sin break_if_below: a ext se llega desde low (debajo), así que en el
+            # ciclo 1 la rampa salía de inmediato y el hold calentaba solo. Era una
+            # copia del caso de high (que sí viene caliente del hold de denat),
+            # presente desde antes del refactor de mayo; quitada el 13/10/2026.
+            self._reach_phase("ext_ramp", ext_temp, "ext", ts, break_if_below=False)
 
             # Hold Ext
             self._enter_phase("ext_hold")
@@ -1874,6 +2162,14 @@ class PCRFrame(ttk.Frame):
         self.avg_cycle_duration = (
             self.avg_cycle_duration * (self.cycles_complete - 1) + self.last_cycle_duration
         ) / self.cycles_complete
+        # Racha de ciclos fallidos: un ciclo con algún timeout la alarga, uno limpio
+        # la corta. Lo que importa es la racha (fallo persistente = problema real),
+        # no el total: los fallos aislados se arreglan solos en el ciclo siguiente.
+        if self._cycle_timeouts:
+            self.failed_cycles.append(self.cycle_current)
+            self.consec_failed_cycles += 1
+        else:
+            self.consec_failed_cycles = 0
 
     def experiment_pcr(
         self,
@@ -1903,13 +2199,6 @@ class PCRFrame(ttk.Frame):
         self.ext_time_final = ext_time_final
         # Reset para esta corrida: se fija al iniciar la extensión final (más abajo).
         self.start_final_ext_time = 0.0
-        self.teorical_time_pcr = (
-            (time_high + time_low + ext_time) * 1.2 * cycles
-            + denat_time
-            + ext_time_final
-            + FLUOR_READ_TOTAL_S * cycles  # lectura de fluorescencia por ciclo
-            + FLUOR_READ_TOTAL_S  # lectura de fluorescencia final
-        )
 
         settings = read_settings_from_file()
         pidGains = settings.get("pidControllerRPM", {})
@@ -1917,6 +2206,28 @@ class PCRFrame(ttk.Frame):
             ts = float(pidGains.get("ts_pcr", 0.02))
         except Exception:
             ts = 0.02
+        # Salvaguarda de fases y frescura: una lectura por corrida (van a la
+        # metadata del CSV).
+        self.timeout_cfg = _phase_timeout_cfg(pidGains)
+        self.fresh_cfg = _freshness_cfg(pidGains)
+        # 0 no tiene sentido (abortaría si la primera lectura no llegó ya) → default.
+        start_wait_s = (
+            _cfg_num(pidGains, "temp_start_wait_s", PCR_TEMP_START_WAIT_S)
+            or PCR_TEMP_START_WAIT_S
+        )
+        print(
+            f"Phase timeout config: {self.timeout_cfg} | freshness: {self.fresh_cfg}"
+            f" | start wait: {start_wait_s} s"
+        )
+        # ETA antes del primer ciclo: mismo modelo que la preview y la salvaguarda
+        # (rampas y enfriamiento por ΔT). El anterior, holds × 1.2, ignoraba rampas y
+        # enfriamiento y daba ~1.9 ks para Newn1 contra 3.27 ks reales. Desde el
+        # primer ciclo la ETA pasa a la duración medida (_estimate_remaining_time).
+        self.teorical_time_pcr = _estimate_total_s(
+            high_temp, low_temp, ext_temp, time_high, time_low, ext_time, cycles,
+            denat_temp, denat_time, ext_time_final, initial_spin_time, self.timeout_cfg,
+        )
+        print(f"Estimated run time: {self.teorical_time_pcr / 60:.1f} min")
 
         # Nombre del proyecto activo para trazabilidad receta->datos. Si corrió con
         # entradas editadas a mano (snapshot implícito), se marca como sin guardar.
@@ -1935,7 +2246,11 @@ class PCRFrame(ttk.Frame):
             f"project: {project_label}"
             f"-high_temp: {high_temp}-low_temp: {low_temp}-time_high: {time_high}"
             f"-time_low: {time_low}-cycles: {cycles}-rpm: {rpm}"
-            f"-denat_temp: {denat_temp}-denat_time: {denat_time}-ts: {ts}"
+            f"-denat_temp: {denat_temp}-denat_time: {denat_time}"
+            # La receta completa: sin estos, la extensión de Newn1 hubo que deducirla
+            # de la curva (docs/pcr_pendientes.md punto 5).
+            f"-ext_temp: {ext_temp}-ext_time: {ext_time}-ext_time_final: {ext_time_final}"
+            f"-initial_spin: {initial_spin_time}-ts: {ts}"
             f"-temp_source: {primary_label}"
             f"-start: {datetime.fromtimestamp(self.start_pcr_time).isoformat(timespec='seconds')}"
             f"-cols: {primary_label}|{secondary_label}|t_s|cycle|phase"
@@ -1963,11 +2278,11 @@ class PCRFrame(ttk.Frame):
 
         try:
             # Start-gate: no arrancar el ciclado si al inicio ninguno de los dos
-            # sensores del par entrega lectura válida dentro de PCR_TEMP_START_WAIT_S.
+            # sensores del par entrega lectura válida dentro de temp_start_wait_s.
             # El cliente UDP ya corre; esperamos a _temp_ever_valid (lo marca
             # update_displayed_temperature en la primera lectura buena). Al retornar
             # aquí, el finally desmonta el hardware y _ui_poll_loop restaura la UI.
-            gate_deadline = time.time() + PCR_TEMP_START_WAIT_S
+            gate_deadline = time.time() + start_wait_s
             while not self._temp_ever_valid and time.time() < gate_deadline:
                 if self.stop_udp_listenner.is_set():
                     return
@@ -2025,15 +2340,7 @@ class PCRFrame(ttk.Frame):
             # caso el primer ciclo debe alcanzar High de verdad (denat_skipped).
             denat_skipped = _skip(denat_time)
             if not denat_skipped:
-                self._enter_phase("denat_ramp")
-                self.pin_heating.write(True)  # pyrefly: ignore
-                self._reach_temperature_pi(
-                    denat_temp,
-                    self._load_phase_pid("denat", ts),
-                    self.stop_udp_listenner,
-                    break_if_below=False,
-                    tolerance=0.5,
-                )
+                self._reach_phase("denat_ramp", denat_temp, "denat", ts, break_if_below=False)
 
                 # ----- Denaturation Hold
                 self._enter_phase("denat_hold")
@@ -2062,6 +2369,22 @@ class PCRFrame(ttk.Frame):
                     ads,
                     denat_skipped=denat_skipped,
                 )
+                # Fallos aislados se toleran (el ciclo siguiente suele recuperarse);
+                # una racha de max_failed ciclos seguidos ya es un problema real
+                # (heater o motor muertos) y seguir solo gasta tiempo y muestra.
+                # Mismo apagado que el watchdog: los stop-events cortan el resto y
+                # el CSV se guarda igual abajo.
+                max_failed = self.timeout_cfg["max_failed"]
+                if 0 < max_failed <= self.consec_failed_cycles:
+                    self._enter_phase("aborted_timeouts")
+                    print(
+                        f"Aborting PCR: {self.consec_failed_cycles} consecutive cycles "
+                        f"with phase timeouts (max_failed_cycles={max_failed})"
+                    )
+                    self.stop_udp_listenner.set()
+                    if self.stop_event_motor is not None:
+                        self.stop_event_motor.set()
+                    break
 
             # ----- Extensión final + lectura de fluorescencia (solo si no se detuvo).
             # El hold final se omite si ext_time_final <= 0, pero la lectura de
@@ -2070,6 +2393,7 @@ class PCRFrame(ttk.Frame):
                 print("PCR cycles complete, reading fluorescence")
                 # Fuera del ciclado: cycle vuelve a 0 (la fase dice que es el cierre).
                 self.cycle_current = 0
+                self._cycle_timeouts = []  # la lectura final no hereda los del último ciclo
                 self._enter_phase("final_ext")
                 # Ancla del cronómetro del segmento final (hold + lectura final).
                 # Se pone siempre, incluso si el hold se omite (ext_time_final<=0),

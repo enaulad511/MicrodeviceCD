@@ -13,17 +13,21 @@ __date__ = "$ 08/10/2025  at 11:20 a.m. $"
 # Al añadir una clave nueva de configuración, agrégala aquí con su valor por defecto
 # para que un dispositivo con un settings.json viejo (conservado tras `git pull` por
 # el script update_repo) la auto-repare al arrancar.
+# Las ganancias de pidControllerRPM son las AFINADAS EN EL EQUIPO (settings.json del Pi
+# al 13/10/2026, docs/pcr_pendientes.md punto 11): un equipo nuevo o un archivo
+# corrupto arranca con lo validado, no con valores de desarrollo.
 DEFAULT_SETTINGS = {
     "version": "0.1.0",
     "pidControllerRPM": {
-        "KP_denat": 1.2,
-        "win_denat": 0.05,
-        "m_age_denat": 0.1,
+        "KP_denat": 1.9,
+        "win_denat": 0.1,
+        "m_age_denat": 0.2,
         "m_age_min_denat": 0.02,
         "m_age_max_denat": 0.2,
-        "KP_h_denat": 0.2,
+        "KP_h_denat": 1.2,
+        "KI_h_denat": 0.5,
         "win_h_denat": 0.09,
-        "KI_denat": 0.6,
+        "KI_denat": 1.9,
         "imax_denat": 0.6,
         "tband_denat": 0.01,
         "ff_frac_denat": 0.8,
@@ -31,18 +35,18 @@ DEFAULT_SETTINGS = {
         "tband_h_denat": 0.05,
         "KP_high": 0.9,
         "win_high": 0.09,
-        "m_age_high": 0.09,
+        "m_age_high": 0.2,
         "m_age_min_high": 0.02,
-        "m_age_max_high": 0.2,
-        "tband_high": 0.02,
-        "KI_high": 0.9,
+        "m_age_max_high": 0.3,
+        "tband_high": 0.1,
+        "KI_high": 1.9,
         "ff_frac_high": 0.8,
         "imax_high": 0.5,
         "KP_h_high": 0.5,
         "win_h_high": 0.05,
-        "KI_h_high": 0.9,
+        "KI_h_high": 1.3,
         "imax_h_high": 0.5,
-        "tband_h_high": 0.03,
+        "tband_h_high": 0.02,
         "KP_h_low": 0.1,
         "win_h_low": 0.05,
         "KI_h_low": 0.2,
@@ -58,9 +62,9 @@ DEFAULT_SETTINGS = {
         "KI_ext": 0.5,
         "ff_frac_ext": 0.0,
         "imax_ext": 0.5,
-        "KP_h_ext": 0.1,
-        "win_h_ext": 0.09,
-        "KI_h_ext": 0.5,
+        "KP_h_ext": 0.5,
+        "win_h_ext": 0.02,
+        "KI_h_ext": 1.3,
         "imax_h_ext": 0.5,
         "tband_h_ext": 0.02,
         "kp": 0.0005,
@@ -73,6 +77,24 @@ DEFAULT_SETTINGS = {
         # Ventana del watchdog "ambas caídas" de PCR (s sin lectura fresca de
         # ninguno de los dos sensores del par → detener). Ver PcrFrame.
         "temp_stale_s": 10.0,
+        # Start-gate de PCR: espera máxima (s) por una primera lectura válida.
+        "temp_start_wait_s": 3.0,
+        # Salvaguarda de fases PCR (rampas/enfriamiento): se abandona la fase si
+        # dura más de max(floor, factor × estimado), con estimado = ΔT × s/°C
+        # (ramp_s_per_c al calentar, cool_s_per_c al enfriar).
+        # factor 0 = desactivada; max_failed_cycles 0 = nunca abortar por racha.
+        # Ver docs/pcr_timeout_fases.md.
+        "phase_timeout_factor": 3.0,
+        "phase_timeout_floor_s": 20.0,
+        "ramp_s_per_c": 0.2,
+        "cool_s_per_c": 1.0,
+        "max_failed_cycles": 3.0,
+        # Frescura de la temperatura relativa a la cadencia medida: una lectura es
+        # confiable hasta que la siguiente llega fresh_dt_factor veces tarde (con
+        # tope fresh_age_cap_s). 0 = solo umbrales absolutos (m_age_*, ts_pcr).
+        # Ver docs/pcr_temperature_control.md §9.
+        "fresh_dt_factor": 1.5,
+        "fresh_age_cap_s": 1.0,
     },
     "ads_fsr": 0.256,
     "photoreceptor": {"use_diff": 1.0},

@@ -102,6 +102,16 @@ cualquier fase sin la clave conserva el comportamiento PI puro previo.
 > **Tuning pendiente:** `KI_denat/imax_denat/tband_denat` se inicializaron espejando high
 > (`0.6 / 0.5 / 0.05`). Conviene una pasada de tuning en hardware, ya que denat parte de
 > ambiente y su dinámica térmica difiere de la subida intra-ciclo de high.
+> **Actualización 13/10/2026:** esa pasada se hizo en el equipo (`KP_denat 1.9`,
+> `KI_denat 1.9`, `win_denat 0.1`, …). Desde ese día, `DEFAULT_SETTINGS` adopta las
+> ganancias del equipo ([pcr_pendientes.md](pcr_pendientes.md) punto 11) y declara
+> `KI_h_denat = 0.5` explícito, que es el *fallback* que ya regía.
+
+> **Salvaguarda de tiempo (13/10/2026):** `_reach_temperature_pi` acepta un `deadline`
+> que cubre la pre-rampa **y** el PI. Si vence, apaga el heater y devuelve `False`, y
+> `_reach_phase` registra el timeout y deja pasar al *hold*. Sus ramas sin trabajo ahora
+> duermen `PCR_POLL_S` (10 ms); antes giraban sin pausa. Ver
+> [pcr_timeout_fases.md](pcr_timeout_fases.md).
 
 ## 5. Resumen de cambios en código
 
@@ -208,8 +218,22 @@ El **hold** (`hold_temperature`) queda intacto: usa su propio umbral estricto (`
 > y el host la mide por corrida. Confundirlas dejaba las tasas °C/s del análisis ~20 %
 > bajas; ver [pcr_eje_tiempo.md](pcr_eje_tiempo.md).
 
-> **Nota de umbrales:** el docstring de `_fuzzy_gains` menciona 15°C/5°C, pero el código
-> real usa **5°C/2°C** — esos son los cortes efectivos, replicados en `_fuzzy_max_age`.
+> **Cortes y continuidad (corregido el 13/10/2026).** Los cortes efectivos son **5 °C y
+> 2 °C**, ahora constantes compartidas (`FUZZY_FAR_C`, `FUZZY_NEAR_C`) entre
+> `_fuzzy_gains` y `_fuzzy_max_age`.
+>
+> Historia del bug: el gain scheduling nació (`9c6f3f1`) con cortes 15/5 °C e
+> interpolaciones continuas. Los cortes se movieron a 7/3 (`6a3587b`) y luego a 5/2
+> (`c67e0d9`, `f708e4e`) **sin reescalar las `t`**. Resultado:
+>
+> - en 2–5 °C, `t` era negativa, y daba kp × 0.7–1.0 y ki × 1.24–1.0 en vez de
+>   kp × 1.0→2.0 y ki × 1.0→0.2;
+> - en 5 °C había un salto de kp × 1.0 → 2.0 y de ki × 1.0 → 0.2;
+> - la zona fina interpolaba sobre 0–5 °C en vez de 0–2 °C.
+>
+> Ahora las `t` se escriben en función de las constantes y la curva es continua (salto
+> < 1e-9 en ambos cortes). Tabla antes/después en
+> [pcr_pendientes.md](pcr_pendientes.md) punto 10.
 
 ### Parámetros (`settings.json` → `pidControllerRPM`)
 
@@ -222,5 +246,74 @@ El **hold** (`hold_temperature`) queda intacto: usa su propio umbral estricto (`
 `_load_phase_pid` devuelve `MAX_AGE_MIN`/`MAX_AGE_MAX`. Cualquier fase sin las claves nuevas
 cae a `0.02`/`0.2` (`ext` las declara explícitas con esos mismos valores). Los límites son absolutos (no escalan el valor base),
 acotados a `[m_age_min, m_age_max]` por construcción del interpolador.
+
+## 9. Frescura relativa a la cadencia medida (13/10/2026)
+
+### El problema: umbrales absolutos menores que la cadencia
+
+Los umbrales de "lectura vieja" de §8 (`m_age_min/max`, 0.02–0.3 s) y el del *hold*
+(`MAX_TEMP_AGE = ts_pcr` = 0.1 s) se fijaron pensando en lecturas cada 0.08 s. En la
+corrida Newn1 llegaron **cada 0.30 s** (metadata `dt_mean: 0.3014`; la causa está en
+[pcr_pendientes.md](pcr_pendientes.md) punto 1). Con umbrales menores que el periodo
+de muestreo, después de cada ventana de control la lectura ya cuenta como vieja hasta que
+llega la siguiente, y el heater queda **forzado a OFF**.
+
+No es una protección: es una pérdida de potencia silenciosa. Medido corriendo
+`hold_temperature` y `_reach_temperature_pi` reales, con las ganancias del equipo y
+lecturas cada 0.3 s:
+
+| caso | antes | con §9 | con dt = 0.08 s |
+|---|:---:|:---:|:---:|
+| *hold* `h_denat` 91.5 → 94 °C (el PI pide 100 %) | 31 % | **100 %** | 100 % |
+| *hold* `h_high` 91.5 → 94 °C | 34 % | **100 %** | 100 % |
+| *hold* `h_ext` 71.2 → 72 °C | 27 % | **93 %** | 94 % |
+| rampa `ext` a 71.2 °C (atasco del ciclo 2) | 10 % | **36 %** | 36 % |
+| rampa `ext` a 69 °C (atasco del ciclo 23) | 19 % | **64 %** | 64 % |
+
+Lo que la rampa `ext` aún no entrega cerca de la banda (36 %) ya no es frescura: son sus
+ganancias de *fallback* (punto 3 de los pendientes).
+
+### La regla
+
+```
+umbral efectivo = max(umbral absoluto, min(fresh_age_cap_s, fresh_dt_factor × mediana(dt)))
+```
+
+- **Mediana de los últimos `PCR_CADENCE_WIN` = 15 periodos** entre lecturas **válidas**
+  del primario. La calcula `_note_rx` en el hilo UDP, una vez por lectura (ordenar 15
+  números a ~3 Hz). Los lazos solo leen el atributo `fresh_age_s`. Antes de
+  `PCR_CADENCE_MIN_N` = 5 periodos medidos vale 0, y solo rigen los umbrales absolutos.
+- **`fresh_dt_factor` = 1.5:** una lectura es confiable hasta que la siguiente llega 50 %
+  tarde. Con Newn1 da 0.45 s. El jitter medido (p95 0.313 s contra mediana 0.307 s)
+  queda muy dentro.
+- **Los umbrales absolutos quedan como piso:** §8 sigue rigiendo cuando la cadencia es
+  más rápida que ellos.
+- Se reinicia por corrida en `init_temperature_graph`.
+
+### Por qué no reabre el *runaway* (§2, §6)
+
+La guarda anti-*runaway* protege contra un **stall** del feed UDP: segundos sin datos con
+el heater encendido. La regla la conserva por construcción:
+
+- **Mediana, no media:** un hueco aislado es un *outlier* que no la mueve (verificado: un
+  hueco de 2 s dentro de la ventana deja el umbral en 0.450 s). Un stall real sigue
+  apagando el heater en ~1.5 periodos: en simulación se apagó **0.45 s** después de la
+  última lectura y no volvió a encender.
+- **Solo una degradación sostenida** de la cadencia relaja el umbral, y nunca más allá de
+  `fresh_age_cap_s` = 1.0 s. Más allá de eso ya es un stall, no una cadencia.
+- **El watchdog de sensores** (`temp_stale_s` = 10 s) sigue por encima de todo.
+- **Lecturas inválidas del primario** siguen fijando `temp_ts = 0.8`, es decir, vieja
+  siempre. Y no alimentan la mediana.
+
+### Configuración (`pidControllerRPM`)
+
+| clave | default | significado |
+|-------|:-------:|-------------|
+| `fresh_dt_factor` | `1.5` | múltiplo de la cadencia medida. **`0` desactiva §9** (solo umbrales absolutos, comportamiento previo). |
+| `fresh_age_cap_s` | `1.0` | tope del umbral derivado de la cadencia. |
+
+Se leen una vez por corrida en `experiment_pcr`, junto a la salvaguarda de fases. La
+metadata del CSV registra la config y el último umbral efectivo:
+`-fresh: x1.5 cap 1s eff 0.451s` (`eff 0.000s` = nunca llegó a medirse cadencia).
 
 __author__ = "Edisson A. Naula"

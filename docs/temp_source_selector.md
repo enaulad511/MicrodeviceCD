@@ -251,7 +251,8 @@ par IR Object ↔ Termocupla: el **primario** (regula el PID) y el **secundario*
   el watchdog, que corre a ritmo de UI: editarla en el ConfigFrame aplica desde la
   siguiente corrida. Un valor no numérico o `<= 0` cae a `PCR_TEMP_DEAD_S` (10 s) para
   que un tecleo erróneo nunca desarme el watchdog. (Era 5 s fijo hasta el 13/10/2026.) Al inicio, un
-  **start-gate** en `experiment_pcr` espera hasta `PCR_TEMP_START_WAIT_S` (3 s) una
+  **start-gate** en `experiment_pcr` espera hasta `pidControllerRPM.temp_start_wait_s`
+  (default 3 s, `PCR_TEMP_START_WAIT_S`; configurable desde el 13/10/2026) una
   primera lectura válida de cualquiera de los dos (`_temp_ever_valid`); si no llega,
   no arranca (retorna dentro del `try`, el `finally` desmonta). Un glitch UDP puntual
   no detiene: los valores sostenidos mantienen plot/CSV hasta que se cumpla la ventana.

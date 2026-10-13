@@ -70,6 +70,12 @@ dice la pantalla y lo que queda en el CSV no pueden divergir.
 | `done` | terminó (no suele llevar muestras: el cliente UDP se detiene) | 0 |
 | `aborted_start` | ningún sensor dio lectura válida al inicio | 0 |
 | `aborted_sensors` | watchdog "ambas caídas" ([temp_source_selector.md](temp_source_selector.md)) | el del momento |
+| `aborted_timeouts` | racha de ciclos con fases abandonadas ([pcr_timeout_fases.md](pcr_timeout_fases.md)) | el último ciclo |
+
+Una rampa abandonada por la salvaguarda de tiempo **no** tiene código propio: se ve como
+un `*_ramp` que termina sin llegar al setpoint y da paso a su `*_hold`. El detalle (ciclo,
+fase, duración/límite) va en la metadata y en la columna `timeouts` del CSV de
+fotodetector ([pcr_timeout_fases.md](pcr_timeout_fases.md) §5).
 
 El **código** es la llave de los datos: no se renombra. La **etiqueta** es solo pantalla
 y se puede retocar libremente.
@@ -108,6 +114,8 @@ Ambas se reinician por corrida en `init_temperature_graph`
   agrupar por `cycle` automáticamente), pero cambia el flujo de esa pestaña y se deja
   para cuando se decida cómo convivir con la selección manual.
 - **No se añadió `cycle` al CSV de fotodetector por ciclo:** el número de fila ya lo es.
+  Sí ganó una columna `timeouts` por ciclo con la salvaguarda de fases
+  ([pcr_timeout_fases.md](pcr_timeout_fases.md)).
 
 ## Archivos
 
