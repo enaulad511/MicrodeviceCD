@@ -276,34 +276,61 @@ ganancias de *fallback* (punto 3 de los pendientes).
 ### La regla
 
 ```
-umbral efectivo = max(umbral absoluto, min(fresh_age_cap_s, fresh_dt_factor × mediana(dt)))
+umbral efectivo = max(umbral absoluto, min(fresh_age_cap_s, fresh_dt_factor × p90(huecos)))
 ```
 
-- **Mediana de los últimos `PCR_CADENCE_WIN` = 15 periodos** entre lecturas **válidas**
-  del primario. La calcula `_note_rx` en el hilo UDP, una vez por lectura (ordenar 15
-  números a ~3 Hz). Los lazos solo leen el atributo `fresh_age_s`. Antes de
-  `PCR_CADENCE_MIN_N` = 5 periodos medidos vale 0, y solo rigen los umbrales absolutos.
-- **`fresh_dt_factor` = 1.5:** una lectura es confiable hasta que la siguiente llega 50 %
-  tarde. Con Newn1 da 0.45 s. El jitter medido (p95 0.313 s contra mediana 0.307 s)
-  queda muy dentro.
+- **p90 de los últimos `PCR_CADENCE_WIN` = 25 huecos** entre lecturas **válidas** del
+  primario. La calcula `_note_rx` en el hilo UDP, una vez por lectura (ordenar 25 números
+  a ~12 Hz). Los lazos solo leen el atributo `fresh_age_s`. Antes de
+  `PCR_CADENCE_MIN_N` = 10 huecos medidos vale 0, y solo rigen los umbrales absolutos.
+- **`fresh_dt_factor` = 1.5:** una lectura es confiable hasta que el hueco largo típico se
+  excede en un 50 %. Con lecturas uniformes cada 0.307 s (Newn1) da 0.46 s; con las
+  ráfagas actuales, 0.41 s.
 - **Los umbrales absolutos quedan como piso:** §8 sigue rigiendo cuando la cadencia es
   más rápida que ellos.
 - Se reinicia por corrida en `init_temperature_graph`.
+
+### Por qué p90 y no mediana (14/10/2026)
+
+La primera versión (13/10) usaba la **mediana** de 15 periodos. Era correcta para la
+cadencia uniforme de Newn1, pero no para la real. Después de apagar el `power_save` del Pi
+([pcr_pendientes.md](pcr_pendientes.md) punto 1), la captura mostró **ráfagas**:
+
+- `rate` 12.5/s, es decir, los 80 ms del firmware;
+- mediana de 0.021–0.026 s;
+- p95 de 0.27 s.
+
+Es decir, 3–4 lecturas casi juntas cada ~0.27 s. La mediana mide el espaciado **dentro**
+de la ráfaga: el umbral salía de 1.5 × 0.023 ≈ 0.035 s, y en cada hueco entre ráfagas el
+heater quedaba forzado a OFF de nuevo. Simulado con ese patrón (código real, ganancias del
+equipo):
+
+| caso | mediana | **p90** |
+|---|:---:|:---:|
+| *hold* `h_denat` 91.5 → 94 °C | 45 % | **100 %** |
+| *hold* `h_high` 91.5 → 94 °C | 40 % | **100 %** |
+| *hold* `h_ext` 71.2 → 72 °C | 34 % | **94 %** |
+| rampa `ext` a 71.2 °C | 10 % | **36 %** |
+| rampa `ext` a 69 °C | 29 % | **78 %** |
+
+Lo que importa es **cuánto hay que confiar en la última lectura hasta la siguiente**, y
+eso lo da el hueco largo, no el típico. La ventana se amplió a 25 huecos (~2 s), con un
+mínimo de 10, para que el p90 tenga suficientes huecos largos donde apoyarse.
 
 ### Por qué no reabre el *runaway* (§2, §6)
 
 La guarda anti-*runaway* protege contra un **stall** del feed UDP: segundos sin datos con
 el heater encendido. La regla la conserva por construcción:
 
-- **Mediana, no media:** un hueco aislado es un *outlier* que no la mueve (verificado: un
-  hueco de 2 s dentro de la ventana deja el umbral en 0.450 s). Un stall real sigue
-  apagando el heater en ~1.5 periodos: en simulación se apagó **0.45 s** después de la
-  última lectura y no volvió a encender.
+- **p90, no máximo:** con 25 huecos, el p90 descarta los 3 mayores. Un stall aislado no
+  lo mueve (verificado: un stall de 2 s dentro de la ventana deja el umbral en 0.408 s,
+  igual que sin él). Un stall real sigue apagando el heater: en simulación con ráfagas se
+  apagó **0.5 s** después de la última lectura y no volvió a encender.
 - **Solo una degradación sostenida** de la cadencia relaja el umbral, y nunca más allá de
   `fresh_age_cap_s` = 1.0 s. Más allá de eso ya es un stall, no una cadencia.
 - **El watchdog de sensores** (`temp_stale_s` = 10 s) sigue por encima de todo.
 - **Lecturas inválidas del primario** siguen fijando `temp_ts = 0.8`, es decir, vieja
-  siempre. Y no alimentan la mediana.
+  siempre. Y no alimentan la ventana.
 
 ### Configuración (`pidControllerRPM`)
 
@@ -314,6 +341,6 @@ el heater encendido. La regla la conserva por construcción:
 
 Se leen una vez por corrida en `experiment_pcr`, junto a la salvaguarda de fases. La
 metadata del CSV registra la config y el último umbral efectivo:
-`-fresh: x1.5 cap 1s eff 0.451s` (`eff 0.000s` = nunca llegó a medirse cadencia).
+`-fresh: x1.5 cap 1s eff 0.408s` (`eff 0.000s` = nunca llegó a medirse cadencia).
 
 __author__ = "Edisson A. Naula"

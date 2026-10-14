@@ -147,8 +147,13 @@ PCR_POLL_S = 0.01
 # docs/pcr_temperature_control.md §9 y docs/pcr_pendientes.md punto 1.
 PCR_FRESH_DT_FACTOR = 1.5  # fresh_dt_factor (0 desactiva: solo umbrales absolutos)
 PCR_FRESH_AGE_CAP_S = 1.0  # fresh_age_cap_s: tope; más allá ya es un stall, no cadencia
-PCR_CADENCE_WIN = 15  # lecturas en la mediana móvil del periodo de recepción
-PCR_CADENCE_MIN_N = 5  # periodos medidos antes de relajar nada
+# El estimador es un PERCENTIL ALTO de los huecos, no la mediana: con power_save del
+# Pi apagado las lecturas llegan en ráfagas (3–4 casi juntas cada ~0.27 s; captura del
+# 14/10: rate 12.5/s, mediana 0.023 s, p95 0.27 s), y la mediana mide el espaciado
+# DENTRO de la ráfaga, no cuánto hay que confiar en la última lectura.
+PCR_CADENCE_WIN = 25  # huecos en la ventana (~2 s a 12.5 lecturas/s)
+PCR_CADENCE_PCTL = 0.9  # p90: con 25 huecos descarta los 3 mayores (stalls aislados)
+PCR_CADENCE_MIN_N = 10  # huecos medidos antes de relajar nada
 
 
 def _cfg_num(pid, key, default):
@@ -1240,12 +1245,15 @@ class PCRFrame(ttk.Frame):
         self.data_phase.append(self.phase_code)
 
     def _note_rx(self, rx_ts):
-        """Actualiza el umbral de frescura con el periodo real entre lecturas válidas.
+        """Actualiza el umbral de frescura con los huecos reales entre lecturas válidas.
 
-        Mediana móvil (no media): un stall aislado o un datagrama perdido es un
-        outlier que no la mueve, así que un hueco real sigue apagando el heater;
-        solo una degradación SOSTENIDA de la cadencia relaja el umbral, y nunca
-        más allá de fresh_age_cap_s. Corre en el hilo UDP, una vez por lectura.
+        Percentil alto (p90) de los últimos PCR_CADENCE_WIN huecos, no mediana: si
+        las lecturas llegan en ráfagas, la mediana es el espaciado dentro de la
+        ráfaga (~0.02 s) y dejaría el heater apagado en cada hueco entre ráfagas
+        (~0.27 s). El p90 mide ese hueco y, a la vez, descarta los 2–3 mayores de la
+        ventana: un stall aislado no lo mueve, así que un corte real sigue apagando
+        el heater; solo una degradación SOSTENIDA relaja el umbral, y nunca más allá
+        de fresh_age_cap_s. Corre en el hilo UDP, una vez por lectura.
         """
         try:
             rx = float(rx_ts)
@@ -1256,8 +1264,9 @@ class PCRFrame(ttk.Frame):
         self._last_good_rx = rx
         k = self.fresh_cfg["factor"]
         if k > 0 and len(self._rx_dts) >= PCR_CADENCE_MIN_N:
-            median_dt = sorted(self._rx_dts)[len(self._rx_dts) // 2]
-            self.fresh_age_s = min(self.fresh_cfg["cap_s"], k * median_dt)
+            gaps = sorted(self._rx_dts)
+            gap_hi = gaps[int(PCR_CADENCE_PCTL * (len(gaps) - 1))]
+            self.fresh_age_s = min(self.fresh_cfg["cap_s"], k * gap_hi)
         else:
             self.fresh_age_s = 0.0
 

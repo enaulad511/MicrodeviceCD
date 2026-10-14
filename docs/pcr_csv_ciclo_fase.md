@@ -127,3 +127,4 @@ Ambas se reinician por corrida en `init_temperature_graph`
   [pcr_temperature_control.md](pcr_temperature_control.md) (fases omitidas).
 
 __author__ = "Edisson A. Naula"
+__date__ = "$ 13/10/2026 $"

@@ -10,7 +10,7 @@ los defaults del repo.
 
 | # | pendiente | prioridad | ¿necesita el settings del Pi? | estado |
 |:-:|-----------|:---------:|:-----------------------------:|--------|
-| 1 | Cadencia de temperatura 0.30 s vs. umbrales de frescura del control | **alta** | sí (revisado) | **(B) hecho** (frescura relativa a la cadencia); (A) causa de los 0.3 s: diagnóstico listo, falta correrlo en el equipo |
+| 1 | Cadencia de temperatura 0.30 s vs. umbrales de frescura del control | **alta** | sí (revisado) | **(B) hecho** (frescura relativa a la cadencia); (A) **cerrado**: causa `power_save` del Pi (0.307 s = DTIM), apagado de forma persistente el 14/10; llegan en ráfagas → estimador **p90** |
 | 2 | Hold de desnaturalización 2.5 °C por debajo del setpoint | alta | sí (revisado) | probablemente consecuencia del 1 |
 | 3 | Causa de los atascos de `ext_ramp` | media | sí (revisado) | **decidido: no re-afinar** hasta ver una corrida con (B); mitigado por la salvaguarda |
 | 4 | `ext_ramp` con `break_if_below` en el ciclo 1 | media | no | **hecho** (quitado por decisión del usuario) |
@@ -137,11 +137,98 @@ defecto), así que no hace falta la app:
 1. **Con la app cerrada**, en el Pi: `python test/test_udp_cadence.py`.
    - dt ≈ 0.08 s → el disco emite bien y el cuello está en la recepción de la app
      (`SO_RCVBUF` de 512 B en `ClientUDP`, o el hilo receptor sin turno de CPU).
-   - dt ≈ 0.30 s → el cuello está antes del Pi: el lazo del Pico, el UART a 230400 o el
+   - dt ≈ 0.30 s → el cuello está antes de la app: el enlace WiFi, el lazo del Pico, el UART a 230400 o el
      reenvío del Wemos. En el código del firmware no hay ningún retardo de 300 ms a la
      vista: leer los tres sensores y enviar por UART son milisegundos.
 2. **Con la app corriendo un PCR**, en paralelo (ambos sockets usan `SO_REUSEADDR` y
    reciben el broadcast): comparar con el `dt_mean` de la metadata de esa corrida.
+
+**Resultado del paso 1 (14/10/2026), con la app cerrada y el firmware del disco al día:**
+`dt median ≈ 0.307 s`. **El cuello está antes del socket de la app** (enlace WiFi o disco), no en la recepción de `ClientUDP`.
+
+**Topología real (aclarada por el usuario):** no hay hotspot externo. El Wemos intenta
+`EdiPcTec` 20 s, no la encuentra y levanta **su propio AP `CD_DEVICE`**
+([WemosD1Mini.ino:346-349](../firmware/WemosD1Mini/WemosD1Mini.ino#L346-L349)). **El Pi se
+conecta a ese AP como cliente.**
+
+> Primera hipótesis, **descartada**: "modem sleep del Wemos en STA". Partía de suponer que
+> el Wemos era cliente de `EdiPcTec`; en modo AP el ESP8266 nunca duerme la radio.
+
+**Hipótesis vigente: el ahorro de energía WiFi del Pi.** Tres indicios:
+
+- **La cifra:** 0.307 s = **3 × 102.4 ms**, tres intervalos de beacon (100 TU). Es la
+  huella de un DTIM = 3.
+- **La regla 802.11:** si algún cliente asociado está en ahorro de energía, el AP
+  **retiene los broadcasts y solo los emite tras el beacon DTIM**. La telemetría es
+  broadcast (`192.168.4.255:5005`), y Raspberry Pi OS trae `power_save` activo en `wlan0`
+  por default.
+- **El patrón:** un paquete por periodo y no ráfagas de ~4, aunque el Pico manda uno cada
+  80 ms. Es coherente con que el softAP del ESP8266 retenga muy pocos broadcasts por DTIM
+  y descarte el resto. Se infiere de la mediana; no se midió dentro del ESP.
+
+En el Pico no hay nada que bloquee ~300 ms. El UART al Wemos es `timeout=0`, y leer los
+sensores toma milisegundos (+4 ms en el peor reintento del MLX).
+
+**Prueba (en el Pi, sin flashear nada):**
+
+1. Ver el estado: `iw dev wlan0 get power_save`. Se espera `Power save: on`.
+2. Apagarlo hasta el próximo reinicio: `sudo iw dev wlan0 set power_save off`.
+3. Repetir `python3 test/test_udp_cadence.py`. Se espera `dt median ≈ 0.08 s` y
+   `rate ≈ 12/s`.
+
+**Resultado (14/10/2026): confirmado.** Con `power_save` apagado, el periodo de 307 ms
+desaparece: `dt median` 0.027–0.030 s.
+
+Esa mediana es **menor** que los 80 ms del firmware: tanto el espejo como el original en
+`~/MicroPython/DiscPCB/` dicen `sample_ms = 80`. **Ráfagas, confirmado** con tres reportes
+de 10 s de la misma captura:
+
+- `rate` 12.43–12.53/s, es decir, los 80 ms del firmware;
+- mediana de 0.021–0.026 s;
+- p95 de 0.267–0.271 s, máximo de 0.285–0.289 s y mínimo de 0.000 s.
+
+Llegan 3–4 lecturas casi juntas cada ~0.27 s: no se pierden, llegan a saltos.
+
+**Consecuencia y fix (14/10/2026):** el estimador por mediana del 13/10 quedaba en 1.5 ×
+0.023 ≈ 0.035 s y volvía a apagar el heater en cada hueco entre ráfagas. En simulación con
+este patrón, los *holds* caían a 34–45 %. Se cambió a **p90 de 25 huecos**: los *holds*
+vuelven a 94–100 %, sin aflojar ante un stall aislado. Detalle en
+[pcr_temperature_control.md](pcr_temperature_control.md) §9 y, para la cadencia,
+[pcr_eje_tiempo.md](pcr_eje_tiempo.md) §6.
+
+**Cierre (14/10/2026):**
+
+- **`power_save off` persistente en el Pi: hecho por el usuario.** Captura posterior
+  (dos reportes de 10 s): `rate` 12.53–12.66/s, mediana 0.022–0.027 s, p95
+  0.265–0.272 s, máximo 0.280–0.289 s y **47–49 % de huecos < 20 ms**. Siguen las ráfagas,
+  y el p90 las cubre: con ~25 % de huecos en ~0.27 s, el p90 cae en el hueco largo y el
+  umbral queda en ~0.4 s, por encima del máximo medido.
+- **"Otros" datagramas: no había tráfico extra; fue un error de lectura.** El contador
+  del script era **acumulado** desde el arranque (48 → 51 → 53), y se interpretó como
+  ~5/s. Por ventana son 1–2 beacons `CD_DISCOVERY_AP` del Wemos (uno cada 4 s). El script
+  ya reporta el conteo por ventana y el acumulado solo en el `TOTAL`.
+- **Causa de las ráfagas:** no se investiga. Probablemente es el planificador WiFi del
+  softAP del ESP8266, y con el p90 no afecta al control.
+
+**Hacer persistente el `power_save off`** (abajo).
+- **"Otros" datagramas:** ~5/s en el puerto 5005 durante la captura. No los mandan ni el
+  Pico ni el Wemos: el beacon va cada 4 s y los `ack`/`pong` son eventuales. El script
+  ahora reporta su IP de origen y su prefijo. Hay que identificarlos en la próxima captura.
+- **Causa de las ráfagas:** probablemente el planificador WiFi del softAP del ESP8266.
+  Con el p90 ya no afecta al control, así que no es urgente.
+
+**Hacerlo persistente.** Depende del gestor de red del Pi:
+
+- **Con NetworkManager** (Bookworm; `systemctl is-active NetworkManager` → `active`):
+  `/etc/NetworkManager/conf.d/wifi-powersave-off.conf` con `[connection]` +
+  `wifi.powersave = 2`, y luego `sudo systemctl restart NetworkManager`.
+- **Con dhcpcd** (Bullseye o anterior): un servicio systemd o `/etc/rc.local` que ejecute
+  `iw dev wlan0 set power_save off` al arrancar.
+
+**Si `power_save` ya estaba en off, o apagarlo no cambia nada,** el siguiente sospechoso
+es el propio softAP del ESP8266: su DTIM no es configurable desde
+`WiFi.softAP()`. Alternativa: que el Wemos mande la telemetría por **unicast** al Pi en vez
+de broadcast. Eso requiere flashear el Wemos.
 
 Nota: antes del 13/10, la pre-rampa y las ramas de "lectura vieja" giraban sin `sleep`
 ([pcr_timeout_fases.md](pcr_timeout_fases.md) §6). Un núcleo al 100 % compite por el GIL
@@ -329,6 +416,12 @@ Checklist para la próxima corrida real:
 - [ ] **Sin sobreimpulso nuevo** en las aproximaciones a high y ext. El fuzzy corregido
       (punto 10) mete más kp entre 2 y 5 °C de error. Si aparece, es el primer sospechoso.
 - [ ] Sin atascos de `ext_ramp` (punto 3: predicción de que desaparecen sin re-afinar).
+- [ ] La metadata trae `dt_mean` ≈ 0.08 s, y no ~0.3 s como Newn1.
+  - Si sale bastante mayor que 0.08 pero menor que 0.3, el `SO_RCVBUF` de 512 B de
+    `ClientUDP` está descartando lecturas dentro de las ráfagas. Al control no le afecta,
+    porque el p90 se adapta a lo que la app recibe de verdad, pero reduce la densidad de
+    datos del CSV.
+  - Si sale ~0.3, el `power_save` volvió a activarse.
 - [ ] El CSV de fotodetector trae la columna `timeouts`.
 - [ ] Si una rampa se atasca, corta en ~20 s y el ciclo sigue. La línea `State` muestra
       el aviso.
@@ -408,3 +501,4 @@ corrupto o para desarrollo. Las 18 claves que el equipo aún no tiene se le semb
 estos valores tras el update.
 
 __author__ = "Edisson A. Naula"
+__date__ = "$ 14/10/2026 $"

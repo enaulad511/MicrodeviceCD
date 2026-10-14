@@ -119,6 +119,40 @@ dato es lo que evita volver a suponerla.
 segundos, hay huecos reales en la curva y toca reabrir la decisión de §9 y revisar ese
 buffer de recepción.
 
+### Cadencia real: `power_save` del Pi y ráfagas (14/10/2026)
+
+**Topología.** No hay hotspot externo: el Wemos levanta su propio AP `CD_DEVICE` y el Pi se
+conecta a él como cliente.
+
+**`power_save` del Pi (requisito).** Raspberry Pi OS trae `power_save` activo en
+`wlan0`. Con eso, el AP del Wemos retiene los broadcasts hasta cada beacon DTIM, y la
+temperatura llega **una vez cada 0.307 s** (3 × 102.4 ms) en vez de cada 80 ms: así se
+grabó Newn1 (`dt_mean: 0.3014`). Con `sudo iw dev wlan0 set power_save off` el periodo de
+307 ms desaparece. **Debe quedar apagado de forma persistente en el Pi**, y así quedó en
+el equipo el 14/10/2026 (pasos en [pcr_pendientes.md](pcr_pendientes.md) punto 1). Si
+alguien reinstala el sistema y no lo hace, se vuelve a 0.3 s sin ningún aviso, salvo el
+`dt_mean` de la metadata.
+
+**Ráfagas.** Aun con `power_save` apagado, las lecturas no llegan espaciadas. Captura con
+`test/test_udp_cadence.py`:
+
+- `rate` 12.5/s (los 80 ms del firmware);
+- mediana de dt de 0.021–0.027 s;
+- p95 de 0.27 s y máximo de 0.29 s;
+- **47–49 % de los huecos < 20 ms**, con `power_save` ya persistente.
+
+Es decir, 3–4 lecturas casi juntas cada ~0.27 s. No se pierden lecturas, pero la
+información nueva llega a saltos. Dos consecuencias:
+
+- **Control:** el umbral de frescura usa el **p90** de los huecos, no la mediana
+  ([pcr_temperature_control.md](pcr_temperature_control.md) §9).
+- **Metadata:** con ráfagas, `dt_mean` (~0.08) cuenta el número de lecturas pero no el
+  ritmo de información; `dt_p95` (~0.27) es el hueco real entre ráfagas. **Leer los dos.**
+
+**Diagnóstico:** `test/test_udp_cadence.py`, en el Pi y con la app cerrada. Reporta rate,
+mediana, p95, el porcentaje de huecos < 20 ms (ráfagas) y quién manda los demás
+datagramas del puerto 5005.
+
 ## 7. Análisis: tiempo por experimento
 
 El tab superpone varios experimentos, y durante la transición lo normal es mezclar un

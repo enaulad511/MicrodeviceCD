@@ -178,9 +178,8 @@ producción (sin REPL conectado) no imprime nada mientras nada cambie.
 
 ## 8. Pendiente
 
-- **Reflashear** `mlx90614.py` **y** `emstat_wifi_v1.9.py`. Degrada bien: si solo
-  copias el driver, el `except` que ya está en la placa igual convierte el fallo
-  en `None`; lo único que pierdes es el print por flanco.
+- ~~**Reflashear** `mlx90614.py` **y** `emstat_wifi_v1.9.py`~~ — **hecho**: el disco
+  corre la v1.9 (confirmado por el usuario el 14/10/2026).
 - **Validar antes de migrar el PID al IR**: comparar `t_obj` contra la termocupla
   en régimen (con ε = 0.96 ya rigiendo) y verificar que el sesgo es aceptable en
   el rango de PCR (~55–95 °C). El ajuste fino de `ε` es la perilla

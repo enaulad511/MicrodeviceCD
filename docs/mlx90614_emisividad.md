@@ -144,12 +144,16 @@ los mismos `mlx90614.py` y `emstat_wifi_v1.9.py` (verificado por `diff`).
 
 ## 6. Pendiente
 
-- **Flasheo**: el cambio viaja en `emstat_wifi_v1.9.py`, que **aún no está
-  flasheado** (mismo pendiente que CA, ver
-  [ca_cronoamperometria.md §7](ca_cronoamperometria.md)). Hay que copiar
-  `mlx90614.py` **y** `emstat_wifi_v1.9.py` a la placa.
-- **Validación en hardware**: confirmar por REPL/UDP que `read_emissivity()`
-  devuelve ≈0.96 tras el reinicio, y que el segundo arranque ya no escribe.
+- ~~**Flasheo**~~ — **hecho**: el disco corre la v1.9 (confirmado por el usuario el
+  14/10/2026).
+- ~~**Validación en hardware**~~ — **hecho**: confirmado por el usuario en la consola serial
+  del Pico (14/10/2026). Queda como referencia de cómo se valida. Confirmar por la
+  **consola USB del Pico** (Thonny/REPL)
+  que al arrancar imprime `MLX90614: emisividad escrita -> 0.96` la primera vez y
+  `MLX90614: emisividad ya en 0.96` desde el segundo arranque (ya no reescribe). También
+  sirve `read_emissivity()` en el REPL, que debe dar ≈0.96. **El `hello` UDP no sirve**
+  para esto: sale al arrancar, cuando el AP del Wemos (`CD_DEVICE`) acaba de levantarse y
+  el Pi todavía no se reconecta, así que se pierde.
 - **Calibración del valor**: 0.96 es el valor pedido (típico de plásticos/vidrio);
   si se compara `t_obj` contra la termocupla y queda un sesgo sistemático, el
   ajuste fino de `ε` es la perilla.

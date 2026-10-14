@@ -168,10 +168,10 @@ igual que EIS/SQWV.
 
 ## 7. Pendiente
 
-- **Flasheo del firmware v1.9**: el mirror `emstat_wifi_v1.9.py` tiene la rama `"ca"`,
-  pero hay que copiar el original (`~/MicroPython/DiscPCB/`) a la placa y flashear; sin
-  eso, un payload `"ca"` cae en `UNKNOWN_COMMAND` / `emstat_error`.
-- **Validación end-to-end en hardware** (forma de los paquetes `e`/`i` de CA, marcador
+- ~~**Flasheo del firmware v1.9**~~ — **hecho**: el disco corre la v1.9 (confirmado por
+  el usuario el 14/10/2026), así que un payload `"ca"` ya no cae en
+  `UNKNOWN_COMMAND`.
+- **Validación end-to-end en hardware** (ya no bloqueada por el flasheo) (forma de los paquetes `e`/`i` de CA, marcador
   `*` entre loops, decaimiento de Cottrell esperado).
 - **Automatizar Max bandwidth**: hoy es editable con default `58505m`; falta deducir
   cómo lo calcula PSTrace (¿de `t_interval`?) para fijarlo automáticamente.
