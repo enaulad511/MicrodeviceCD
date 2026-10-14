@@ -19,11 +19,14 @@ __date__ = "$ 08/10/2025  at 01:07 p.m. $"
 
 
 class PhotoreceptorFrame(ttk.Frame):
-    def __init__(self, parent, ads_reader):
+    def __init__(self, parent, ads_reader, lock_tabs_callback=None):
         super().__init__(parent)
         self.start_time = 0.0
         self.parent = parent
         self.ads = ads_reader
+        # Bloquea PCR/Electrochemical mientras la lectura corre (solo una cosa a
+        # la vez); lo provee MainGUI.
+        self.lock_tabs_callback = lock_tabs_callback
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=1)
         content_frame = ScrolledFrame(self, autohide=True)
@@ -127,12 +130,16 @@ class PhotoreceptorFrame(ttk.Frame):
             self.data.clear()
             self.timestamps.clear()
             self.after(intervalo, self.adquirir_dato)
+            if self.lock_tabs_callback is not None:
+                self.lock_tabs_callback(True)
         except ValueError:
             self.interval_entry.configure(background="salmon")
 
     def detener_lectura(self):
         print("Stopping photoreceptor reading")
         self.running = False
+        if self.lock_tabs_callback is not None:
+            self.lock_tabs_callback(False)
 
     def save_data(self):
         if not self.data:

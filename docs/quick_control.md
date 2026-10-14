@@ -43,6 +43,36 @@ liberación del driver en un hilo aparte (`_motor_stop_worker`) y reactiva la UI
 con `after(0, self._on_motor_stopped)`. Mientras "se detiene", ambos botones
 quedan deshabilitados (`motor_stopping=True`) para impedir un re-Start.
 
+### Motor: el driver solo está abierto mientras hay un hilo de motor vivo
+
+Invariante (`ui/DiscFrame.py`): **`drv` abierto ⇔ hay un hilo de motor vivo**.
+Todo hilo de motor de las tabs Disc y Quick Control corre envuelto en
+`run_and_release(target, *args)`, que en un `finally` llama a
+`release_driver()` (deshabilita ENABLE, cierra UART y libera GPIO 12, bajo
+`thread_lock`, idempotente). Así el driver se suelta tanto por Stop como cuando
+el movimiento acaba solo, o por una excepción. Los Stop de ambas tabs llaman
+también a `release_driver()` tras el join, como red de seguridad.
+
+Por qué importa: un `DriverStepperSys` abierto (1) retiene GPIO 12, así que PCR
+(`sistemaMotor`) y el oscilador de CV/SWV (`spinMotorAngleDriver`, que crea su
+propio driver) fallan con `line busy`. PCR aborta la corrida y en CV/SWV el
+hilo del motor muere y **el experimento sigue sin agitación**. (2) Su hilo
+lector `_reader_loop` **no es daemon**, así que al cerrar la app el proceso
+quedaba colgado para siempre. Antes pasaba en dos casos: el **Zero** de la tab
+Disc, que termina solo y dejaba el driver abierto hasta pulsar Stop, y cerrar
+la app con el disco girando desde la tab Disc, que no tenía `<Destroy>`. En ese
+segundo caso tampoco se mandaba `STOP` y el Pico seguía girando.
+
+Al cerrar la app, `ControlDiscFrame._on_destroy` y `QuickControlFrame._on_destroy`
+activan el stop del motor: el hilo frena en rampa, vuelve a cero (como Stop) y
+libera el driver, y recién entonces sale el proceso (unos segundos). Los hilos
+de motor de ambas tabs son **no daemon** a propósito: con `daemon=True` Python
+los mataba a mitad del `close()`. La espera está acotada porque `_on_destroy`
+siempre activa el stop y el `go_zero` expira a los 15 s. Si un dueño externo
+tiene el motor, Disc (`_ensure_driver`) y Quick Control avisan
+("Motor not available" / "Motor busy") y no arrancan, en vez de soltar un
+traceback.
+
 ### Bloqueo de tabs mientras hay algo activo
 
 Pedido explícito del usuario: mientras Quick Control opere **cualquier** cosa
@@ -51,21 +81,41 @@ deshabilita — en **ambos** notebooks, porque PCR y Electrochemical también us
 el motor/UDP. Implementación:
 
 - `QuickControlFrame._update_lock()` calcula el estado y llama a
-  `lock_tabs_callback(locked)`.
+  `lock_tabs_callback(locked)` (dueño `"quick"`).
 - `MainGUI.set_tabs_locked()` pone `state="disabled"` en todas las tabs del
   notebook principal salvo Manual Control (índice 2) y en todas las del
   notebook anidado salvo Quick Control (índice 0).
 - El desbloqueo es automático al quedar todo apagado/detenido; un label 🔒 en
   el frame indica qué lo mantiene bloqueado.
 
+Este bloqueo se generalizó después a una **exclusión mutua entre PCR,
+Electrochemical y los controles manuales**: solo puede correr una cosa a la
+vez. `set_tabs_locked(locked, owner)` lleva un conjunto de dueños (`"pcr"`,
+`"electrochem"`, `"quick"`, `"disc"`, `"led_heat"`, `"led_fluor"`, `"photo"`,
+`"temp"`), y solo `"quick"` bloquea también el notebook anidado. Ver
+[bloqueo_tabs_exclusion.md](bloqueo_tabs_exclusion.md).
+
 ### LEDs: línea gpiod abierta mientras el toggle está ON
 
-A diferencia de `FluorecenseLEDFrame` (abre→write→close inmediato), aquí el
+A diferencia de las tabs viejas `LEDFrame` y `FluorecenseLEDFrame`, aquí el
 `GPIOPin` se retiene mientras el toggle está ON y se libera al apagar
 (`_toggle_led` / `_release_led`). Es seguro **porque** el bloqueo de tabs
 impide que la tab vieja pida la misma línea (evita el `line busy` de libgpiod).
 Si algún día se quita el bloqueo, hay que volver al patrón abrir-escribir-cerrar.
 En `<Destroy>` se fuerza `write(False)+close` de ambos pines.
+
+Las tabs viejas **no** bloquean nada, así que usan ese patrón en cada
+escritura (`_set_led`: `GPIOPin` → `write` → `close` en un `finally`), también
+en el "Timed On" (enciende y libera; el apagado agendado vuelve a abrir, escribir
+y cerrar). Así nunca dejan la línea tomada y PCR puede pedirla aunque el LED se
+haya dejado encendido: PCR lo pone en bajo al tomarlo. Si PCR la tiene, la tab
+recibe el `line busy`, lo imprime y no hace nada (no interfiere con el heater).
+El nivel escrito persiste tras liberar la línea (comportamiento del kernel del
+Pi en el que ya se apoyaba `FluorecenseLEDFrame`). Como el LED puede quedar
+encendido con la línea libre, cada tab recuerda si lo dejó encendido
+(`_led_on`) y en `<Destroy>` lo apaga solo en ese caso; si no, no toca la línea
+(antes `LEDFrame` llamaba `write` sobre `pin=None` y en cada cierre de la app
+imprimía `Error closing heating LED GPIO`).
 
 ### Lecturas: una señal a la vez, preparado para escalar
 

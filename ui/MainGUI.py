@@ -82,6 +82,13 @@ def load_images():
     return images
 
 
+# Tab principal (grupo) de cada dueño del bloqueo de tabs; los no listados son
+# controles manuales y viven en Manual Control (índice 2). Ver set_tabs_locked y
+# docs/bloqueo_tabs_exclusion.md.
+LOCK_OWNER_TAB = {"pcr": 0, "electrochem": 1}
+MANUAL_CONTROL_TAB = 2
+
+
 class MainGUI(ttk.Window):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -97,6 +104,9 @@ class MainGUI(ttk.Window):
         self.option_add("*Combobox*Listbox.font", font_text)
         self.ads = None
         self.analysis_window = None
+        # Dueños activos del bloqueo de tabs ("pcr", "electrochem", "quick",
+        # "disc", ...); ver set_tabs_locked
+        self._tab_lock_owners: set[str] = set()
         # --------------------Start Animation -------------------
         # self.show_gif_toplevel()
         self.after(0, self.maximize_window)
@@ -118,10 +128,16 @@ class MainGUI(ttk.Window):
         self.main_notebook.bind("<<NotebookTabChanged>>", self.on_main_tab_changed)
 
         # ------------------PCR tab-------------------
-        self.tab_pcr = PCRFrame(self.main_notebook, self.ads)
+        self.tab_pcr = PCRFrame(
+            self.main_notebook, self.ads, lock_tabs_callback=self.lock_callback("pcr")
+        )
         self.main_notebook.add(self.tab_pcr, text=main_tabs_texts[0], padding=1)
         # ------------------Electrochemical tab-------------------
-        self.tab_electrochemical = ElectrochemicalFrame(self.main_notebook, self.callback_ip)
+        self.tab_electrochemical = ElectrochemicalFrame(
+            self.main_notebook,
+            self.callback_ip,
+            lock_tabs_callback=self.lock_callback("electrochem"),
+        )
         self.main_notebook.add(self.tab_electrochemical, text=main_tabs_texts[1], padding=1)
         # ------------------Manual Control tab-------------------
         self.tab_manual_control = ttk.Frame(self.main_notebook)
@@ -147,28 +163,38 @@ class MainGUI(ttk.Window):
         print("init tabs")
 
         self.tab_quick = QuickControlFrame(
-            self.notebook, self.ads, lock_tabs_callback=self.set_tabs_locked
+            self.notebook, self.ads, lock_tabs_callback=self.lock_callback("quick")
         )
         self.notebook.add(self.tab_quick, text=tab_texts[0])
         print("init tabs Quick Control")
 
-        self.tab1 = ControleLEDFrame(self.notebook)
+        self.tab1 = ControleLEDFrame(
+            self.notebook, lock_tabs_callback=self.lock_callback("led_heat")
+        )
         self.notebook.add(self.tab1, text=tab_texts[1])
         print("init tabs LED")
 
-        self.tab2 = ControlFluorescenteFrame(self.notebook)
+        self.tab2 = ControlFluorescenteFrame(
+            self.notebook, lock_tabs_callback=self.lock_callback("led_fluor")
+        )
         self.notebook.add(self.tab2, text=tab_texts[2])
         print("init tabs Fluorescence")
 
-        self.tab3 = ControlDiscFrame(self.notebook)
+        self.tab3 = ControlDiscFrame(self.notebook, lock_tabs_callback=self.lock_callback("disc"))
         self.notebook.add(self.tab3, text=tab_texts[3])
         print("init tabs Disc")
 
-        self.tab4 = PhotoreceptorFrame(self.notebook, self.ads)
+        self.tab4 = PhotoreceptorFrame(
+            self.notebook, self.ads, lock_tabs_callback=self.lock_callback("photo")
+        )
         self.notebook.add(self.tab4, text=tab_texts[4])
         print("init tabs Photoreceptor")
 
-        self.tab5 = TemperatureFrame(self.notebook, sensor_reader="termocupula")
+        self.tab5 = TemperatureFrame(
+            self.notebook,
+            sensor_reader="termocupula",
+            lock_tabs_callback=self.lock_callback("temp"),
+        )
         self.notebook.add(self.tab5, text=tab_texts[5])
         # # --------------------footer-------------------
         self.frame_footer = ttk.Frame(self)
@@ -225,20 +251,38 @@ class MainGUI(ttk.Window):
             else:
                 self.notebook.tab(i, text=text)
 
-    def set_tabs_locked(self, locked):
-        """Bloquea/desbloquea las demás tabs mientras Quick Control tiene
-        actuadores o lecturas activas. Aplica a AMBOS notebooks: las tabs
-        hermanas del Manual Control y las principales (PCR/Electrochemical
-        también usan motor/UDP). La tab Manual Control (índice 2) y la propia
-        Quick Control (índice 0) quedan siempre habilitadas."""
-        state = "disabled" if locked else "normal"
+    def lock_callback(self, owner):
+        """Callback `lock_tabs_callback(locked)` para el frame dueño `owner`."""
+        return lambda locked: self.set_tabs_locked(locked, owner=owner)
+
+    def set_tabs_locked(self, locked, owner="quick"):
+        """Exclusión mutua entre grupos: solo puede correr UNA cosa a la vez,
+        PCR, Electrochemical o los controles manuales (comparten motor, LEDs,
+        ADS y la cadena del disco). Mientras haya algún dueño activo, se
+        deshabilitan las tabs principales de los OTROS grupos; la del grupo
+        activo queda habilitada. El grupo de cada dueño sale de LOCK_OWNER_TAB
+        ("pcr", "electrochem"); el resto ("quick", "disc", "led_heat",
+        "led_fluor", "photo", "temp") son controles manuales (Manual Control).
+
+        Se lleva un conjunto de dueños para que el desbloqueo de uno no suelte el
+        bloqueo de otro. Además, "quick" (Quick Control) bloquea las tabs hermanas
+        del notebook anidado (pedido explícito, docs/quick_control.md): la propia
+        Quick Control (índice 0) queda habilitada."""
+        if locked:
+            self._tab_lock_owners.add(owner)
+        else:
+            self._tab_lock_owners.discard(owner)
+        active_tabs = {
+            LOCK_OWNER_TAB.get(o, MANUAL_CONTROL_TAB) for o in self._tab_lock_owners
+        }
+        nested_state = "disabled" if "quick" in self._tab_lock_owners else "normal"
         try:
             for i, _ in enumerate(main_tabs_texts):
-                if i != 2:  # Manual Control aloja a Quick Control
-                    self.main_notebook.tab(i, state=state)
+                busy = bool(active_tabs) and i not in active_tabs
+                self.main_notebook.tab(i, state="disabled" if busy else "normal")
             for i, _ in enumerate(tab_texts):
                 if i != 0:  # Quick Control
-                    self.notebook.tab(i, state=state)
+                    self.notebook.tab(i, state=nested_state)
         except Exception as e:
             print(f"Error locking tabs: {e}")
 

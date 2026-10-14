@@ -172,6 +172,34 @@ thread_motor = None
 thread_lock = threading.Lock()
 
 
+def release_driver():
+    """Deshabilita y cierra el driver compartido (UART + GPIO 12 de ENABLE) si
+    está abierto. Idempotente y seguro desde cualquier hilo. Mientras siga
+    abierto, PCR/CV/SWV no pueden crear el suyo (line busy en GPIO 12) y su
+    hilo lector (no daemon) impide que el proceso termine al cerrar la app."""
+    global drv
+    with thread_lock:
+        if drv is None:
+            return
+        try:
+            drv.enable_driver(False)
+            drv.close()
+            print("Motor driver released (UART/GPIO)")
+        except Exception as e:
+            print(f"Error releasing motor driver: {e}")
+        drv = None
+
+
+def run_and_release(target, *args):
+    """Corre una función de movimiento y, al terminar por cualquier causa (Stop,
+    fin natural del go-to-zero, excepción), libera el driver compartido: así el
+    driver solo está abierto mientras hay un hilo de motor vivo."""
+    try:
+        target(*args)
+    finally:
+        release_driver()
+
+
 # spinMotorRPM_ramped vive ahora en Drivers/DriverStepperSys.py (centralizado);
 # la rampa de velocidad corre en el firmware del Pico (StepperClass_V5).
 # Importarlo de forma lazy dentro de cada callback (el módulo del driver
@@ -301,9 +329,14 @@ class ControlDiscFrame(ttk.Frame):
     :type parent: ttk.Frame
     """
 
-    def __init__(self, parent):
+    def __init__(self, parent, lock_tabs_callback=None):
         ttk.Frame.__init__(self, parent)
         self.parent = parent
+        # Bloquea PCR/Electrochemical mientras el motor de esta tab gira (ver
+        # _lock_while_running); lo provee MainGUI.
+        self.lock_tabs_callback = lock_tabs_callback
+        self._motor_thread: threading.Thread | None = None
+        self._lock_job: str | None = None
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=1)
         content_frame = ScrolledFrame(self, autohide=True)
@@ -323,9 +356,74 @@ class ControlDiscFrame(ttk.Frame):
         self.keyboard.attach(entry_widgets)
         self.stop_event = None
 
+        # Al cerrar la app: detener el motor y liberar el driver
+        self.bind("<Destroy>", self._on_destroy)
+
+    # ----------------- Helpers motor -----------------
+    def _ensure_driver(self) -> bool:
+        """Crea el driver compartido si no existe. Llamar con thread_lock tomado.
+        False si el motor lo tiene otro dueño (p. ej. una corrida de PCR o el
+        oscilador de CV/SWV crean su propio driver)."""
+        global drv
+        if drv is not None:
+            return True
+        from Drivers.DriverStepperSys import DriverStepperSys
+
+        try:
+            d = DriverStepperSys(
+                en_pin=12, enable_active_high=False, uart_port=serial_port_encoder
+            )
+        except Exception as e:
+            print(f"Motor not available (PCR/Electrochemical running?): {e}")
+            return False
+        d.enable_driver(True)
+        drv = d
+        return True
+
+    def _lock_while_running(self, thread):
+        """Bloquea PCR/Electrochemical mientras este hilo de motor vive (crean su
+        propio driver y chocarían en GPIO 12) y desbloquea al terminar, sea por
+        Stop o porque el go-to-zero acabó solo. Sondeo con after(): el hilo del
+        motor no toca Tk."""
+        self._motor_thread = thread
+        if self.lock_tabs_callback is not None:
+            self.lock_tabs_callback(True)
+        if self._lock_job is None:
+            self._poll_motor_thread()
+
+    def _poll_motor_thread(self):
+        if self._motor_thread is not None and self._motor_thread.is_alive():
+            self._lock_job = self.after(200, self._poll_motor_thread)  # pyrefly: ignore
+            return
+        self._lock_job = None
+        self._motor_thread = None
+        if self.lock_tabs_callback is not None:
+            self.lock_tabs_callback(False)
+
+    def _on_destroy(self, event=None):
+        """Al cerrar la app con el motor girando: lo detiene como Stop (rampa +
+        go_zero) y el hilo libera el driver al terminar, así el proceso puede
+        salir (antes quedaba colgado por el hilo lector no-daemon del driver y
+        el Pico seguía girando)."""
+        if event is not None and event.widget is not self:
+            return
+        if self._lock_job is not None:
+            try:
+                self.after_cancel(self._lock_job)
+            except Exception:
+                pass
+            self._lock_job = None
+        if self.stop_event is not None:
+            self.stop_event.set()
+        # Si hay un hilo vivo (de esta tab o de Quick Control) él libera al
+        # terminar; si no, se libera un driver que hubiera quedado abierto.
+        if not (thread_motor is not None and thread_motor.is_alive()):
+            release_driver()
+
+    # ----------------- Callbacks -----------------
     def callback_spin(self):
-        global thread_motor, drv
-        from Drivers.DriverStepperSys import DriverStepperSys, spinMotorRPM_ramped
+        global thread_motor
+        from Drivers.DriverStepperSys import spinMotorRPM_ramped
 
         with thread_lock:
             if thread_motor and thread_motor.is_alive():
@@ -336,19 +434,17 @@ class ControlDiscFrame(ttk.Frame):
             direction = self.entries[0].get()
             rpm_setpoint = float(self.entries[1].get())
             ts = settings.get("ts_spin", 0.1)
-            if drv is None:
-                drv = DriverStepperSys(
-                    en_pin=12, enable_active_high=False, uart_port=serial_port_encoder
-                )
-                drv.enable_driver(True)
+            if not self._ensure_driver():
+                return
             self.stop_event = (
                 threading.Event() if self.stop_event is None else self.stop_event
             )
             settings = read_settings_from_file()
             acceleration = settings.get("acceleration_spin", 200.0)
-            thread_motor = threading.Thread(
-                target=spinMotorRPM_ramped,
+            th = threading.Thread(
+                target=run_and_release,
                 args=(
+                    spinMotorRPM_ramped,
                     direction,
                     rpm_setpoint,
                     ts,
@@ -361,43 +457,44 @@ class ControlDiscFrame(ttk.Frame):
                     self.stop_event,
                 ),
             )
-            thread_motor.start()
+            thread_motor = th
+            th.start()
             print(
                 f"Motor {direction} at {rpm_setpoint} RPM started",
                 f"with acceleration {acceleration} RPM/s",
             )
+        self._lock_while_running(th)
 
     def callback_zero(self):
         print("Run go-to-zero function")
-        global thread_motor, drv
-        from Drivers.DriverStepperSys import DriverStepperSys
+        global thread_motor
 
         rpm_zero = float(self.entries[8].get())
         with thread_lock:
             if thread_motor and thread_motor.is_alive():
                 print("A thread is already active; cannot start another.")
                 return
-            if drv is None:
-                drv = DriverStepperSys(
-                    en_pin=12, enable_active_high=False, uart_port=serial_port_encoder
-                )
-                drv.enable_driver(True)
+            if not self._ensure_driver():
+                return
             self.stop_event = (
                 threading.Event() if self.stop_event is None else self.stop_event
             )
-            thread_motor = threading.Thread(
-                target=spinMotorToZero,
-                args=(rpm_zero, None, self.stop_event),
+            # Termina solo al llegar a cero: run_and_release suelta el driver
+            # (antes quedaba abierto hasta pulsar Stop y bloqueaba a PCR/CV).
+            th = threading.Thread(
+                target=run_and_release,
+                args=(spinMotorToZero, rpm_zero, None, self.stop_event),
             )
-            thread_motor.start()
+            thread_motor = th
+            th.start()
             print(f"Motor at {rpm_zero} RPM started")
+        self._lock_while_running(th)
 
     def callback_cycle(self):
         print("Run on/off cycle")
 
     def callback_oscillator(self):
-        global thread_motor, drv
-        from Drivers.DriverStepperSys import DriverStepperSys
+        global thread_motor
 
         settings: dict = read_settings_from_file()
         max_rpm = settings.get("max_rpm", 700)
@@ -413,17 +510,15 @@ class ControlDiscFrame(ttk.Frame):
                 print("A thread is already active; cannot start another.")
                 return
             # Aquí se iniciaría el modo oscilador con los parámetros dados
-            if drv is None:
-                drv = DriverStepperSys(
-                    en_pin=12, enable_active_high=False, uart_port=serial_port_encoder
-                )
-                drv.enable_driver(True)
+            if not self._ensure_driver():
+                return
             self.stop_event = (
                 threading.Event() if self.stop_event is None else self.stop_event
             )
-            thread_motor = threading.Thread(
-                target=spinMotorAngle,
+            th = threading.Thread(
+                target=run_and_release,
                 args=(
+                    spinMotorAngle,
                     angle,
                     speed_percentage * max_rpm / 100,
                     max_rpm,
@@ -433,11 +528,13 @@ class ControlDiscFrame(ttk.Frame):
                     drv
                 ),
             )
-            thread_motor.start()
+            thread_motor = th
+            th.start()
             print("Oscillator mode started")
+        self._lock_while_running(th)
 
     def callback_stop(self):
-        global thread_motor, drv
+        global thread_motor
         print("Stopping motor...")
         if self.stop_event is None:
             print("No stop event defined.")
@@ -445,10 +542,8 @@ class ControlDiscFrame(ttk.Frame):
         self.stop_event.set()
         if thread_motor:
             thread_motor.join()
-        if drv is not None:
-            drv.enable_driver(False)
-            drv.close()
-            drv = None
-            print("released resources")
+        # El hilo ya liberó el driver al terminar (run_and_release); esto cubre
+        # un driver que hubiera quedado abierto sin hilo.
+        release_driver()
         print("Thread stopped")
         self.stop_event = None

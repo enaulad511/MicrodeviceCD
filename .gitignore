@@ -48,6 +48,7 @@ test_*.py
 files/**.xlsx
 CLAUDE.md
 *draft.md
+.claude/**
 
 # --- Análisis local (notebook + figuras exportadas) ---
 analysis_plots.ipynb

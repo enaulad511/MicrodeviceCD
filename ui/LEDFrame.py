@@ -1,12 +1,18 @@
 # -*- coding: utf-8 -*-
 
 from tkinter import Entry, StringVar
+from typing import TYPE_CHECKING
 
 import ttkbootstrap as ttk
 from ttkbootstrap.scrolled import ScrolledFrame
 
 from templates.constants import font_entry, led_heatin_pin
 from ui.KeyboardFrame import NumericKeyboard
+
+# Solo para el type checker: Drivers.DriverGPIO importa gpiod a nivel de módulo
+# y rompería el modo dev en Windows; en ejecución se importa bajo demanda.
+if TYPE_CHECKING:
+    from Drivers.DriverGPIO import GPIOPin
 
 __author__ = "Edisson A. Naula"
 __date__ = "$ 08/10/2025  at 09:32 a.m. $"
@@ -105,9 +111,13 @@ class ControleLEDFrame(ttk.Frame):
         led_gpio: int = 25,
         chip: str = "/dev/gpiochip0",
         active_low: bool = False,
+        lock_tabs_callback=None,
     ):
         ttk.Frame.__init__(self, parent)
         self.parent = parent
+        # Bloquea PCR/Electrochemical mientras esta tab deja el LED encendido
+        # (solo una cosa a la vez); lo provee MainGUI.
+        self.lock_tabs_callback = lock_tabs_callback
         self.led_gpio = led_gpio
         self.chip = chip
         self.active_low = active_low
@@ -116,7 +126,11 @@ class ControleLEDFrame(ttk.Frame):
         content_frame = ScrolledFrame(self, autohide=True)
         content_frame.grid(row=0, column=0, sticky="nsew")
         content_frame.columnconfigure((0, 1), weight=1)
-        self.pin = None
+        # La línea gpiod solo se abre durante cada escritura (ver _set_led), así
+        # nunca queda tomada y PCR puede pedirla. _led_on recuerda si esta tab
+        # dejó el LED encendido, para apagarlo al cerrar la app.
+        self.pin: "GPIOPin | None" = None
+        self._led_on = False
         # ---- Estado para tareas programadas ----
         self._on_time_job = None
         self._pattern_job = None
@@ -141,9 +155,7 @@ class ControleLEDFrame(ttk.Frame):
     ):
         from Drivers.DriverGPIO import GPIOPin
 
-        if self.pin is not None:
-            self._cleanup_jobs()
-        else:
+        if self.pin is None:
             print(f"Creating GPIO pin {led_heatin_pin}")
             self.pin = GPIOPin(  # pyrefly: ignore
                 led_heatin_pin,
@@ -190,52 +202,80 @@ class ControleLEDFrame(ttk.Frame):
         except Exception:
             return default
 
-    def _on_destroy(self, event=None):
-        # Apaga el LED y libera recursos
-        self._cleanup_jobs()
+    def _release_pin(self):
+        """Libera la línea gpiod (el nivel escrito queda en el pin)."""
+        if self.pin is None:
+            return
         try:
-            self.pin.write(False)  # pyrefly: ignore
             self.pin.close()  # pyrefly: ignore
         except Exception as e:
             print(f"Error closing heating LED GPIO: {e}")
+        self.pin = None
+
+    def _set_led(self, value: bool) -> bool:
+        """Abre la línea, escribe y la libera en el acto (mismo patrón que
+        FluorecenseLEDFrame), para no dejarla tomada y que PCR pueda pedirla.
+        Devuelve False si no se pudo, p. ej. línea ocupada porque PCR corre."""
+        try:
+            self.init_GPIO()
+            self.pin.write(value)  # pyrefly: ignore
+            return True
+        except Exception as e:
+            print(f"Error GPIO heating LED: {e}")
+            return False
+        finally:
+            self._release_pin()
+
+    def _update_lock(self):
+        """Tabs de PCR/Electrochemical bloqueadas mientras el LED quede encendido."""
+        if self.lock_tabs_callback is not None:
+            self.lock_tabs_callback(self._led_on)
+
+    def _on_destroy(self, event=None):
+        # Apaga el LED solo si esta tab lo dejó encendido; si no, no toca la
+        # línea (podría tenerla PCR) y no hay nada que liberar.
+        self._cleanup_jobs()
+        if self._led_on:
+            self._set_led(False)
 
     # ----------------- Callbacks públicos -----------------
     def callback_on(self):
-        self.init_GPIO()
         self._cleanup_jobs()
-        self.pin.write(True)  # pyrefly: ignore
-        print("LED ON")
+        if self._set_led(True):
+            self._led_on = True
+            print("LED ON")
+        self._update_lock()
 
     def callback_off(self):
-        if self.pin is None:
-            print("GPIO not initialized")
-            return
         # Parar cualquier programación y apagar
         self._cleanup_jobs()
-        self.pin.write(False)
-        print("LED OFF")
-        self.pin.close()  # pyrefly: ignore
-        self.pin = None
+        if self._set_led(False):
+            self._led_on = False
+            print("LED OFF")
+        self._update_lock()
 
     def callback_on_time(self):
-        self.init_GPIO()
         # Lee duración en ms (entries[0])
         ms = self._read_int_entry(self.entries[0], default=2000)  # default 500 ms
         if ms < 0:
             ms = 0
         self._cleanup_jobs()
-        self.pin.write(True)  # pyrefly: ignore
+        if not self._set_led(True):
+            self._update_lock()
+            return
+        self._led_on = True
         print(f"LED ON for {ms} ms")
+        self._update_lock()
 
-        # Agenda apagado
+        # Agenda apagado (la línea queda libre mientras corre el tiempo)
         self._on_time_job = self.after(ms, self._on_time_finish)  # pyrefly: ignore
 
     def _on_time_finish(self):
-        self.pin.write(False)  # pyrefly: ignore
         self._on_time_job = None
-        print("Time finished: LED OFF")
-        self.pin.close()  # pyrefly: ignore
-        self.pin = None
+        if self._set_led(False):
+            self._led_on = False
+            print("Time finished: LED OFF")
+        self._update_lock()
 
     def callback_pattern(self):
         print("Starting pattern")

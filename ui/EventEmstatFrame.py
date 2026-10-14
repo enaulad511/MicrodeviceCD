@@ -76,6 +76,11 @@ class EventPlotter(ttk.Frame):
         # si el Timer de pre-tratamiento fallara. Se fija en update_val_experiment y se
         # anula tras dispararse (one-shot por corrida).
         self.on_first_data: Callable[[], None] | None = None
+        # Hook opcional on_run_state(running): True al arrancar una corrida, False al
+        # terminar (Stop o terminal del firmware). Siempre se invoca en el hilo de UI.
+        # Lo fija ElectrochemicalFrame para bloquear PCR y los controles manuales
+        # mientras corre (solo una cosa a la vez; ver docs/bloqueo_tabs_exclusion.md).
+        self.on_run_state: Callable[[bool], None] | None = None
         # Indicador de fase del pre-tratamiento (SWV): lista [[nombre, dur_s], ...] de las
         # fases presentes (condition/deposition/equilibration). Mientras el pre-tratamiento
         # corre, el plot no cambia (esos puntos no se grafican), así que mostramos la fase y
@@ -311,6 +316,7 @@ class EventPlotter(ttk.Frame):
         self.stop_event.clear()
         self.flag_recording = True
         self.running = True
+        self._notify_run_state(True)  # start() viene del botón: hilo de UI
 
         # Reset cobertura/estado del tap para esta corrida
         self.seq_seen = {"tcp": set(), "udp": set()}
@@ -429,6 +435,12 @@ class EventPlotter(ttk.Frame):
             pass
         self.running = False
         self.flag_recording = False
+        # stop() puede venir del hilo procesador (terminales del firmware): el hook
+        # toca Tk, así que se agenda en el hilo de UI.
+        try:
+            self.after(0, self._notify_run_state, False)
+        except Exception:
+            pass
         self._print_coverage()  # resumen de cobertura TCP vs UDP (Fase 0)
         # Fase 2: reconcilia TCP+UDP por seq y redibuja en el hilo UI (matplotlib/Tk
         # no son thread-safe; stop() puede venir del hilo procesador).
@@ -447,6 +459,16 @@ class EventPlotter(ttk.Frame):
             self._set_status("Stopped by user.")
         self.on_end_experiment(self.thread_motor)
         self.thread_motor = None
+
+    def _notify_run_state(self, running):
+        """Invoca on_run_state (hilo de UI). Un fallo del hook no debe tumbar la corrida."""
+        cb = self.on_run_state
+        if cb is None:
+            return
+        try:
+            cb(running)
+        except Exception as e:
+            print(f"on_run_state hook error: {e}")
 
     def clear_plot(self):
         """Limpia datos y resetea el gráfico (wipe total: incluye líneas cargadas)."""

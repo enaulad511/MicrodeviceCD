@@ -398,9 +398,12 @@ def create_buttons(master, callbacks, svar_status):
 
 
 class PCRFrame(ttk.Frame):
-    def __init__(self, parent, ads_reader):
+    def __init__(self, parent, ads_reader, lock_tabs_callback=None):
         ttk.Frame.__init__(self, parent)
         self.parent = parent
+        # Exclusión mutua con Electrochemical y los controles manuales: bloquea
+        # sus tabs mientras corre (MainGUI.set_tabs_locked, dueño "pcr").
+        self.lock_tabs_callback = lock_tabs_callback
         self.running_experiment = False
         self.pin_heating = None
         self.pin_pcr = None
@@ -1720,6 +1723,9 @@ class PCRFrame(ttk.Frame):
         self._ui_poll_graph_counter = 0
         self._ui_poll_active = True
         self.after(500, self._ui_poll_loop)
+        # Aquí y no al poner running_experiment: si leer las entradas fallara, las
+        # tabs no quedan bloqueadas. Se desbloquea en _restore_input_ui.
+        self._set_tabs_locked(True)
         self.thread_experiment = threading.Thread(  # pyrefly: ignore
             target=self.experiment_pcr,
             args=(
@@ -2461,6 +2467,16 @@ class PCRFrame(ttk.Frame):
         if self.cbo_temp_source is not None:
             self.cbo_temp_source.configure(state="readonly")
         self._refresh_project_list()
+        # Fin de corrida (natural o Stop): las otras tabs vuelven a estar
+        # disponibles. Idempotente.
+        self._set_tabs_locked(False)
+
+    def _set_tabs_locked(self, locked):
+        if self.lock_tabs_callback is not None:
+            try:
+                self.lock_tabs_callback(locked)
+            except Exception as e:
+                print(f"Error in lock_tabs_callback: {e}")
 
     def callback_stop_experiment(self):
         # Restaura UI y dispara la salida ordenada del hilo del experimento.

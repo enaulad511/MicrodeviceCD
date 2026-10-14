@@ -34,9 +34,18 @@ class TemperatureFrame(ttk.Frame):
       que devuelva la temperatura en °C como float.
     """
 
-    def __init__(self, parent, sensor_reader="default", title="Temperature measurement"):
+    def __init__(
+        self,
+        parent,
+        sensor_reader="default",
+        title="Temperature measurement",
+        lock_tabs_callback=None,
+    ):
         super().__init__(parent)
         self.parent = parent
+        # Bloquea PCR/Electrochemical mientras la lectura corre (solo una cosa a
+        # la vez); lo provee MainGUI.
+        self.lock_tabs_callback = lock_tabs_callback
         self.start_time = 0.0
         self.running = False
         self.temps = []  # Temperaturas
@@ -187,6 +196,8 @@ class TemperatureFrame(ttk.Frame):
             self.timestamps.clear()
             self.client.start()
             self.after(intervalo, self.adquirir_dato)
+            if self.lock_tabs_callback is not None:
+                self.lock_tabs_callback(True)
         except ValueError:
             self.interval_entry.configure(background="salmon")
             print("Invalid interval")
@@ -196,6 +207,8 @@ class TemperatureFrame(ttk.Frame):
         if self.client is not None:
             self.client.stop()
         self.running = False
+        if self.lock_tabs_callback is not None:
+            self.lock_tabs_callback(False)
 
     def limpiar_datos(self):
         if self.running:

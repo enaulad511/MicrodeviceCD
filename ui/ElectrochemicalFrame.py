@@ -15,10 +15,13 @@ from ui.SqwVFrame import SWVFrame
 
 
 class ElectrochemicalFrame(ttk.Frame):
-    def __init__(self, parent, callback_get_ip_sender=None):
+    def __init__(self, parent, callback_get_ip_sender=None, lock_tabs_callback=None):
         ttk.Frame.__init__(self, parent)
         self.parent = parent
         self.callback_ip = callback_get_ip_sender
+        # Exclusión mutua con PCR y los controles manuales: bloquea sus tabs
+        # mientras corre un experimento (MainGUI.set_tabs_locked, dueño "electrochem").
+        self.lock_tabs_callback = lock_tabs_callback
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=1)
 
@@ -96,6 +99,13 @@ class ElectrochemicalFrame(ttk.Frame):
         plotter = getattr(frame, "udp_plotter", None)
         return bool(getattr(plotter, "running", False))
 
+    def _on_run_state(self, running):
+        """Hook de EventPlotter (hilo de UI): bloquea/desbloquea las tabs de PCR y
+        Manual Control mientras corre un experimento. Basta un dueño para los 4
+        métodos: el cambio de método ya está bloqueado durante una corrida."""
+        if self.lock_tabs_callback is not None:
+            self.lock_tabs_callback(running)
+
     def _build_test_frame(self, selected_test, ip_sender):
         """Construye el frame del metodo seleccionado (una sola vez, lazy)."""
         match selected_test:
@@ -160,6 +170,9 @@ class ElectrochemicalFrame(ttk.Frame):
         if frame is None:
             frame = self._build_test_frame(selected_test, ip_sender)
             self.frame_cache[selected_test] = frame
+            plotter = getattr(frame, "udp_plotter", None)
+            if plotter is not None:
+                plotter.on_run_state = self._on_run_state
         self.current_test_frame = frame
         self.current_method = selected_test
         self.current_test_frame.grid(row=0, column=0, sticky="nsew", pady=5)

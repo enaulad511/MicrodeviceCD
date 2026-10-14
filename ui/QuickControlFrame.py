@@ -396,19 +396,32 @@ class QuickControlFrame(ttk.Frame):
                 return
             drv = disc.drv
             if drv is None:
-                drv = DriverStepperSys(
-                    en_pin=12, enable_active_high=False, uart_port=serial_port_encoder
-                )
+                try:
+                    drv = DriverStepperSys(
+                        en_pin=12, enable_active_high=False, uart_port=serial_port_encoder
+                    )
+                except Exception as e:
+                    # GPIO 12 / UART tomados por otro dueño (PCR o el oscilador de CV/SWV)
+                    print(f"Motor not available: {e}")
+                    self._set_status("Motor busy (PCR/Electrochemical running?).")
+                    return
                 drv.enable_driver(True)
                 disc.drv = drv  # pyrefly: ignore  # singleton compartido con DiscFrame
             self.motor_stop_event = threading.Event()
+            # run_and_release suelta el driver al terminar el hilo por cualquier
+            # causa; sin eso, cerrar la app con el motor girando dejaba el proceso
+            # colgado (hilo lector no-daemon del driver). Hilos NO daemon: al
+            # cerrar la app, _on_destroy activa el stop y la salida espera a que
+            # el hilo frene, vuelva a cero y cierre el driver (acotado); daemon
+            # los mataba a mitad del close().
             if mode == "Continuous":
                 direction = self.motor_dir_var.get()
                 ts = settings.get("ts_spin", 0.1)
                 acceleration = settings.get("acceleration_spin", 200.0)
                 thread = threading.Thread(
-                    target=spinMotorRPM_ramped,
+                    target=disc.run_and_release,
                     args=(
+                        spinMotorRPM_ramped,
                         direction,
                         rpm,
                         ts,
@@ -420,14 +433,14 @@ class QuickControlFrame(ttk.Frame):
                         None,
                         self.motor_stop_event,
                     ),
-                    daemon=True,
                 )
                 self._set_status(f"Motor {direction} at {rpm:.0f} RPM.")
             else:
                 max_rpm = settings.get("max_rpm", 700)
                 thread = threading.Thread(
-                    target=disc.spinMotorAngle,
+                    target=disc.run_and_release,
                     args=(
+                        disc.spinMotorAngle,
                         angle,
                         speed_pct * max_rpm / 100,
                         max_rpm,
@@ -436,7 +449,6 @@ class QuickControlFrame(ttk.Frame):
                         self.motor_stop_event,
                         drv,
                     ),
-                    daemon=True,
                 )
                 self._set_status(f"Oscillator ±{angle:.0f}° at {speed_pct:.0f}%.")
             disc.thread_motor = thread  # pyrefly: ignore  # singleton compartido
@@ -464,15 +476,8 @@ class QuickControlFrame(ttk.Frame):
         th = disc.thread_motor
         if th is not None and th.is_alive():
             th.join()
-        with disc.thread_lock:
-            drv = disc.drv
-            if drv is not None:
-                try:
-                    drv.enable_driver(False)
-                    drv.close()
-                except Exception as e:
-                    print(f"Error releasing motor driver: {e}")
-                disc.drv = None  # pyrefly: ignore  # singleton compartido
+        # El hilo ya liberó el driver al terminar (run_and_release); idempotente.
+        disc.release_driver()
         self.after(0, self._on_motor_stopped)
 
     def _on_motor_stopped(self):
