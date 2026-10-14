@@ -86,8 +86,8 @@ el enfriamiento no hace falta (ya se está bajo el objetivo) tampoco hay `coolin
 
 ### La espera previa a la lectura ya no es hold
 
-`fluor_read` y `final_read` se declaran **antes** de los `FLUOR_PRE_SLEEP_S` (0.5 s) de
-espera, no después ([PcrFrame.py:1865](../ui/PcrFrame.py#L1865),
+`fluor_read` y `final_read` se declaran **antes** de los `pcr_fluorescence.pre_sleep_s`
+(0.5 s por defecto, [cambios_fluorescencia.md](cambios_fluorescencia.md) §3) de espera, no después ([PcrFrame.py:1865](../ui/PcrFrame.py#L1865),
 [PcrFrame.py:2082](../ui/PcrFrame.py#L2082)). En esa espera el lazo del hold ya terminó y
 la temperatura deriva; etiquetarla `ext_hold` ensuciaría justo la estadística del hold
 que estas columnas buscan habilitar. Efecto visible: el label de estado dice

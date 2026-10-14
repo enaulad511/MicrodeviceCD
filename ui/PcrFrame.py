@@ -47,15 +47,13 @@ thread_motor = None
 ads = None
 thread_lock = threading.Lock()
 
-# Duración de la lectura de fluorescencia (fuente única de verdad).
-# Usadas como defaults de _read_fluorescence, en los sleeps previos a cada
-# lectura y en la estimación de tiempo restante del experimento.
-FLUOR_PRE_SLEEP_S = 0.5  # espera tras el hold de extensión, antes de muestrear
-FLUOR_BASELINE_S = 0.5  # ventana de línea base (luz OFF)
-FLUOR_LIGHT_S = 2.0  # ventana de excitación (luz ON)
-FLUOR_POST_S = 0.5  # ventana de decaimiento (luz OFF)
-# Tiempo total que consume una lectura completa (sleep previo + 3 ventanas).
-FLUOR_READ_TOTAL_S = FLUOR_PRE_SLEEP_S + FLUOR_BASELINE_S + FLUOR_LIGHT_S + FLUOR_POST_S
+# Duración de la lectura de fluorescencia. Son solo los DEFAULTS: los efectivos
+# vienen de settings.json → pcr_fluorescence (_fluor_cfg) y se leen una vez por
+# corrida en self.fluor_cfg, que usan la lectura, la espera previa y la ETA.
+FLUOR_PRE_SLEEP_S = 0.5  # pre_sleep_s: espera tras el hold de extensión, antes de muestrear
+FLUOR_BASELINE_S = 0.5  # baseline_s: ventana de línea base (luz OFF)
+FLUOR_LIGHT_S = 2.0  # light_s: ventana de excitación (luz ON)
+FLUOR_POST_S = 0.5  # post_s: ventana de decaimiento (luz OFF)
 
 # Fuentes de temperatura válidas en PCR: IR Ambient queda fuera (no es la
 # temperatura de la muestra, solo referencia). El primario regula el PID y el
@@ -189,15 +187,34 @@ def _freshness_cfg(pid):
     }
 
 
+def _fluor_cfg(fl):
+    """Ventanas de la lectura de fluorescencia desde el dict pcr_fluorescence.
+
+    No numérico o negativo → default. baseline_s y light_s en 0 también: sin una
+    de esas dos ventanas el delta (luz − baseline) pierde sentido. pre_sleep_s y
+    post_s sí admiten 0 (sin espera previa / sin ventana de decaimiento).
+    total_s = lo que consume una lectura completa (espera previa + 3 ventanas).
+    """
+    cfg = {
+        "pre_sleep_s": _cfg_num(fl, "pre_sleep_s", FLUOR_PRE_SLEEP_S),
+        "baseline_s": _cfg_num(fl, "baseline_s", FLUOR_BASELINE_S) or FLUOR_BASELINE_S,
+        "light_s": _cfg_num(fl, "light_s", FLUOR_LIGHT_S) or FLUOR_LIGHT_S,
+        "post_s": _cfg_num(fl, "post_s", FLUOR_POST_S),
+    }
+    cfg["total_s"] = sum(cfg.values())
+    return cfg
+
+
 # Temperatura de partida que asumen la preview y la ETA (no hay lectura todavía).
 PCR_ROOM_TEMP_C = 20.0
 
 
-def _estimate_cycle_s(high_temp, low_temp, ext_temp, time_high, time_low, ext_time, cfg):
+def _estimate_cycle_s(high_temp, low_temp, ext_temp, time_high, time_low, ext_time, cfg, fluor_s):
     """Duración estimada de UN ciclo en régimen, con el mismo modelo que la
     salvaguarda de fases (ΔT × ramp_s_per_c al subir, ΔT × cool_s_per_c al bajar)
     y las mismas reglas de omisión que _run_cycle. Incluye la lectura de
-    fluorescencia. Contra Newn1: 80.3 s estimados vs ~83 s medidos.
+    fluorescencia (fluor_s = _fluor_cfg(...)["total_s"]). Contra Newn1: 80.3 s
+    estimados vs ~83 s medidos.
     """
     # Un ciclo arranca donde terminó el anterior: en ext, o en la última fase activa.
     cur = ext_temp if not _skip(ext_time) else (low_temp if not _skip(time_low) else high_temp)
@@ -214,21 +231,32 @@ def _estimate_cycle_s(high_temp, low_temp, ext_temp, time_high, time_low, ext_ti
         cur = low_temp
     if not _skip(ext_time):
         total += abs(ext_temp - cur) * cfg["s_per_c"] + ext_time
-    return total + FLUOR_READ_TOTAL_S
+    return total + fluor_s
 
 
 def _estimate_total_s(
-    high_temp, low_temp, ext_temp, time_high, time_low, ext_time,
-    cycles, denat_temp, denat_time, ext_time_final, initial_spin_time, cfg,
+    high_temp,
+    low_temp,
+    ext_temp,
+    time_high,
+    time_low,
+    ext_time,
+    cycles,
+    denat_temp,
+    denat_time,
+    ext_time_final,
+    initial_spin_time,
+    cfg,
+    fluor_s,
 ):
     """Duración estimada de la corrida completa (ETA antes del primer ciclo)."""
     total = max(0.0, initial_spin_time)
     if not _skip(denat_time):
         total += abs(denat_temp - PCR_ROOM_TEMP_C) * cfg["s_per_c"] + denat_time
     total += cycles * _estimate_cycle_s(
-        high_temp, low_temp, ext_temp, time_high, time_low, ext_time, cfg
+        high_temp, low_temp, ext_temp, time_high, time_low, ext_time, cfg, fluor_s
     )
-    return total + max(0.0, ext_time_final) + FLUOR_READ_TOTAL_S
+    return total + max(0.0, ext_time_final) + fluor_s
 
 
 def check_temp_higher(temp, target_temp):
@@ -458,6 +486,8 @@ class PCRFrame(ttk.Frame):
         # lecturas válidas del primario y el umbral derivado que leen los lazos.
         # 0.0 = sin medición aún → solo rigen los umbrales absolutos.
         self.fresh_cfg = _freshness_cfg({})
+        # Ventanas de la lectura de fluorescencia (se relee en experiment_pcr).
+        self.fluor_cfg = _fluor_cfg({})
         self._rx_dts: deque = deque(maxlen=PCR_CADENCE_WIN)
         self._last_good_rx: "float | None" = None
         self.fresh_age_s = 0.0
@@ -943,7 +973,9 @@ class PCRFrame(ttk.Frame):
             # cool_s_per_c): perfil dibujado, ETA y plazo de cada fase salen del
             # mismo modelo. El enfriamiento antes era 10000 / rpm, que solo
             # ve el giro y lo dibujaba 2.4× más corto que el real (Newn1).
-            est_cfg = _phase_timeout_cfg(read_settings_from_file().get("pidControllerRPM", {}))
+            settings = read_settings_from_file()
+            est_cfg = _phase_timeout_cfg(settings.get("pidControllerRPM", {}))
+            fluor_s = _fluor_cfg(settings.get("pcr_fluorescence", {}))["total_s"]
             heating_rate_up = est_cfg["s_per_c"]
 
             def transition_time_up(t_from, t_to):
@@ -957,7 +989,7 @@ class PCRFrame(ttk.Frame):
             # ese tope para no aplastar los ciclos. Es solo visual: el tiempo real
             # se conserva en la anotación de cada tramo recortado.
             cycle_dur = _estimate_cycle_s(
-                high_temp, low_temp, ext_temp, time_high, time_low, ext_time, est_cfg
+                high_temp, low_temp, ext_temp, time_high, time_low, ext_time, est_cfg, fluor_s
             )
             clip_cap = 1.5 * cycle_dur if cycle_dur > 0 else float("inf")
 
@@ -1037,7 +1069,14 @@ class PCRFrame(ttk.Frame):
                     current_time += ramp_high
 
                     phase_segments.append(
-                        (current_time, current_time + time_high, high_temp, high_temp, "High", "red")
+                        (
+                            current_time,
+                            current_time + time_high,
+                            high_temp,
+                            high_temp,
+                            "High",
+                            "red",
+                        )
                     )
                     current_time += time_high
                     current_temp = high_temp
@@ -1045,9 +1084,7 @@ class PCRFrame(ttk.Frame):
                 # Cooling hacia la siguiente fase activa (Low, o Extension si Low se
                 # omite). Solo si hay algo más frío hacia lo que enfriar.
                 cool_target = (
-                    low_temp
-                    if not _skip(time_low)
-                    else (ext_temp if not _skip(ext_time) else None)
+                    low_temp if not _skip(time_low) else (ext_temp if not _skip(ext_time) else None)
                 )
                 if cool_target is not None and current_temp > cool_target:
                     ramp_down = transition_time_down(current_temp, cool_target)
@@ -1290,11 +1327,7 @@ class PCRFrame(ttk.Frame):
         solo señaliza los stop-events y marca la fase — el finally del hilo del
         experimento desmonta y _ui_poll_loop restaura la UI al ver running=False.
         """
-        if (
-            not self.running_experiment
-            or not self._temp_ever_valid
-            or self._temp_abort_triggered
-        ):
+        if not self.running_experiment or not self._temp_ever_valid or self._temp_abort_triggered:
             return
         last_fresh = max(
             self._chan_last_good[self.temp_source_idx],
@@ -1304,8 +1337,7 @@ class PCRFrame(ttk.Frame):
             self._temp_abort_triggered = True
             self._enter_phase("aborted_sensors")
             print(
-                f"Aborting PCR: both pair sensors stale > {self.temp_dead_s}s "
-                "— stopping experiment"
+                f"Aborting PCR: both pair sensors stale > {self.temp_dead_s}s — stopping experiment"
             )
             if self.stop_udp_listenner is not None:
                 self.stop_udp_listenner.set()
@@ -1333,9 +1365,7 @@ class PCRFrame(ttk.Frame):
         self._check_temp_watchdog()
 
         src_label = temp_source_label(self.temp_source)
-        warn = (
-            f"  ⚠ {src_label} unavailable — holding last value" if self.temp_source_bad else ""
-        )
+        warn = f"  ⚠ {src_label} unavailable — holding last value" if self.temp_source_bad else ""
         # Secundario del par (suavizado, hold-last): siempre muestra su valor
         # sostenido porque está en la curva. IR Ambient va crudo como referencia
         # ("N/A" si viene ausente); no se plotea ni se guarda.
@@ -1355,8 +1385,7 @@ class PCRFrame(ttk.Frame):
         if self.phase_timeouts:
             cyc, code = self.phase_timeouts[-1][0], self.phase_timeouts[-1][1]
             timeout_note = (
-                f"  ⚠ {len(self.phase_timeouts)} phase timeout(s), "
-                f"last: {code} (cycle {cyc})"
+                f"  ⚠ {len(self.phase_timeouts)} phase timeout(s), last: {code} (cycle {cyc})"
             )
         # Reconstruir el status completo cada tick: este loop es el único escritor
         # de svar_status durante la corrida, así que no hace falta leer/partir el
@@ -1400,7 +1429,7 @@ class PCRFrame(ttk.Frame):
                 self.avg_cycle_duration * cycles_left
                 - elapsed_current
                 + self.ext_time_final
-                + FLUOR_READ_TOTAL_S  # lectura de fluorescencia final pendiente
+                + self.fluor_cfg["total_s"]  # lectura de fluorescencia final pendiente
             )
         else:
             # Ya pasaron todos los ciclos: solo queda el segmento final (hold de
@@ -1413,7 +1442,7 @@ class PCRFrame(ttk.Frame):
             # deja solo la lectura final. start_final_ext_time puede ser 0.0 (no
             # fijado) en la ventana mínima entre el fin de los ciclos y el arranque
             # del segmento; ahí se muestra el total sin descontar.
-            total_final = max(0.0, self.ext_time_final) + FLUOR_READ_TOTAL_S
+            total_final = max(0.0, self.ext_time_final) + self.fluor_cfg["total_s"]
             if self.start_final_ext_time > 0.0:
                 remaining = total_final - (time.time() - self.start_final_ext_time)
             else:
@@ -1455,12 +1484,20 @@ class PCRFrame(ttk.Frame):
         p_label = temp_source_label(self.temp_source)
         s_label = temp_source_label_by_index(self._secondary_idx())
         (self.line,) = self.ax.plot(
-            [], [], marker="o", markersize=2,
-            color=PCR_TEMP_CHANNEL_COLORS.get(p_label), label=p_label,
+            [],
+            [],
+            marker="o",
+            markersize=2,
+            color=PCR_TEMP_CHANNEL_COLORS.get(p_label),
+            label=p_label,
         )
         (self.line_secondary,) = self.ax.plot(
-            [], [], marker="o", markersize=2,
-            color=PCR_TEMP_CHANNEL_COLORS.get(s_label), label=s_label,
+            [],
+            [],
+            marker="o",
+            markersize=2,
+            color=PCR_TEMP_CHANNEL_COLORS.get(s_label),
+            label=s_label,
         )
         # Las Line2D se recrean en cada corrida: hay que re-aplicarles el estado
         # del checkbox o la secundaria reaparecería al pulsar Start.
@@ -1612,9 +1649,7 @@ class PCRFrame(ttk.Frame):
             # "cols: <primario>|<secundario>|t_s|cycle|phase" y el resumen de
             # cadencia medido). El loader del análisis la salta y lee por posición,
             # así que crecer la fila de metadata y agregar columnas al final es seguro.
-            writer.writerow(
-                [self.prefix_row + self._cadence_summary() + self._timeouts_summary()]
-            )
+            writer.writerow([self.prefix_row + self._cadence_summary() + self._timeouts_summary()])
             # Cinco columnas alineadas por muestra: [primario, secundario, t_s,
             # cycle, phase]. Se anexan juntas en update_displayed_temperature;
             # zip_longest cubre un desfase de a lo más una muestra si el paro cayó
@@ -1847,9 +1882,7 @@ class PCRFrame(ttk.Frame):
     def _record_timeout(self, code, t0, limit, target):
         """Registra una fase abandonada; el ciclo en curso cuenta como fallido."""
         elapsed = time.time() - t0
-        self.phase_timeouts.append(
-            (self.cycle_current, code, elapsed, limit, self.temp, target)
-        )
+        self.phase_timeouts.append((self.cycle_current, code, elapsed, limit, self.temp, target))
         self._cycle_timeouts.append(code)
         print(
             f"Phase timeout: {code} (cycle {self.cycle_current}) {elapsed:.1f}s > "
@@ -1973,15 +2006,7 @@ class PCRFrame(ttk.Frame):
         )
         self.pin_heating.write(False)  # pyrefly: ignore
 
-    def _read_fluorescence(
-        self,
-        ads,
-        baseline_s=FLUOR_BASELINE_S,
-        light_s=FLUOR_LIGHT_S,
-        post_s=FLUOR_POST_S,
-        sample_dt=0.1,
-        averages=4,
-    ):
+    def _read_fluorescence(self, ads, sample_dt=0.1, averages=4):
         # Muestreo continuo del fotodetector mientras se modula la luz (pin_pcr):
         #   baseline_s  -> luz OFF (línea base oscura)
         #   light_s     -> luz ON  (excitación)
@@ -1989,6 +2014,11 @@ class PCRFrame(ttk.Frame):
         # Acumula la serie temporal cruda y agrega el escalar
         #   delta = media(ventana con luz) - media(ventana baseline)
         # a data_photodetector (plot por-ciclo). Soporta lectura diferencial.
+        # Las ventanas salen de self.fluor_cfg (una lectura por corrida): todas las
+        # lecturas de una corrida usan las mismas, aunque se edite settings.json.
+        baseline_s = self.fluor_cfg["baseline_s"]
+        light_s = self.fluor_cfg["light_s"]
+        post_s = self.fluor_cfg["post_s"]
         settings = read_settings_from_file()
         use_diff = settings.get("photoreceptor", {}).get("use_diff", False)
 
@@ -2091,9 +2121,7 @@ class PCRFrame(ttk.Frame):
         # Si Low se omite (time_low <= 0) se enfría hacia la extensión; si ambas
         # se omiten no hay nada que enfriar (la próxima fase es calentamiento).
         cool_target = (
-            low_temp
-            if not _skip(time_low)
-            else (ext_temp if not _skip(ext_time) else None)
+            low_temp if not _skip(time_low) else (ext_temp if not _skip(ext_time) else None)
         )
         if cool_target is not None and self.temp > cool_target + 0.5:
             print(f"Cooling down to {cool_target} °C with motor spin")
@@ -2163,10 +2191,10 @@ class PCRFrame(ttk.Frame):
             print("Skipping Extension phase: time <= 0")
 
         # Lectura de fluorescencia. La fase se declara ANTES de la espera previa:
-        # esos FLUOR_PRE_SLEEP_S ya no son hold (el lazo terminó y la temperatura
+        # esos pre_sleep_s ya no son hold (el lazo terminó y la temperatura
         # deriva), y etiquetarlos ext_hold ensuciaría la estadística del hold.
         self._enter_phase("fluor_read")
-        time.sleep(FLUOR_PRE_SLEEP_S)
+        time.sleep(self.fluor_cfg["pre_sleep_s"])
         print("Reading fluorescence...")
         v_fluo = self._read_fluorescence(ads)
         print(f"fluorescence delta voltage: {v_fluo}")
@@ -2221,26 +2249,37 @@ class PCRFrame(ttk.Frame):
             ts = float(pidGains.get("ts_pcr", 0.02))
         except Exception:
             ts = 0.02
-        # Salvaguarda de fases y frescura: una lectura por corrida (van a la
-        # metadata del CSV).
+        # Salvaguarda de fases, frescura y ventanas de fluorescencia: una lectura por
+        # corrida (van a la metadata del CSV).
         self.timeout_cfg = _phase_timeout_cfg(pidGains)
         self.fresh_cfg = _freshness_cfg(pidGains)
+        self.fluor_cfg = _fluor_cfg(settings.get("pcr_fluorescence", {}))
         # 0 no tiene sentido (abortaría si la primera lectura no llegó ya) → default.
         start_wait_s = (
-            _cfg_num(pidGains, "temp_start_wait_s", PCR_TEMP_START_WAIT_S)
-            or PCR_TEMP_START_WAIT_S
+            _cfg_num(pidGains, "temp_start_wait_s", PCR_TEMP_START_WAIT_S) or PCR_TEMP_START_WAIT_S
         )
         print(
             f"Phase timeout config: {self.timeout_cfg} | freshness: {self.fresh_cfg}"
-            f" | start wait: {start_wait_s} s"
+            f" | start wait: {start_wait_s} s | fluorescence: {self.fluor_cfg}"
         )
         # ETA antes del primer ciclo: mismo modelo que la preview y la salvaguarda
         # (rampas y enfriamiento por ΔT). El anterior, holds × 1.2, ignoraba rampas y
         # enfriamiento y daba ~1.9 ks para Newn1 contra 3.27 ks reales. Desde el
         # primer ciclo la ETA pasa a la duración medida (_estimate_remaining_time).
         self.teorical_time_pcr = _estimate_total_s(
-            high_temp, low_temp, ext_temp, time_high, time_low, ext_time, cycles,
-            denat_temp, denat_time, ext_time_final, initial_spin_time, self.timeout_cfg,
+            high_temp,
+            low_temp,
+            ext_temp,
+            time_high,
+            time_low,
+            ext_time,
+            cycles,
+            denat_temp,
+            denat_time,
+            ext_time_final,
+            initial_spin_time,
+            self.timeout_cfg,
+            self.fluor_cfg["total_s"],
         )
         print(f"Estimated run time: {self.teorical_time_pcr / 60:.1f} min")
 
@@ -2253,6 +2292,7 @@ class PCRFrame(ttk.Frame):
         # Identidad de columnas del CSV de temperatura: col0=primario, col1=secundario.
         primary_label = temp_source_label(self.temp_source)
         secondary_label = temp_source_label_by_index(self._secondary_idx())
+        fc = self.fluor_cfg
         # OJO: "ts" es el periodo del lazo PI, NO la cadencia de muestreo (esa la
         # manda el firmware del disco y ahora se mide: ver _cadence_summary).
         # "start" ancla el eje t_s —que es relativo— al reloj de pared, para poder
@@ -2267,7 +2307,10 @@ class PCRFrame(ttk.Frame):
             f"-ext_temp: {ext_temp}-ext_time: {ext_time}-ext_time_final: {ext_time_final}"
             f"-initial_spin: {initial_spin_time}-ts: {ts}"
             f"-temp_source: {primary_label}"
-            f"-start: {datetime.fromtimestamp(self.start_pcr_time).isoformat(timespec='seconds')}"
+            # Ventanas de fluorescencia efectivas (configurables en settings.json).
+            f"-fluor: pre {fc['pre_sleep_s']:g}s base {fc['baseline_s']:g}s"
+            f" light {fc['light_s']:g}s post {fc['post_s']:g}s"
+            f"-start:{datetime.fromtimestamp(self.start_pcr_time).isoformat(timespec='seconds')}"
             f"-cols: {primary_label}|{secondary_label}|t_s|cycle|phase"
         )
         self.temp = 20.0
@@ -2419,7 +2462,7 @@ class PCRFrame(ttk.Frame):
                 else:
                     print("Skipping Final Extension hold: time <= 0")
                 self._enter_phase("final_read")
-                time.sleep(FLUOR_PRE_SLEEP_S)
+                time.sleep(self.fluor_cfg["pre_sleep_s"])
                 v_fluo_final = self._read_fluorescence(ads)
                 print(f"Final fluorescence delta voltage: {v_fluo_final}")
                 self._enter_phase("done")

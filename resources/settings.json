@@ -68,6 +68,12 @@
     "photoreceptor": {
         "use_diff": 1.0
     },
+    "pcr_fluorescence": {
+        "pre_sleep_s": 0.5,
+        "baseline_s": 0.5,
+        "light_s": 2.0,
+        "post_s": 0.5
+    },
     "windows_pcr": 1500.0,
     "temp_source": "thermocouple"
 }

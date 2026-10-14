@@ -11,7 +11,8 @@ nueva arriba de las entradas, sin pantalla previa (panel integrado).
 
 Un proyecto guarda **solo las 12 entradas visibles** — lo que el biólogo edita
 entre corridas. El tuning de control (ganancias PID por fase, `ts_pcr`,
-`acceleration_spin`, `windows_pcr`, `photoreceptor.use_diff`) **no** entra en el
+`acceleration_spin`, `windows_pcr`, `photoreceptor.use_diff`, ventanas de
+`pcr_fluorescence`) **no** entra en el
 proyecto: es calibración del *equipo* (inercia térmica del disco, heater), vive
 en `resources/settings.json` y se edita allí. Mezclar tuning por-protocolo
 invitaría a regresiones silenciosas de calibración.
