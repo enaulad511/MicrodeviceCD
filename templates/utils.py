@@ -98,14 +98,17 @@ DEFAULT_SETTINGS = {
     },
     "ads_fsr": 0.256,
     "photoreceptor": {"use_diff": 1.0},
-    # Ventanas de la lectura de fluorescencia de PCR (s): espera tras el hold de
-    # extensión, línea base (luz OFF), excitación (luz ON) y decaimiento (luz OFF).
+    # Lectura de fluorescencia de PCR. Ventanas (s): espera tras el hold de
+    # extensión, línea base (luz OFF), excitación (luz ON) y decaimiento (luz OFF);
+    # muestreo: periodo dentro de cada ventana y lecturas del ADS por muestra.
     # Se leen una vez por corrida (PcrFrame._fluor_cfg). Ver docs/cambios_fluorescencia.md.
     "pcr_fluorescence": {
         "pre_sleep_s": 0.5,
         "baseline_s": 0.5,
         "light_s": 2.0,
         "post_s": 0.5,
+        "sample_dt_s": 0.1,
+        "averages": 4.0,
     },
     "windows_pcr": 1500.0,
     "temp_source": "thermocouple",

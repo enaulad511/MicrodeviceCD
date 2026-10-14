@@ -54,6 +54,8 @@ FLUOR_PRE_SLEEP_S = 0.5  # pre_sleep_s: espera tras el hold de extensión, antes
 FLUOR_BASELINE_S = 0.5  # baseline_s: ventana de línea base (luz OFF)
 FLUOR_LIGHT_S = 2.0  # light_s: ventana de excitación (luz ON)
 FLUOR_POST_S = 0.5  # post_s: ventana de decaimiento (luz OFF)
+FLUOR_SAMPLE_DT_S = 0.1  # sample_dt_s: periodo de muestreo dentro de cada ventana
+FLUOR_AVERAGES = 4  # averages: lecturas del ADS promediadas por muestra
 
 # Fuentes de temperatura válidas en PCR: IR Ambient queda fuera (no es la
 # temperatura de la muestra, solo referencia). El primario regula el PID y el
@@ -188,20 +190,25 @@ def _freshness_cfg(pid):
 
 
 def _fluor_cfg(fl):
-    """Ventanas de la lectura de fluorescencia desde el dict pcr_fluorescence.
+    """Ventanas y muestreo de la lectura de fluorescencia desde el dict pcr_fluorescence.
 
     No numérico o negativo → default. baseline_s y light_s en 0 también: sin una
     de esas dos ventanas el delta (luz − baseline) pierde sentido. pre_sleep_s y
-    post_s sí admiten 0 (sin espera previa / sin ventana de decaimiento).
-    total_s = lo que consume una lectura completa (espera previa + 3 ventanas).
+    post_s sí admiten 0 (sin espera previa / sin ventana de decaimiento), y
+    sample_dt_s también (sin pacing: tan rápido como lea el ADS). averages es
+    entero >= 1 (0 → default).
+    total_s = lo que consume una lectura completa (espera previa + 3 ventanas);
+    el muestreo no lo cambia, las ventanas son por tiempo.
     """
     cfg = {
         "pre_sleep_s": _cfg_num(fl, "pre_sleep_s", FLUOR_PRE_SLEEP_S),
         "baseline_s": _cfg_num(fl, "baseline_s", FLUOR_BASELINE_S) or FLUOR_BASELINE_S,
         "light_s": _cfg_num(fl, "light_s", FLUOR_LIGHT_S) or FLUOR_LIGHT_S,
         "post_s": _cfg_num(fl, "post_s", FLUOR_POST_S),
+        "sample_dt_s": _cfg_num(fl, "sample_dt_s", FLUOR_SAMPLE_DT_S),
+        "averages": int(_cfg_num(fl, "averages", FLUOR_AVERAGES)) or FLUOR_AVERAGES,
     }
-    cfg["total_s"] = sum(cfg.values())
+    cfg["total_s"] = cfg["pre_sleep_s"] + cfg["baseline_s"] + cfg["light_s"] + cfg["post_s"]
     return cfg
 
 
@@ -2006,7 +2013,7 @@ class PCRFrame(ttk.Frame):
         )
         self.pin_heating.write(False)  # pyrefly: ignore
 
-    def _read_fluorescence(self, ads, sample_dt=0.1, averages=4):
+    def _read_fluorescence(self, ads):
         # Muestreo continuo del fotodetector mientras se modula la luz (pin_pcr):
         #   baseline_s  -> luz OFF (línea base oscura)
         #   light_s     -> luz ON  (excitación)
@@ -2014,11 +2021,14 @@ class PCRFrame(ttk.Frame):
         # Acumula la serie temporal cruda y agrega el escalar
         #   delta = media(ventana con luz) - media(ventana baseline)
         # a data_photodetector (plot por-ciclo). Soporta lectura diferencial.
-        # Las ventanas salen de self.fluor_cfg (una lectura por corrida): todas las
-        # lecturas de una corrida usan las mismas, aunque se edite settings.json.
+        # Ventanas y muestreo salen de self.fluor_cfg (una lectura por corrida):
+        # todas las lecturas de una corrida usan los mismos, aunque se edite
+        # settings.json.
         baseline_s = self.fluor_cfg["baseline_s"]
         light_s = self.fluor_cfg["light_s"]
         post_s = self.fluor_cfg["post_s"]
+        sample_dt = self.fluor_cfg["sample_dt_s"]
+        averages = self.fluor_cfg["averages"]
         settings = read_settings_from_file()
         use_diff = settings.get("photoreceptor", {}).get("use_diff", False)
 
@@ -2310,6 +2320,7 @@ class PCRFrame(ttk.Frame):
             # Ventanas de fluorescencia efectivas (configurables en settings.json).
             f"-fluor: pre {fc['pre_sleep_s']:g}s base {fc['baseline_s']:g}s"
             f" light {fc['light_s']:g}s post {fc['post_s']:g}s"
+            f" dt {fc['sample_dt_s']:g}s avg {fc['averages']}"
             f"-start:{datetime.fromtimestamp(self.start_pcr_time).isoformat(timespec='seconds')}"
             f"-cols: {primary_label}|{secondary_label}|t_s|cycle|phase"
         )

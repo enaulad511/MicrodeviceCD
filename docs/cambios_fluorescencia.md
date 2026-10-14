@@ -16,7 +16,7 @@ Ahora: muestrea de forma continua (~0.1 s) modulando la luz (`pin_pcr`):
 
 (Antes eran constantes de módulo; desde el 14/10/2026 se configuran en `settings.json`, ver §3.)
 
-- Cadencia con *pacing* por tiempo transcurrido: `sleep(max(0, sample_dt - elapsed))`. `averages=4` por muestra.
+- Cadencia con *pacing* por tiempo transcurrido: `sleep(max(0, sample_dt - elapsed))`. `averages=4` por muestra (ambos en `pcr_fluorescence` desde el 14/10/2026: `sample_dt_s`, `averages`).
 - **Abort-safe**: revisa `stop_udp_listenner` cada iteración; `try/finally` garantiza `pin_pcr.write(False)`.
 - **Escalar acumulado** = `media(ventana luz) − media(ventana baseline)` (ventana vacía → 0.0).
 - Acumulación **dentro de la función** (fuente única): agrega el escalar a `data_photodetector` (plot por-ciclo) y la serie cruda a la nueva lista `data_photodetector_series`; agenda `update_graph_photodetector` vía `self.after`. Devuelve el escalar.
@@ -48,15 +48,20 @@ FLUOR_READ_TOTAL_S = FLUOR_PRE_SLEEP_S + FLUOR_BASELINE_S + FLUOR_LIGHT_S + FLUO
 
 ## 3. Ventanas configurables en `settings.json` (14/10/2026)
 
-Las cuatro duraciones salieron del código a `settings.json` → `pcr_fluorescence`
-(`pre_sleep_s`, `baseline_s`, `light_s`, `post_s`), editables desde el ConfigFrame
-como el resto del tuning. Las constantes `FLUOR_*` de
+Las cuatro duraciones y el muestreo salieron del código a `settings.json` →
+`pcr_fluorescence` (`pre_sleep_s`, `baseline_s`, `light_s`, `post_s`,
+`sample_dt_s`, `averages`), editables desde el ConfigFrame como el resto del tuning. Las constantes `FLUOR_*` de
 [PcrFrame.py](../ui/PcrFrame.py) quedan **solo como defaults**; `FLUOR_READ_TOTAL_S`
 desapareció (ahora es `total_s` del dict).
 
 - `_fluor_cfg(dict)` valida: no numérico o negativo → default. `baseline_s` y
   `light_s` en 0 también caen al default (sin una de esas ventanas el delta
   luz − baseline no tiene sentido); `pre_sleep_s` y `post_s` sí admiten 0.
+  `sample_dt_s` también admite 0 (sin pacing: tan rápido como lea el ADS);
+  `averages` se trunca a entero y < 1 cae al default (4). El JSON lo guarda como
+  float (`4.0`) porque el ConfigFrame guarda todo con `float()`.
+- `total_s` suma solo espera + ventanas: el muestreo no cambia la duración de una
+  lectura (las ventanas son por tiempo), solo cuántas muestras caen en ellas.
 - **Una lectura por corrida**: `experiment_pcr` guarda `self.fluor_cfg`, y de ahí
   salen la espera previa, las tres ventanas de `_read_fluorescence`, la ETA
   (`_estimate_total_s`, `_estimate_remaining_time`) y la metadata. Así todas las
@@ -65,16 +70,15 @@ desapareció (ahora es `total_s` del dict).
 - La preview lee `settings.json` al dibujarse; `_estimate_cycle_s` /
   `_estimate_total_s` reciben el total como argumento `fluor_s`.
 - Trazabilidad: la fila de metadata del CSV de temperatura lleva
-  `-fluor: pre …s base …s light …s post …s`.
+  `-fluor: pre …s base …s light …s post …s dt …s avg …`.
 - `DEFAULT_SETTINGS` incluye la sección, así que un Pi con `settings.json` viejo la
   recibe con los valores de siempre al arrancar (`seed_default_settings`).
-- `sample_dt` (0.1 s) y `averages` (4) siguen como parámetros de la función.
 
 ## Decisiones tomadas (para retomar)
 - Acumulación: serie completa + escalar derivado.
 - Escalar: delta luz − baseline.
 - Duraciones: `settings.json` → `pcr_fluorescence` (§3), una lectura por corrida; `use_diff` sigue en `photoreceptor`.
-- Cadencia: `averages=4` + pacing por tiempo transcurrido.
+- Cadencia: `averages` (4) + pacing por tiempo transcurrido (`sample_dt_s`, 0.1 s), ambos en `pcr_fluorescence`.
 - CSV crudo: nuevo archivo formato largo.
 - Lectura final: se acumula igual que las de ciclo (índice = siguiente entero).
 - Lógica de acumulación dentro de la función.

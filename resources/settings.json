@@ -72,7 +72,9 @@
         "pre_sleep_s": 0.5,
         "baseline_s": 0.5,
         "light_s": 2.0,
-        "post_s": 0.5
+        "post_s": 0.5,
+        "sample_dt_s": 0.1,
+        "averages": 4.0
     },
     "windows_pcr": 1500.0,
     "temp_source": "thermocouple"
