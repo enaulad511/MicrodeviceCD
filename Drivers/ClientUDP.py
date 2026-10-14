@@ -91,7 +91,7 @@ class UdpClient:
         self._latest_addr = None
         self.data_temps = [20.0, 20.0, 20.0]
         self.status_disc = False
-        self.latest_temp = None
+        self.latest_temp: "TempSample | None" = None
         self.latest_lock = threading.Lock()
         self.count_timeout = 0
 
@@ -140,37 +140,38 @@ class UdpClient:
         print(f"[UdpClient] Listening on {self.local_ip or '0.0.0.0'}:{self.port} (threaded)")
 
     def stop(self):
-        """Stop the background thread and close the socket."""
+        """Stop the background thread and wait for it to close its socket.
+
+        El socket lo cierra el PROPIO hilo receptor al salir (_run_loop/finally).
+        Antes se cerraba aquí, desde el hilo de la UI, mientras el receptor estaba
+        bloqueado dentro de recvfrom (hasta recv_timeout_sec): al volver, el
+        descriptor ya no existía y cada Stop imprimía "[Errno 9] Bad file
+        descriptor". Ahora: señalar, soltar la referencia y esperar.
+        """
         self._stop_evt.set()
-        if self._sock:
+        sock, self._sock = self._sock, None
+        th = self._thread
+        if th is not None and th is not threading.current_thread():
+            th.join(timeout=2.0)
+        self._thread = None
+        # Respaldo: si no hubo hilo que lo cerrara (nunca arrancó o ya terminó),
+        # cerrarlo aquí. Si el hilo sigue vivo tras el join, lo cerrará él al salir.
+        if sock is not None and (th is None or not th.is_alive()):
             try:
-                # Send a dummy packet to unblock recvfrom if needed (optional)
-                # socket.socket(...).sendto(b'', ('127.0.0.1', self.port))
-                self._sock.close()
+                sock.close()
             except Exception:
                 pass
-            self._sock = None
-
-        if self._thread:
-            self._thread.join(timeout=2.0)
-            self._thread = None
         print("[UdpClient] Stopped.")
 
     def stop_testing(self):
-        """Stop the background thread and close the socket."""
-        self._stop_evt.set()
-        if self._sock:
-            try:
-                # Send a dummy packet to unblock recvfrom if needed (optional)
-                # socket.socket(...).sendto(b'', ('127.0.0.1', self.port))
-                self._sock.close()
-            except Exception:
-                pass
-            self._sock = None
+        """Stop sin join: para llamarse desde el callback del propio hilo receptor.
 
-        if self._thread:
-            # self._thread.join(timeout=2.0)
-            self._thread = None
+        Solo señaliza y suelta el socket; el lazo sale en la siguiente vuelta y lo
+        cierra en su finally (mismo motivo que en stop()).
+        """
+        self._stop_evt.set()
+        self._sock = None
+        self._thread = None
         print("[UdpClient] Stopped.")
 
     def listen_forever(self):
@@ -190,10 +191,25 @@ class UdpClient:
             self._sock = None
 
     def _run_loop(self):
-        assert self._sock is not None, "Socket must be created before running loop."
+        # Referencia LOCAL al socket: este hilo es su dueño y lo cierra al salir.
+        # Si stop()/stop_testing() soltaron self._sock (o un start() posterior lo
+        # reemplazó), el lazo termina aunque alguien haya vuelto a limpiar el evento.
+        sock = self._sock
+        assert sock is not None, "Socket must be created before running loop."
+        try:
+            self._receive(sock)
+        finally:
+            try:
+                sock.close()
+            except Exception:
+                pass
+            if self._sock is sock:
+                self._sock = None
+
+    def _receive(self, sock):
         start_time = time.time()
 
-        while not self._stop_evt.is_set():
+        while not self._stop_evt.is_set() and self._sock is sock:
             if (
                 self.auto_stop_after_sec is not None
                 and (time.time() - start_time) >= self.auto_stop_after_sec
@@ -206,7 +222,7 @@ class UdpClient:
                 self._stop_evt.set()
                 break
             try:
-                data, addr = self._sock.recvfrom(self.buffer_size)
+                data, addr = sock.recvfrom(self.buffer_size)
                 text = data.decode(errors="replace")
 
                 if "UDP" not in text:

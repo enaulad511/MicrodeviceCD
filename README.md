@@ -65,7 +65,7 @@ Subsystems and how the Pi reaches each one:
 | Subsystem | Transport | Driver |
 |---|---|---|
 | Disc temperature broadcast (MAX31855 thermocouple + MLX90614 IR) | **UDP :5005** broadcast, `t_amb:t_obj:t_tc` | `Drivers/ClientUDP.py` |
-| DC motor (BTS7960) and stepper, via a Raspberry Pi Pico | **UART** `/dev/ttyAMA0` | `Drivers/DriverMotorDC.py`, `Drivers/DriverStepperSys.py`, `Drivers/DriverEncoder.py` |
+| Stepper (disc motor), via a Raspberry Pi Pico | **UART** `/dev/ttyAMA0` | `Drivers/DriverStepperSys.py` (the old BTS7960 DC-motor drivers are kept as `Drivers/legacy_*.py`, unused) |
 | Photoreceptor / analog reads (ADS1115) | **I²C** | `Drivers/ReaderADS.py` |
 | Heating LED, fluorescence LED | **GPIO** (libgpiod v2) | `Drivers/DriverGPIO.py` |
 | EmStat potentiostat | **TCP :5006** → Wemos → Pico → EmStat | `ui/EventEmstatFrame.py`, `Drivers/EmstatUtils.py` |

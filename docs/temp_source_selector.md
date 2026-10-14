@@ -35,7 +35,7 @@ slots reservados ahora llevan las IR). El driver queda **genérico** —relata
 datos crudos— y cada frame selecciona el índice según su combobox. Esto es
 retrocompatible: el índice 2 sigue siendo la termocupla, así que los cuatro
 consumidores existentes que leían `temps_list[2]` no se rompen
-(`Drivers/ClientUDP.py:216-238`).
+(`Drivers/ClientUDP.py:231-261`).
 
 `latest_temp` (para lectores directos) y `data_temps` conservan el **último
 valor válido por campo** —no se pisan con `None`— y `latest_temp` sigue siendo
@@ -256,6 +256,39 @@ par IR Object ↔ Termocupla: el **primario** (regula el PID) y el **secundario*
   primera lectura válida de cualquiera de los dos (`_temp_ever_valid`); si no llega,
   no arranca (retorna dentro del `try`, el `finally` desmonta). Un glitch UDP puntual
   no detiene: los valores sostenidos mantienen plot/CSV hasta que se cumpla la ventana.
+
+### 10. Ciclo de vida del socket: lo cierra el hilo receptor (14/10/2026)
+
+**Síntoma.** En Quick Control, cada Stop de la lectura de temperatura imprimía
+`str error: [Errno 9] Bad file descriptor` (en Windows, `WinError 10038`).
+
+**Causa.** Era una carrera entre hilos, no un fallo de red. `stop()` cerraba el socket
+**desde el hilo de la UI** mientras el hilo receptor estaba bloqueado dentro de
+`recvfrom`, hasta `recv_timeout_sec` (0.1 s en Quick Control y TemperatureFrame). Al
+volver, el descriptor ya no existía, y el `except` genérico del lazo lo imprimía antes de
+ver la orden de parar. Reproducido: 20 de 20 Stops con error.
+
+**Fix.** El hilo receptor es el **dueño** del socket:
+
+- **`_run_loop`** ([ClientUDP.py:193](../Drivers/ClientUDP.py#L193)) toma una
+  referencia local y cierra el socket en su `finally`. El lazo
+  (`_receive`, [ClientUDP.py:209](../Drivers/ClientUDP.py#L209)) termina si se activa el
+  evento **o** si `self._sock` dejó de ser su socket. Por eso un hilo viejo no revive aunque
+  alguien limpie un evento compartido.
+- **`stop()`** ([ClientUDP.py:142](../Drivers/ClientUDP.py#L142)) solo señala, suelta la
+  referencia y espera al hilo (2 s). Cierra el socket únicamente si no hubo hilo vivo que
+  lo hiciera, y no hace `join` si lo llama el propio hilo.
+- **`stop_testing()`** ([ClientUDP.py:166](../Drivers/ClientUDP.py#L166)), que la prueba
+  de conexión de `MainGUI` llama **desde el callback del propio hilo**, solo señala y
+  suelta la referencia; el lazo sale y cierra en la vuelta siguiente.
+
+Verificado con la versión anterior contra la nueva:
+
+| caso | antes | ahora |
+|---|---|---|
+| 20 Start/Stop con tráfico | 20 errores | 0 errores |
+| `stop_testing()` desde el callback | — | sin errores |
+| Evento de stop externo compartido (patrón de PCR) | — | el hilo sale y cierra solo, sin errores |
 
 ## Orden de los campos (crítico)
 
