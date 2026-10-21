@@ -89,6 +89,9 @@ DEFAULT_SETTINGS = {
         "ramp_s_per_c": 0.2,
         "cool_s_per_c": 1.0,
         "max_failed_cycles": 3.0,
+        # Enfriamiento de PCR: el giro del motor para en cool_target + este margen
+        # (°C) y el resto baja en pasivo. Ver docs/pcr_temperature_control.md.
+        "cool_stop_margin_c": 5.5,
         # Frescura de la temperatura relativa a la cadencia medida: una lectura es
         # confiable hasta que la siguiente llega fresh_dt_factor veces tarde (con
         # tope fresh_age_cap_s). 0 = solo umbrales absolutos (m_age_*, ts_pcr).

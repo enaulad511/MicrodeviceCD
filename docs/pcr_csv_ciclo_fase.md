@@ -20,8 +20,10 @@ Dos columnas **al final** de cada fila:
 | 2 | `t_s` | tiempo real desde el inicio de la corrida ([pcr_eje_tiempo.md](pcr_eje_tiempo.md)) |
 | 3 | `cycle` | **nuevo** — ciclo en curso (ver §2) |
 | 4 | `phase` | **nuevo** — código de la fase en curso (ver §3) |
+| 5 | `heater_on_s` | segundos de heater encendido acumulados (desde el 21/10/2026, ver §6) |
 
-La fila 0 (metadata) declara `cols: <pri>|<sec>|t_s|cycle|phase`.
+La fila 0 (metadata) declara `cols: <pri>|<sec>|t_s|cycle|phase|heater_on_s` (antes del
+21/10/2026, sin `heater_on_s`).
 
 Ir **al final** es lo que hace el cambio retrocompatible: el loader del análisis
 (`_read_temp_csv` en [ui/analysis/pcr.py](../ui/analysis/pcr.py)) lee las columnas 0–2
@@ -117,11 +119,46 @@ Ambas se reinician por corrida en `init_temperature_graph`
   Sí ganó una columna `timeouts` por ciclo con la salvaguarda de fases
   ([pcr_timeout_fases.md](pcr_timeout_fases.md)).
 
+## 6. `heater_on_s`: lo que de verdad calentó el heater (21/10/2026)
+
+Hasta aquí el CSV solo traía temperatura: para afinar ganancias había que **deducir**
+qué hizo el PI a partir de la curva. La columna 5 graba, por muestra, los **segundos
+acumulados de heater encendido** desde que se armó el pin en esa corrida, evaluados en el
+instante de recepción (`t_s`). El duty de cualquier ventana sale directo:
+
+```
+duty[a..b] = (heater_on_s[b] − heater_on_s[a]) / (t_s[b] − t_s[a])
+```
+
+**Por qué acumulado y no un 0/1 por muestra:** las muestras llegan en ráfagas (~80 ms de
+media, huecos de ~0.27 s) y el PWM del PI dura `win_*` = 20–90 ms. Un 0/1 muestreado así
+es alias puro; tampoco sirve grabar la potencia que pidió el PI, porque no incluye los
+cortes. El acumulado es exacto con cualquier ventana y deja elegir el suavizado al
+analizar.
+
+**Qué incluye:** todo lo que pasa por el pin. El pin del heater es un `_HeaterMeter`
+([PcrFrame.py](../ui/PcrFrame.py), clase `_HeaterMeter`) que envuelve el `GPIOPin` y
+contabiliza cada `write`: blast de feed-forward (duty 1), PWM de rampas y holds,
+**cortes por lectura vieja** (duty 0 aunque el PI pidiera más; fue el problema de Newn1,
+[pendientes](pcr_pendientes.md) punto 1) y el apagado del teardown. Si una escritura del
+pin falla, no se contabiliza.
+
+- **Antes de armar el pin** (`initial`: start-gate y spin inicial) vale `0`. **Tras el
+  teardown** se congela en el último valor: el heater está apagado.
+- Es **monótono**: el tiempo de cada transición se toma dentro del lock que comparten el
+  hilo del experimento (escribe) y el hilo UDP (lee), así que un Δ nunca es negativo.
+- **Invariante:** toda escritura del heater va por `self.pin_heating` (el medidor).
+  Escribir un `GPIOPin` crudo encendería el heater sin que la columna lo vea.
+
+Verificado en simulación (pin falso, PWM 30 % + blast + corte, lector en ráfagas):
+0.96 s contados contra 0.95 s ideales, sin retrocesos. Pendiente de validar en el
+equipo con la primera corrida que lo traiga.
+
 ## Archivos
 
 - [ui/PcrFrame.py](../ui/PcrFrame.py) — `PCR_PHASE_LABELS`, `_enter_phase`,
-  `cycle_current`/`phase_code`, `data_cycle`/`data_phase`, columnas 3–4 de
-  `save_data_temps_file`, `cols:` de la metadata.
+  `cycle_current`/`phase_code`, `data_cycle`/`data_phase`, `_HeaterMeter`/`data_heater_on`,
+  columnas 3–5 de `save_data_temps_file`, `cols:` de la metadata.
 - Docs relacionados: [pcr_eje_tiempo.md](pcr_eje_tiempo.md) §6 (columna `t_s` y
   metadata), [pcr_analisis.md](pcr_analisis.md) (loader),
   [pcr_temperature_control.md](pcr_temperature_control.md) (fases omitidas).

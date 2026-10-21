@@ -127,11 +127,15 @@ PCR_TIMEOUT_FLOOR_S = 20.0  # phase_timeout_floor_s: cubre la cola de asentamien
 PCR_RAMP_S_PER_C = 0.2  # ramp_s_per_c: estimado de calentamiento (≈5 °C/s); también la preview
 # cool_s_per_c: estimado de enfriamiento = ΔT real × s/°C, medido en la corrida Newn1
 # (94→60 °C a 700 rpm: 34 s, 1.02 s/°C de mediana, máx 1.19). La cola pasiva tras
-# parar el motor (target+9.5 → target+0.5) es ~2/3 de ese tiempo, por eso se dejó
-# la vieja fórmula por rpm (10000 / rpm), que solo veía el giro y se quedaba 2.4×
-# corta: con factor 3 dejaba un margen de 7 % y daría timeouts falsos. La preview
-# y la ETA usan esta misma tasa (_estimate_cycle_s).
+# parar el motor (target+9.5 → target+0.5, margen de entonces) es ~2/3 de ese tiempo,
+# por eso se dejó la vieja fórmula por rpm (10000 / rpm), que solo veía el giro y se
+# quedaba 2.4× corta: con factor 3 dejaba un margen de 7 % y daría timeouts falsos.
+# La preview y la ETA usan esta misma tasa (_estimate_cycle_s).
 PCR_COOL_S_PER_C = 1.0
+# cool_stop_margin_c: el giro del enfriamiento para en target + margen y el resto
+# (hasta target + 0.5) baja en pasivo. Más margen = menos undershoot y más cola
+# pasiva. Newn1 corrió con 9.5; con un margen distinto cool_s_per_c cambia.
+PCR_COOL_STOP_MARGIN_C = 5.5
 PCR_MAX_FAILED_CYCLES = 3  # max_failed_cycles: consecutivos con timeout → abortar (0 = nunca)
 # Pausa de los lazos de espera que antes giraban sin dormir. La temperatura llega
 # cada ~80 ms, así que 10 ms no cambian la reacción y liberan el núcleo.
@@ -437,6 +441,48 @@ def create_buttons(master, callbacks, svar_status):
     )
 
 
+class _HeaterMeter:
+    """Pin del heater que además acumula cuánto tiempo estuvo encendido.
+
+    Toda escritura del heater pasa por aquí (blast, PWM del PI, cortes por lectura
+    vieja, teardown), así que el acumulado es lo que de verdad se calentó, no lo
+    que pidió el PI. update_displayed_temperature lo graba por muestra (columna
+    heater_on_s): el duty de cualquier ventana es Δheater_on_s / Δt_s. Acumulado y
+    no un 0/1 instantáneo porque las muestras llegan en ráfagas (~80 ms) y el PWM
+    dura 20–90 ms: el 0/1 muestreado sería puro alias. Ver
+    docs/pcr_csv_ciclo_fase.md §6.
+    """
+
+    def __init__(self, pin):
+        self.pin = pin
+        # Escribe el hilo del experimento (o el teardown de Stop), lee el hilo UDP.
+        self._lock = threading.Lock()
+        self._acc_s = 0.0
+        self._on_since: "float | None" = None
+
+    def write(self, value: bool):
+        self.pin.write(value)  # si falla no cambió nada: no se contabiliza
+        with self._lock:
+            # El instante se toma dentro del lock: así on_s es monótono aunque el
+            # hilo se duerma entre la escritura del pin y la contabilidad.
+            now = time.time()
+            if value and self._on_since is None:
+                self._on_since = now
+            elif not value and self._on_since is not None:
+                self._acc_s += now - self._on_since
+                self._on_since = None
+
+    def on_s(self, t: float) -> float:
+        """Segundos encendido acumulados hasta el instante t (time.time())."""
+        with self._lock:
+            if self._on_since is None:
+                return self._acc_s
+            return self._acc_s + max(0.0, t - self._on_since)
+
+    def close(self):
+        self.pin.close()
+
+
 class PCRFrame(ttk.Frame):
     def __init__(self, parent, ads_reader, lock_tabs_callback=None):
         ttk.Frame.__init__(self, parent)
@@ -445,7 +491,7 @@ class PCRFrame(ttk.Frame):
         # sus tabs mientras corre (MainGUI.set_tabs_locked, dueño "pcr").
         self.lock_tabs_callback = lock_tabs_callback
         self.running_experiment = False
-        self.pin_heating = None
+        self.pin_heating: "_HeaterMeter | None" = None
         self.pin_pcr = None
         self.temp = 0.0
         self.temp_ts = time.time()
@@ -484,6 +530,7 @@ class PCRFrame(ttk.Frame):
         # Salvaguarda de fases: config (se relee en experiment_pcr) y registro por
         # corrida (se reinicia en init_temperature_graph).
         self.timeout_cfg = _phase_timeout_cfg({})
+        self.cool_margin_c = PCR_COOL_STOP_MARGIN_C  # se relee en experiment_pcr
         self.phase_timeouts: list = []  # (cycle, phase, elapsed_s, limit_s, temp, target)
         self._cycle_timeouts: list = []  # códigos de fase con timeout del ciclo en curso
         self.failed_cycles: list = []
@@ -587,6 +634,8 @@ class PCRFrame(ttk.Frame):
         # Ciclo y fase en curso al recibir cada muestra (lockstep con las de arriba).
         self.data_cycle: list = []
         self.data_phase: list = []
+        # Segundos de heater encendido acumulados al recibir cada muestra (lockstep).
+        self.data_heater_on: list = []
         self.data_photodetector = []
         self.data_photodetector_series = []
 
@@ -1287,6 +1336,14 @@ class PCRFrame(ttk.Frame):
         # curso al llegar el datagrama (lecturas atómicas de atributos).
         self.data_cycle.append(self.cycle_current)
         self.data_phase.append(self.phase_code)
+        heater = self.pin_heating
+        if heater is not None:
+            heater_on = heater.on_s(t_rx)
+        else:
+            # Sin pin (antes de armarlo o tras el teardown) el heater está apagado:
+            # el acumulado no cambia.
+            heater_on = self.data_heater_on[-1] if self.data_heater_on else 0.0
+        self.data_heater_on.append(heater_on)
 
     def _note_rx(self, rx_ts):
         """Actualiza el umbral de frescura con los huecos reales entre lecturas válidas.
@@ -1462,6 +1519,7 @@ class PCRFrame(ttk.Frame):
         self.data_time = []
         self.data_cycle = []
         self.data_phase = []
+        self.data_heater_on = []
         self.data_photodetector = []
         self.data_photodetector_series = []
         # Reset del estado de captura/watchdog del par para la nueva corrida.
@@ -1628,7 +1686,7 @@ class PCRFrame(ttk.Frame):
         out = (
             f"-timeout_cfg: x{cfg['factor']:g} floor {cfg['floor_s']:g}s "
             f"{cfg['s_per_c']:g}s/C cool {cfg['cool_s_per_c']:g}s/C "
-            f"max_failed {cfg['max_failed']}"
+            f"stop +{self.cool_margin_c:g}C max_failed {cfg['max_failed']}"
             f"-failed_cycles: {'|'.join(str(c) for c in self.failed_cycles) or 'none'}"
         )
         events = "|".join(
@@ -1653,20 +1711,21 @@ class PCRFrame(ttk.Frame):
         with open(filename, "w", newline="") as file:
             writer = csv.writer(file)
             # Fila 0: prefijo/metadata (una celda; incluye la identidad de columnas
-            # "cols: <primario>|<secundario>|t_s|cycle|phase" y el resumen de
+            # "cols: <primario>|<secundario>|t_s|cycle|phase|heater_on_s" y el resumen de
             # cadencia medido). El loader del análisis la salta y lee por posición,
             # así que crecer la fila de metadata y agregar columnas al final es seguro.
             writer.writerow([self.prefix_row + self._cadence_summary() + self._timeouts_summary()])
-            # Cinco columnas alineadas por muestra: [primario, secundario, t_s,
-            # cycle, phase]. Se anexan juntas en update_displayed_temperature;
-            # zip_longest cubre un desfase de a lo más una muestra si el paro cayó
-            # entre los append.
-            for p, s, t, c, ph in zip_longest(
+            # Seis columnas alineadas por muestra: [primario, secundario, t_s,
+            # cycle, phase, heater_on_s]. Se anexan juntas en
+            # update_displayed_temperature; zip_longest cubre un desfase de a lo más
+            # una muestra si el paro cayó entre los append.
+            for p, s, t, c, ph, h in zip_longest(
                 self.data_temperature,
                 self.data_temperature_secondary,
                 self.data_time,
                 self.data_cycle,
                 self.data_phase,
+                self.data_heater_on,
             ):
                 writer.writerow(
                     [
@@ -1675,6 +1734,7 @@ class PCRFrame(ttk.Frame):
                         f"{t:.4f}" if t is not None else "",
                         c if c is not None else "",
                         ph if ph is not None else "",
+                        f"{h:.4f}" if h is not None else "",
                     ]
                 )
         print(f"Data saved to {filename}")
@@ -2159,7 +2219,7 @@ class PCRFrame(ttk.Frame):
                 None,
                 stop_func=lambda: self.stop_udp_listenner.is_set()  # pyrefly: ignore
                 or self.temp <= cool_target
-                or self.temp < cool_target + 9.5
+                or self.temp < cool_target + self.cool_margin_c
                 or _expired(),
                 stop_event=self.stop_event_motor,
             )
@@ -2264,12 +2324,14 @@ class PCRFrame(ttk.Frame):
         self.timeout_cfg = _phase_timeout_cfg(pidGains)
         self.fresh_cfg = _freshness_cfg(pidGains)
         self.fluor_cfg = _fluor_cfg(settings.get("pcr_fluorescence", {}))
+        self.cool_margin_c = _cfg_num(pidGains, "cool_stop_margin_c", PCR_COOL_STOP_MARGIN_C)
         # 0 no tiene sentido (abortaría si la primera lectura no llegó ya) → default.
         start_wait_s = (
             _cfg_num(pidGains, "temp_start_wait_s", PCR_TEMP_START_WAIT_S) or PCR_TEMP_START_WAIT_S
         )
         print(
-            f"Phase timeout config: {self.timeout_cfg} | freshness: {self.fresh_cfg}"
+            f"Phase timeout config: {self.timeout_cfg} | cool stop: +{self.cool_margin_c} C"
+            f" | freshness: {self.fresh_cfg}"
             f" | start wait: {start_wait_s} s | fluorescence: {self.fluor_cfg}"
         )
         # ETA antes del primer ciclo: mismo modelo que la preview y la salvaguarda
@@ -2322,7 +2384,7 @@ class PCRFrame(ttk.Frame):
             f" light {fc['light_s']:g}s post {fc['post_s']:g}s"
             f" dt {fc['sample_dt_s']:g}s avg {fc['averages']}"
             f"-start:{datetime.fromtimestamp(self.start_pcr_time).isoformat(timespec='seconds')}"
-            f"-cols: {primary_label}|{secondary_label}|t_s|cycle|phase"
+            f"-cols: {primary_label}|{secondary_label}|t_s|cycle|phase|heater_on_s"
         )
         self.temp = 20.0
         self.client_temperature = UdpClient(
@@ -2388,11 +2450,15 @@ class PCRFrame(ttk.Frame):
             )
             from Drivers.DriverGPIO import GPIOPin
 
-            self.pin_heating = GPIOPin(
-                led_heatin_pin,
-                chip=chip_rasp,
-                consumer="led-heating-ui",
-                active_low=False,
+            # Envuelto en _HeaterMeter: cada escritura se contabiliza para la
+            # columna heater_on_s. Nunca escribir el GPIOPin crudo.
+            self.pin_heating = _HeaterMeter(
+                GPIOPin(
+                    led_heatin_pin,
+                    chip=chip_rasp,
+                    consumer="led-heating-ui",
+                    active_low=False,
+                )
             )
             self.pin_pcr = GPIOPin(
                 led_fluorescence_pin,

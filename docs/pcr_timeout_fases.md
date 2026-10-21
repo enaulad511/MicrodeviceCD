@@ -16,7 +16,7 @@ por duración fija):
 | fase | dónde | qué espera |
 |------|-------|------------|
 | `denat_ramp`, `high_ramp`, `ext_ramp` | `_reach_temperature_pi` | pre-rampa a potencia plena (`while temp < ceiling`) + PI (`while abs(sp − temp) > 0.5`) |
-| `cooling` | `_run_cycle` | giro del motor hasta `target + 9.5 °C` y luego espera pasiva (`while temp > target + 0.5`) |
+| `cooling` | `_run_cycle` | giro del motor hasta `target + cool_stop_margin_c` (9.5 °C en Newn1, hoy configurable, default 5.5) y luego espera pasiva (`while temp > target + 0.5`) |
 
 El caso que importa es el **calentamiento**. En `cooling` casi siempre se llega, y no
 llegar solo pasaría con un objetivo inalcanzable por mala configuración de la receta.
@@ -67,6 +67,9 @@ La primera versión usaba para `cooling` la fórmula de la preview, `10000 / rpm
 14.3 s a 700 rpm. Contra la corrida real (§7.1) **se queda 2.4× corta**. Esa fórmula solo
 modela el giro, y la fase incluye además la cola **pasiva**: el motor para en
 `objetivo + 9.5 °C` y de ahí a `objetivo + 0.5` baja solo, en unos 2/3 del tiempo total.
+(Ese 9.5 es hoy `cool_stop_margin_c`, default 5.5: con menos cola pasiva y más giro el
+1.0 s/°C probablemente sobra, pero no está medido; ver
+[pcr_temperature_control.md](pcr_temperature_control.md).)
 Con factor 3, el límite (42.9 s) quedaba a **7 %** del enfriamiento más lento medido
 (39.9 s): en una corrida más larga o más caliente habría dado timeouts falsos. Ahora el
 enfriamiento se estima igual que las rampas, por ΔT real, con

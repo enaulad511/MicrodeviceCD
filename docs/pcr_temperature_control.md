@@ -169,7 +169,17 @@ cool_target = low_temp  si NO _skip(time_low)
 
 El giro solo corre si `cool_target is not None` y `self.temp > cool_target + 0.5`
 (no se enfría si ya estamos por debajo). El `stop_func` del motor y el bucle de espera
-posterior referencian `cool_target`, no `low_temp`. Alcance **mínimo y a prueba de
+posterior referencian `cool_target`, no `low_temp`.
+
+El motor **para en `cool_target + cool_stop_margin_c`** (`settings.json` →
+`pidControllerRPM`, default `5.5` °C, también en `DEFAULT_SETTINGS`) y de ahí hasta
+`cool_target + 0.5` el disco baja en pasivo. Se lee una vez por corrida en
+`experiment_pcr` (no numérico o negativo → default; `0` = girar hasta el objetivo) y
+queda en la metadata del CSV (`stop +5.5C` dentro de `-timeout_cfg`). Historial: 5.5 →
+9.5 (07/05/2026, `fix low stip`) → 5.5 (21/10/2026, ahora configurable). Más margen
+reduce el *undershoot* pero alarga la cola pasiva; `cool_s_per_c` se midió en Newn1 con
+9.5, así que con otro margen conviene volver a medirlo
+([pcr_timeout_fases.md](pcr_timeout_fases.md) §2). Alcance **mínimo y a prueba de
 crashes** (no se persigue el objetivo a través de límites de ciclo): para combinaciones
 extrañas el ciclo simplemente procede sin colgarse ni dejar el lazo varado.
 

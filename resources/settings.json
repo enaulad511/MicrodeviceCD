@@ -61,6 +61,7 @@
         "ramp_s_per_c": 0.2,
         "cool_s_per_c": 1.0,
         "max_failed_cycles": 3.0,
+        "cool_stop_margin_c": 5.5,
         "fresh_dt_factor": 1.5,
         "fresh_age_cap_s": 1.0
     },
