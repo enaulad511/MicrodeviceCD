@@ -216,6 +216,59 @@ def _fluor_cfg(fl):
     return cfg
 
 
+# Control adaptativo de PCR (opcional: settings.json → pcr_adaptive, apagado por
+# defecto). Cada experimento usa un disco nuevo y su retraso térmico cambia mucho
+# (21/10/2026: el termopar respondía en 0.3–1.25 s según el disco), mientras que la
+# potencia para sostener una temperatura es del instrumento (≈0.20 a 90 °C en los tres
+# discos). Así que aprende el disco durante la corrida:
+#  - rampa: potencia plena hasta setpoint − "calor en vuelo" aprendido por rampa; luego
+#    solo el feed-forward mientras la temperatura sigue subiendo, y el pico enseña;
+#  - hold: feed-forward (duty de régimen aprendido por hold; inicial ff_slope ×
+#    (setpoint − ff_t0)) + PI suave encima. Dentro de la banda se mantiene el
+#    feed-forward (el hold clásico fuerza 0).
+# Apagado, el control clásico corre intacto. Ver docs/pcr_control_adaptativo.md.
+PCR_ADAPT_DEFAULTS = {
+    "enabled": 0.0,
+    "ff_slope": 0.0043,  # duty por °C sobre ff_t0: 0.21 a 90 °C, 0.04 a 50 °C (medido 21/10)
+    "ff_t0": 40.0,
+    "ff_learn": 0.5,  # peso del duty medido en cada hold (0 = no aprende)
+    "hold_kp": 0.1,
+    "hold_ki": 0.03,
+    "hold_imax": 3.0,
+    "hold_tband": 0.05,
+    "hold_win": 0.05,
+    "coast_init": 4.0,  # °C de calor en vuelo supuestos antes de medir (discos: 2.7–8.2)
+    "coast_learn": 0.5,  # ganancia del corte: coast += coast_learn·(pico − setpoint)
+    "coast_min": 0.5,
+    "coast_max": 12.0,
+    "coast_window_s": 8.0,  # espera máxima del pico tras cortar
+}
+PCR_ADAPT_MIN_FULL_S = 1.0  # potencia plena mínima para que el pico enseñe algo
+PCR_ADAPT_PEAK_DROP_C = 0.15  # caída desde el máximo que marca el pico
+# Fin de la subida por calor en vuelo: tasa (°C/s, medida en RATE_WIN_S, que cubre al
+# menos una ráfaga UDP de ~0.27 s) por debajo de la cual ya sube solo por el
+# feed-forward (≤ ~0.5 °C/s en el modelo; el calor en vuelo sube a varios °C/s).
+PCR_ADAPT_RISE_END_CPS = 0.8
+PCR_ADAPT_RATE_WIN_S = 0.6
+PCR_ADAPT_LEARN_MAX_ERR_C = 0.75  # solo se aprende el duty de un hold cerca del setpoint
+PCR_ADAPT_LEARN_MIN_S = 2.0  # segunda mitad mínima del hold para aprender el duty
+
+
+def _adaptive_cfg(d):
+    """Parámetros del control adaptativo desde el dict pcr_adaptive, validados.
+
+    No numérico o negativo → default. enabled > 0 lo activa. Los pesos de aprendizaje
+    se recortan a [0, 1]; hold_win 0 → default (sin ventana no hay PWM).
+    """
+    cfg = {k: _cfg_num(d, k, v) for k, v in PCR_ADAPT_DEFAULTS.items()}
+    cfg["enabled"] = cfg["enabled"] > 0
+    cfg["ff_learn"] = min(1.0, cfg["ff_learn"])
+    cfg["coast_learn"] = min(1.0, cfg["coast_learn"])
+    cfg["hold_win"] = cfg["hold_win"] or PCR_ADAPT_DEFAULTS["hold_win"]
+    cfg["coast_max"] = max(cfg["coast_max"], cfg["coast_min"])
+    return cfg
+
+
 # Temperatura de partida que asumen la preview y la ETA (no hay lectura todavía).
 PCR_ROOM_TEMP_C = 20.0
 
@@ -542,6 +595,11 @@ class PCRFrame(ttk.Frame):
         self.fresh_cfg = _freshness_cfg({})
         # Ventanas de la lectura de fluorescencia (se relee en experiment_pcr).
         self.fluor_cfg = _fluor_cfg({})
+        # Control adaptativo (opcional): config por corrida y lo aprendido del disco,
+        # que se reinicia en cada corrida (el disco cambia).
+        self.adapt_cfg = _adaptive_cfg({})
+        self._adapt_bias: dict = {}  # hold (h_high...) → duty de régimen aprendido
+        self._adapt_coast: dict = {}  # rampa (high, ext, denat) → calor en vuelo (°C)
         self._rx_dts: deque = deque(maxlen=PCR_CADENCE_WIN)
         self._last_good_rx: "float | None" = None
         self.fresh_age_s = 0.0
@@ -1714,7 +1772,14 @@ class PCRFrame(ttk.Frame):
             # "cols: <primario>|<secundario>|t_s|cycle|phase|heater_on_s" y el resumen de
             # cadencia medido). El loader del análisis la salta y lee por posición,
             # así que crecer la fila de metadata y agregar columnas al final es seguro.
-            writer.writerow([self.prefix_row + self._cadence_summary() + self._timeouts_summary()])
+            writer.writerow(
+                [
+                    self.prefix_row
+                    + self._cadence_summary()
+                    + self._timeouts_summary()
+                    + self._adaptive_summary()
+                ]
+            )
             # Seis columnas alineadas por muestra: [primario, secundario, t_s,
             # cycle, phase, heater_on_s]. Se anexan juntas en
             # update_displayed_temperature; zip_longest cubre un desfase de a lo más
@@ -1967,15 +2032,18 @@ class PCRFrame(ttk.Frame):
         self._enter_phase(code)
         est = abs(setpoint - self.temp) * self.timeout_cfg["s_per_c"]
         t0, deadline, limit = self._phase_deadline(est)
-        self.pin_heating.write(True)  # pyrefly: ignore
-        reached = self._reach_temperature_pi(
-            setpoint,
-            self._load_phase_pid(pid_phase, ts),
-            self.stop_udp_listenner,
-            break_if_below=break_if_below,
-            tolerance=0.5,
-            deadline=deadline,
-        )
+        if self.adapt_cfg["enabled"]:
+            reached = self._ramp_adaptive(setpoint, pid_phase, ts, break_if_below, deadline)
+        else:
+            self.pin_heating.write(True)  # pyrefly: ignore
+            reached = self._reach_temperature_pi(
+                setpoint,
+                self._load_phase_pid(pid_phase, ts),
+                self.stop_udp_listenner,
+                break_if_below=break_if_below,
+                tolerance=0.5,
+                deadline=deadline,
+            )
         if not reached:
             self._record_timeout(code, t0, limit, setpoint)
         elif not self.stop_udp_listenner.is_set():  # pyrefly: ignore
@@ -2057,7 +2125,180 @@ class PCRFrame(ttk.Frame):
             time.sleep(WINDOW - on_time)
         return True
 
+    def _pwm_window(self, power, window):
+        """Una ventana de PWM del heater: encendido power·window, apagado el resto."""
+        pin = self.pin_heating
+        stop = self.stop_udp_listenner
+        if pin is None or stop is None:
+            return
+        on_time = max(0.0, min(1.0, power)) * window
+        if on_time > 0:
+            pin.write(True)
+            end_on = time.time() + on_time
+            while time.time() < end_on and not stop.is_set():
+                time.sleep(window / 10)
+        pin.write(False)
+        end_off = time.time() + (window - on_time)
+        while time.time() < end_off and not stop.is_set():
+            time.sleep(window / 10)
+
+    def _adapt_bias_for(self, key, setpoint):
+        """Duty de régimen de un hold: el aprendido en esta corrida o el modelo inicial."""
+        cfg = self.adapt_cfg
+        bias = self._adapt_bias.get(key)
+        if bias is None:
+            bias = cfg["ff_slope"] * (setpoint - cfg["ff_t0"])
+        return max(0.0, min(1.0, bias))
+
+    def _ramp_adaptive(self, setpoint, pid_phase, ts, break_if_below, deadline):
+        """Rampa del control adaptativo. True si terminó (pico o stop), False si venció.
+
+        1) Potencia plena hasta setpoint − calor en vuelo aprendido para esta rampa,
+           con el mismo descarte de lectura vieja que el blast clásico.
+        2) Corte: solo el feed-forward del hold siguiente (apagar del todo haría caer
+           la temperatura tras el pico: a 90 °C se pierden ~2.7 °C/s) mientras dure la
+           subida RÁPIDA, la del calor en vuelo. Termina cuando la temperatura baja del
+           máximo, cuando la subida cae de PCR_ADAPT_RISE_END_CPS, o a coast_window_s.
+           El resto del acercamiento lo hace el hold, cuyo P empuja más que el
+           feed-forward solo.
+        Aprendizaje: si hubo potencia plena suficiente, coast += coast_learn·(máximo de
+        la subida rápida − setpoint): pasarse adelanta el corte y quedarse corto lo
+        atrasa. Absorbe también el desfase sistemático de corte (ráfagas, EMA). Tiene
+        que ser el máximo de la subida RÁPIDA: con el feed-forward encendido la
+        temperatura sigue subiendo despacio hasta el setpoint, así que con el pico
+        completo un corte demasiado temprano también "acertaba", y el aprendizaje
+        quedaba clavado en coast_max (verificado en simulación).
+        """
+        cfg = self.adapt_cfg
+        pin = self.pin_heating
+        stop = self.stop_udp_listenner
+        if pin is None or stop is None:
+            return True
+        if break_if_below and self.temp < setpoint:
+            return True  # como el clásico: venimos calientes del hold de denat
+        params = self._load_phase_pid(pid_phase, ts)
+        coast = self._adapt_coast.get(pid_phase, cfg["coast_init"])
+        t_full = time.time()
+        seen: deque = deque()  # (temp_ts, temp) de las lecturas recientes, para la tasa
+        while not stop.is_set():
+            now = time.time()
+            if deadline is not None and now > deadline:
+                pin.write(False)
+                return False
+            if not seen or seen[-1][0] != self.temp_ts:
+                seen.append((self.temp_ts, self.temp))
+                while self.temp_ts - seen[0][0] > PCR_ADAPT_RATE_WIN_S:
+                    seen.popleft()
+            # Las lecturas llegan en ráfagas cada ~0.27 s y a ~10 °C/s cada una salta
+            # ~3 °C: sin extrapolar, el corte llega una ráfaga tarde.
+            rate = (seen[-1][1] - seen[0][1]) / max(seen[-1][0] - seen[0][0], 1e-3)
+            y_est = self.temp + max(0.0, rate) * min(max(now - self.temp_ts, 0.0), 0.5)
+            if y_est >= setpoint - coast:
+                break
+            max_age = max(
+                _fuzzy_max_age(setpoint - self.temp, params["MAX_AGE_MIN"], params["MAX_AGE_MAX"]),
+                self.fresh_age_s,
+            )
+            pin.write(now - self.temp_ts <= max_age)  # lectura vieja → apagado
+            time.sleep(PCR_POLL_S)
+        full_s = time.time() - t_full
+        y_cut = y_max = self.temp
+        t_cut = time.time()
+        bias = self._adapt_bias_for("h_" + pid_phase, setpoint)
+        recent: deque = deque()  # (t, temp) de la última PCR_ADAPT_RATE_WIN_S
+        while not stop.is_set():
+            now = time.time()
+            if deadline is not None and now > deadline:
+                pin.write(False)
+                return False
+            y = self.temp
+            y_max = max(y_max, y)
+            recent.append((now, y))
+            while now - recent[0][0] > PCR_ADAPT_RATE_WIN_S:
+                recent.popleft()
+            rate = (y - recent[0][1]) / max(now - recent[0][0], 1e-3)
+            slow = now - t_cut >= PCR_ADAPT_RATE_WIN_S and rate < PCR_ADAPT_RISE_END_CPS
+            if y_max - y >= PCR_ADAPT_PEAK_DROP_C or slow or now - t_cut >= cfg["coast_window_s"]:
+                break
+            self._pwm_window(bias, cfg["hold_win"])
+        pin.write(False)
+        if full_s >= PCR_ADAPT_MIN_FULL_S and not stop.is_set():
+            new = coast + cfg["coast_learn"] * (y_max - setpoint)
+            self._adapt_coast[pid_phase] = min(cfg["coast_max"], max(cfg["coast_min"], new))
+            if pid_phase == "denat":  # mismo setpoint que high: punto de partida mejor que init
+                self._adapt_coast.setdefault("high", self._adapt_coast["denat"])
+            print(
+                f"Adaptive {pid_phase} ramp: cut at {y_cut:.1f} °C (coast {coast:.1f}), "
+                f"peak {y_max:.1f} °C → coast {self._adapt_coast[pid_phase]:.1f} °C"
+            )
+        return True
+
+    def _hold_adaptive(self, key, setpoint, duration, ts):
+        """Hold del control adaptativo: feed-forward + PI suave, y aprende el duty.
+
+        Dentro de la banda se mantiene feed-forward + I (el clásico fuerza 0). El duty
+        aprendido es el que mide el _HeaterMeter en la segunda mitad del hold, y solo
+        si la temperatura estuvo cerca del setpoint: un hold pasado de temperatura mide
+        0, y eso no es el duty de régimen.
+        """
+        cfg = self.adapt_cfg
+        pin = self.pin_heating
+        stop = self.stop_udp_listenner
+        if pin is None or stop is None:
+            return
+        bias = self._adapt_bias_for(key, setpoint)
+        window = cfg["hold_win"]
+        integ = 0.0
+        t0 = time.time()
+        mid: "tuple | None" = None  # (instante, heater_on_s) al pasar la mitad
+        err_sum, err_n = 0.0, 0
+        while time.time() - t0 <= duration and not stop.is_set():
+            now = time.time()
+            if mid is None and now >= t0 + duration / 2:
+                mid = (now, pin.on_s(now))
+            if now - self.temp_ts > max(ts, self.fresh_age_s):
+                pin.write(False)  # temperatura vieja → apagar por seguridad
+                time.sleep(window / 2)
+                continue
+            error = setpoint - self.temp
+            if mid is not None:
+                err_sum += error
+                err_n += 1
+            kp_dyn, ki_dyn = _fuzzy_gains(error, cfg["hold_kp"], cfg["hold_ki"])
+            integ = max(-cfg["hold_imax"], min(cfg["hold_imax"], integ + error * window))
+            p_term = 0.0 if abs(error) < cfg["hold_tband"] else kp_dyn * error
+            self._pwm_window(bias + ki_dyn * integ + p_term, window)
+        pin.write(False)
+        if mid is None or err_n == 0 or stop.is_set() or cfg["ff_learn"] <= 0:
+            return
+        t_end = time.time()
+        span = t_end - mid[0]
+        mean_err = err_sum / err_n
+        if span >= PCR_ADAPT_LEARN_MIN_S and abs(mean_err) <= PCR_ADAPT_LEARN_MAX_ERR_C:
+            duty = (pin.on_s(t_end) - mid[1]) / span
+            self._adapt_bias[key] = (1 - cfg["ff_learn"]) * bias + cfg["ff_learn"] * duty
+            print(f"Adaptive {key}: duty {duty:.3f} (mean err {mean_err:+.2f} °C) → bias {self._adapt_bias[key]:.3f}")
+        else:
+            print(f"Adaptive {key}: duty not learned (mean err {mean_err:+.2f} °C over {span:.1f} s)")
+
+    def _adaptive_summary(self):
+        """Control adaptativo para la metadata: off, o la config y lo aprendido al final."""
+        cfg = self.adapt_cfg
+        if not cfg["enabled"]:
+            return "-adaptive: off"
+        bias = " ".join(f"{k} {v:.3f}" for k, v in sorted(self._adapt_bias.items())) or "none"
+        coast = " ".join(f"{k} {v:.1f}" for k, v in sorted(self._adapt_coast.items())) or "none"
+        return (
+            f"-adaptive: on ff {cfg['ff_slope']:g}/{cfg['ff_t0']:g}C learn {cfg['ff_learn']:g}"
+            f" hold kp {cfg['hold_kp']:g} ki {cfg['hold_ki']:g} imax {cfg['hold_imax']:g}"
+            f" coast init {cfg['coast_init']:g}C learn {cfg['coast_learn']:g}"
+            f" | bias {bias} | coast {coast}"
+        )
+
     def _hold_phase(self, phase, setpoint, duration, ts):
+        if self.adapt_cfg["enabled"]:
+            self._hold_adaptive(phase, setpoint, duration, ts)
+            return
         params = self._load_phase_pid(phase, ts)
         self.hold_temperature(
             setpoint,
@@ -2325,6 +2566,8 @@ class PCRFrame(ttk.Frame):
         self.fresh_cfg = _freshness_cfg(pidGains)
         self.fluor_cfg = _fluor_cfg(settings.get("pcr_fluorescence", {}))
         self.cool_margin_c = _cfg_num(pidGains, "cool_stop_margin_c", PCR_COOL_STOP_MARGIN_C)
+        self.adapt_cfg = _adaptive_cfg(settings.get("pcr_adaptive", {}))
+        self._adapt_bias, self._adapt_coast = {}, {}  # disco nuevo → se aprende de cero
         # 0 no tiene sentido (abortaría si la primera lectura no llegó ya) → default.
         start_wait_s = (
             _cfg_num(pidGains, "temp_start_wait_s", PCR_TEMP_START_WAIT_S) or PCR_TEMP_START_WAIT_S
@@ -2334,6 +2577,7 @@ class PCRFrame(ttk.Frame):
             f" | freshness: {self.fresh_cfg}"
             f" | start wait: {start_wait_s} s | fluorescence: {self.fluor_cfg}"
         )
+        print(f"Adaptive control: {self.adapt_cfg if self.adapt_cfg['enabled'] else 'off'}")
         # ETA antes del primer ciclo: mismo modelo que la preview y la salvaguarda
         # (rampas y enfriamiento por ΔT). El anterior, holds × 1.2, ignoraba rampas y
         # enfriamiento y daba ~1.9 ks para Newn1 contra 3.27 ks reales. Desde el

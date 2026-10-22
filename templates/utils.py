@@ -115,6 +115,26 @@ DEFAULT_SETTINGS = {
     },
     "windows_pcr": 1500.0,
     "temp_source": "thermocouple",
+    # Control adaptativo de PCR (enabled 1 para activarlo; 0 = control clásico intacto).
+    # Feed-forward de la potencia de régimen en los holds + corte de rampa por el calor
+    # en vuelo aprendido del disco. Se lee una vez por corrida (PcrFrame._adaptive_cfg).
+    # Ver docs/pcr_control_adaptativo.md.
+    "pcr_adaptive": {
+        "enabled": 0.0,
+        "ff_slope": 0.0043,
+        "ff_t0": 40.0,
+        "ff_learn": 0.5,
+        "hold_kp": 0.1,
+        "hold_ki": 0.03,
+        "hold_imax": 3.0,
+        "hold_tband": 0.05,
+        "hold_win": 0.05,
+        "coast_init": 4.0,
+        "coast_learn": 0.5,
+        "coast_min": 0.5,
+        "coast_max": 12.0,
+        "coast_window_s": 8.0,
+    },
 }
 
 

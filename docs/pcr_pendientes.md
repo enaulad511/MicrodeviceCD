@@ -11,16 +11,17 @@ los defaults del repo.
 | # | pendiente | prioridad | ¿necesita el settings del Pi? | estado |
 |:-:|-----------|:---------:|:-----------------------------:|--------|
 | 1 | Cadencia de temperatura 0.30 s vs. umbrales de frescura del control | **alta** | sí (revisado) | **(B) hecho** (frescura relativa a la cadencia); (A) **cerrado**: causa `power_save` del Pi (0.307 s = DTIM), apagado de forma persistente el 14/10; llegan en ráfagas → estimador **p90** |
-| 2 | Hold de desnaturalización 2.5 °C por debajo del setpoint | alta | sí (revisado) | probablemente consecuencia del 1 |
-| 3 | Causa de los atascos de `ext_ramp` | media | sí (revisado) | **decidido: no re-afinar** hasta ver una corrida con (B); mitigado por la salvaguarda |
+| 2 | Hold de desnaturalización 2.5 °C por debajo del setpoint | alta | sí (revisado) | **cerrado (21/10)**: media 90.7 °C con sp 90; queda la oscilación (punto 12) |
+| 3 | Causa de los atascos de `ext_ramp` | media | sí (revisado) | **cerrado (21/10)**: 0 atascos en 35 ciclos con (B), como se predijo |
 | 4 | `ext_ramp` con `break_if_below` en el ciclo 1 | media | no | **hecho** (quitado por decisión del usuario) |
 | 5 | `ext_temp`/`ext_time` ausentes de la metadata del CSV | baja | no | **hecho** |
 | 6 | Preview y ETA subestiman el enfriamiento | baja | no | **hecho** |
-| 7 | Validación en equipo de los cambios del 13/10 | alta | — | abierto |
+| 7 | Validación en equipo de los cambios del 13/10 | alta | — | casi cerrado (21/10): faltan los ítems de consola/fotodetector/CPU |
 | 8 | La pestaña de análisis aún no usa `cycle`/`phase`/`timeouts` | baja | no | abierto |
 | 9 | `PCR_TEMP_START_WAIT_S` sigue hardcodeado | baja | no | **hecho** (`temp_start_wait_s`) |
 | 10 | Zona intermedia de `_fuzzy_gains` (2–5 °C) no hace lo que dice su comentario | baja | no | **hecho** (corregido, continua) |
 | 11 | `DEFAULT_SETTINGS` del repo desfasado del equipo | baja | sí (revisado) | **hecho** (defaults = equipo) |
+| 12 | *Holds* de 90/65 °C oscilan ±2 °C; sobreimpulso de rampas | **alta** | sí (21/10) | **replanteado:** disco nuevo en cada experimento → la planta varía por corrida (retraso del termopar 0.3–1.25 s); 3 discos medidos: la potencia de régimen es constante (≈0.20 a 90 °C) y el calor en vuelo varía (2.7–8 °C). **Implementado como opción** (`pcr_adaptive`, apagado por defecto; [pcr_control_adaptativo.md](pcr_control_adaptativo.md)), verificado en tiempo virtual; falta validar en el equipo |
 
 ## 0. Qué revisar en cuanto llegue el `settings.json` del Pi
 
@@ -276,6 +277,10 @@ caliente. Es una deducción.
 - Si el *hold* sigue corto con la potencia completa, revisar ganancias, incluido añadir
   `KI_h_denat`.
 
+**Resultado (21/10/2026, sp 90 °C, `KI_h_denat 0.3` ya en el equipo).** El *hold* promedió
+**90.7 °C**: ya no queda corto. Ahora oscila ±2–4 °C y la oscilación crece en los 120 s;
+se trata en [pcr_ajuste_ganancias.md](pcr_ajuste_ganancias.md) (punto 12).
+
 ## 3. Causa de los atascos de `ext_ramp`
 
 **Datos** ([pcr_timeout_fases.md](pcr_timeout_fases.md) §7.1): 2 de 33 rampas a
@@ -339,6 +344,10 @@ contacto pide más potencia, y el equilibrio cae más abajo.
   fuzzy corregido (punto 10), la rampa a 69 °C ya entrega 78 % en simulación: más margen
   aún.
 
+**Resultado (21/10/2026): predicción confirmada.** 35 rampas a ext sin un solo atasco ni
+timeout (mediana 2.0 s), con los mismos `*_ext` de rampa. El problema pasó a ser el
+contrario: sobreimpulso de +2.4 °C ([pcr_ajuste_ganancias.md](pcr_ajuste_ganancias.md)).
+
 ## 4. `ext_ramp` con `break_if_below` en el ciclo 1
 
 **Código.** `_reach_phase("ext_ramp", …, break_if_below=(idx == 0))`, en `_run_cycle`.
@@ -399,24 +408,30 @@ entra en el estimado.
 
 ## 7. Validación en equipo de los cambios del 13/10
 
-Checklist para la próxima corrida real:
+Checklist para la próxima corrida real. Marcados con la corrida del 21/10/2026
+([pcr_ajuste_ganancias.md](pcr_ajuste_ganancias.md)); sin consola ni CSV de fotodetector,
+los ítems que dependen de ellos siguen abiertos.
 
-- [ ] El `settings.json` del Pi tiene las claves nuevas (punto 0).
+- [x] El `settings.json` del Pi tiene las claves nuevas (punto 0).
 - [ ] La consola imprime `Temp watchdog window: 10.0 s` y `Phase timeout config: …`.
-- [ ] El CSV de temperatura trae columnas `cycle`/`phase` coherentes con la curva, y
+- [x] El CSV de temperatura trae columnas `cycle`/`phase` coherentes con la curva, y
       `cols: …|t_s|cycle|phase`.
-- [ ] La metadata trae `-timeout_cfg: …-failed_cycles: …-timeouts: …-fresh: x1.5 cap 1s eff …`.
+- [x] La metadata trae `-timeout_cfg: …-failed_cycles: …-timeouts: …-fresh: x1.5 cap 1s eff …`.
       Con la cadencia de Newn1, `eff` ≈ 0.45 s; `eff 0.000s` significa que nunca se midió
-      la cadencia.
-- [ ] Los *holds* llegan al setpoint. Comparar con Newn1, por ejemplo la desnaturalización
-      contra los 91.5 °C de entonces.
-- [ ] La consola imprime `Estimated run time: … min` y `| start wait: 3.0 s`. La ETA
-      inicial queda a pocos % de la duración real.
-- [ ] El ciclo 1 tiene `ext_ramp` en la columna `phase` (punto 4).
+      la cadencia. (21/10: `eff 0.352s`.)
+- [x] Los *holds* llegan al setpoint. Comparar con Newn1, por ejemplo la desnaturalización
+      contra los 91.5 °C de entonces. (21/10: denat promedia 90.7 con sp 90, pero los
+      *holds* calientes oscilan: punto 12.)
+- [~] La consola imprime `Estimated run time: … min` y `| start wait: 3.0 s`. La ETA
+      inicial queda a pocos % de la duración real. (21/10: ETA recalculada 3330 s contra
+      3222 s, +3 %; falta ver la consola.)
+- [x] El ciclo 1 tiene `ext_ramp` en la columna `phase` (punto 4).
 - [ ] **Sin sobreimpulso nuevo** en las aproximaciones a high y ext. El fuzzy corregido
       (punto 10) mete más kp entre 2 y 5 °C de error. Si aparece, es el primer sospechoso.
-- [ ] Sin atascos de `ext_ramp` (punto 3: predicción de que desaparecen sin re-afinar).
-- [ ] La metadata trae `dt_mean` ≈ 0.08 s, y no ~0.3 s como Newn1.
+      (21/10: hay sobreimpulso, +3.6 en high y +2.4 en ext. El responsable principal es
+      `KI_high 1.9`, no el fuzzy: punto 12.)
+- [x] Sin atascos de `ext_ramp` (punto 3: predicción de que desaparecen sin re-afinar).
+- [x] La metadata trae `dt_mean` ≈ 0.08 s, y no ~0.3 s como Newn1. (21/10: 0.081 s.)
   - Si sale bastante mayor que 0.08 pero menor que 0.3, el `SO_RCVBUF` de 512 B de
     `ClientUDP` está descartando lecturas dentro de las ráfagas. Al control no le afecta,
     porque el p90 se adapta a lo que la app recibe de verdad, pero reduce la densidad de
