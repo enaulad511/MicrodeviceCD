@@ -1,5 +1,7 @@
 # Ciclo y fase por muestra en el CSV de temperatura (PCR)
 
+> **26/10/2026:** el guardado pasó a `.xlsx` ([almacenamiento_por_experimento.md](almacenamiento_por_experimento.md)): el «CSV de temperatura» es la hoja `temperature` de `<slug>_pcr_data_<ts>.xlsx` (encabezado real en la fila 1), la «fila de metadata» es la hoja `metadata` (clave/valor) y los CSV de fotodetector son las hojas `photodetector` (ahora con columna `cycle`) y `photodetector_raw`.
+
 Archivo modificado: `ui/PcrFrame.py`
 
 Cada muestra del `*_temperature_data_*.csv` lleva ahora **en qué ciclo y en qué fase**

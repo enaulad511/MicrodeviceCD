@@ -11,7 +11,7 @@ Reúne en una sola página lo esencial de las demás tabs del Manual Control:
 - Lecturas de temperatura (UDP 5005, filtro de 4 muestras por canal — IR
   ambiente, IR objeto o termocupla, o las 3 a la vez con "All (3 temps)") o
   fluorescencia (ADS1115 canal 0) — una señal a la vez por ahora — con plot,
-  retención de corridas (Keep data) y guardado a CSV (formato largo con columna
+  retención de corridas (Keep data) y guardado a .xlsx (formato largo con columna
   "channel") con metadata de actuadores en el nombre.
 
 Mientras haya CUALQUIER actuador o lectura activa se bloquean las demás tabs
@@ -49,6 +49,7 @@ from templates.utils import (
     temp_source_labels,
     write_temp_source,
 )
+from templates.xlsx_io import XLSX_FILETYPES, write_workbook, xlsx_path
 from ui.KeyboardFrame import NumericKeyboard
 
 __author__ = "Edisson A. Naula"
@@ -805,7 +806,7 @@ class QuickControlFrame(ttk.Frame):
 
     def _current_actuator_meta(self):
         """Contexto de actuadores al momento de iniciar la corrida; va al nombre
-        del CSV para documentar las condiciones del experimento."""
+        del archivo para documentar las condiciones del experimento."""
         meta = {}
         if self.motor_running:
             if self.motor_mode_var.get() == "Continuous":
@@ -839,34 +840,33 @@ class QuickControlFrame(ttk.Frame):
         os.makedirs("files", exist_ok=True)
         signal = self.runs[-1]["signal"]
         suffix = self._build_filename_suffix(self.runs[-1].get("meta", {}))
-        initialfile = f"unified_{signal}_{time.strftime('%Y%m%d_%H%M%S')}{suffix}.csv"
+        initialfile = f"unified_{signal}_{time.strftime('%Y%m%d_%H%M%S')}{suffix}.xlsx"
         filename = filedialog.asksaveasfilename(
             parent=self,
             title="Save data",
             initialdir="files",
             initialfile=initialfile,
-            defaultextension=".csv",
-            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+            defaultextension=".xlsx",
+            filetypes=XLSX_FILETYPES,
         )
         if not filename:
             self._set_status("Save cancelled.")
             return
-        if not filename.lower().endswith(".csv"):
-            filename += ".csv"
+        filename = xlsx_path(filename)
+        # Formato largo (una fila por muestra y canal): soporta corridas heterogéneas
+        # apiladas por Keep data (single-source vs. All (3 temps) vs. fluorescencia)
+        # en una misma hoja sin celdas vacías.
+        rows = [["t_s", "value", "channel", "signal", "run"]]
+        for run in self.runs:
+            cols = run.get("cols") or ["value"]
+            for t, row in zip(run["t"], run["v"]):
+                for ci, col_name in enumerate(cols):
+                    rows.append([round(t, 3), row[ci], col_name, run["signal"], run["run"]])
         try:
-            with open(filename, "w", encoding="utf-8") as f:
-                # Formato largo (una fila por muestra y canal): soporta corridas
-                # heterogéneas apiladas por Keep data (single-source vs. All (3
-                # temps) vs. fluorescencia) en un mismo archivo sin celdas vacías.
-                f.write("t_s,value,channel,signal,run\n")
-                for run in self.runs:
-                    cols = run.get("cols") or ["value"]
-                    for t, row in zip(run["t"], run["v"]):
-                        for ci, col_name in enumerate(cols):
-                            f.write(f"{t:.3f},{row[ci]},{col_name},{run['signal']},{run['run']}\n")
+            write_workbook(filename, {"data": rows})
             self._set_status(f"Data saved: {os.path.basename(filename)}")
         except Exception as e:
-            self._set_status(f"Error saving CSV: {e}")
+            self._set_status(f"Error saving data: {e}")
 
     # ---------------- Bloqueo de tabs y estado ----------------
 

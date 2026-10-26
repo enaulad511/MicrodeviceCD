@@ -1,5 +1,7 @@
 # EmStat — Retención de datos entre corridas ("Keep runs")
 
+> **26/10/2026:** el guardado pasó a `.xlsx` ([almacenamiento_por_experimento.md](almacenamiento_por_experimento.md)): Save escribe `<method>_data_….xlsx`: hoja `data` (con la columna `run`) + hoja `runs` (parámetros de cada corrida apilada); Load lee la hoja `data`.
+
 Checkbox en el plotter (`EventPlotter`) que permite **apilar varias corridas en la misma
 gráfica** para compararlas, sin tener que guardar a CSV y recargar. Estado: **implementado
 en host**; pendiente smoke test en hardware (ver §6).

@@ -1,5 +1,7 @@
 # Quick Control: tab unificada del control manual
 
+> **26/10/2026:** el guardado pasó a `.xlsx` ([almacenamiento_por_experimento.md](almacenamiento_por_experimento.md)): el guardado es `unified_*.xlsx`, hoja `data` (mismo formato largo).
+
 ## Qué es
 
 `ui/QuickControlFrame.py` agrega una tab **"Quick Control" ⚡** como **primera**

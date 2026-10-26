@@ -32,7 +32,7 @@ class CycleCurve:
 
 
 class Experiment:
-    """Un archivo CSV = un experimento con N ciclos."""
+    """Un archivo de datos = un experimento con N ciclos."""
 
     def __init__(self, name):
         self.name = name

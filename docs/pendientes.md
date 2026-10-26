@@ -20,6 +20,10 @@ Actualizado: 14/10/2026.
       paso 4 siembra las claves nuevas de `settings.json` sin tocar lo afinado.
 - [ ] **`power_save` apagado:** `iw dev wlan0 get power_save` → `off`. Si vuelve a `on`,
       la temperatura llega cada 0.3 s ([pcr_eje_tiempo.md](pcr_eje_tiempo.md) §6).
+- [ ] ⬆ HW — **`pip install openpyxl` en el Pi** (dependencia nueva del guardado .xlsx).
+      Sin ella la app arranca, pero cada guardado cae al respaldo CSV o da error. Luego
+      convertir lo viejo con `tools/csv_to_xlsx.py`
+      ([almacenamiento_por_experimento.md](almacenamiento_por_experimento.md) §7).
 
 ## PCR (control térmico)
 

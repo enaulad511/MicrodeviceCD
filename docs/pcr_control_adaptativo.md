@@ -1,5 +1,7 @@
 # Control adaptativo de PCR (opcional)
 
+> **26/10/2026:** el guardado pasó a `.xlsx` ([almacenamiento_por_experimento.md](almacenamiento_por_experimento.md)): `-adaptive: …` es la fila `adaptive` de la hoja `metadata`; la config completa queda además en la hoja `settings`.
+
 Archivo: [ui/PcrFrame.py](../ui/PcrFrame.py) (`_ramp_adaptive`, `_hold_adaptive`,
 `_adaptive_cfg`). Config: `settings.json` → `pcr_adaptive`. **Apagado por defecto.**
 

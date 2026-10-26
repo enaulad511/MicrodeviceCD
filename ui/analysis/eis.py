@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-import csv
 import os
 import time
 import warnings
@@ -11,6 +10,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolb
 from matplotlib.figure import Figure
 
 from templates.utils import experiment_dir
+from templates.xlsx_io import XLSX_FILETYPES, read_sheet_text, write_workbook, xlsx_path
 from ui.analysis.common import plt
 
 
@@ -18,9 +18,9 @@ from ui.analysis.common import plt
 # Modelo de datos (EIS)
 # ---------------------------------------------------------------------------
 # Columnas canónicas que el cargador/siembra entienden (por NOMBRE de header,
-# no por posición — el CSV de EIS guarda x_key/y_key + extras con estos nombres).
+# no por posición — la hoja `data` de EIS guarda x_key/y_key + extras con estos nombres).
 EIS_KEYS = ("freq_Hz", "Z_real", "Z_imag", "Z_mod", "E_V", "t_s")
-# Columnas de datos del archivo "_spectra.csv" (export/import punto-a-punto), en
+# Columnas de datos de la hoja `spectra` (export/import punto-a-punto), en
 # orden de presentación. Incluye el derivado phase_deg (informativo; al reimportar
 # EISSpectrum._derive lo recalcula). Header fijo: las celdas van vacías donde un
 # espectro no tiene esa magnitud (decisión Q5).
@@ -78,7 +78,7 @@ class EISExperiment:
 # Pestaña: análisis EIS (Nyquist · Bode · |Z| vs E · |Z| vs t)
 # ---------------------------------------------------------------------------
 class EISAnalysisFrame(ttk.Frame):
-    """Pestaña de análisis EIS: carga CSV (o siembra desde la corrida en memoria),
+    """Pestaña de análisis EIS: carga archivos (o siembra desde la corrida en memoria),
     elige qué gráficos mostrar (checkboxes + grid dinámico) y mide parámetros del
     Nyquist (Rs, Rct, Warburg) por picking manual sobre el espectro seleccionado."""
 
@@ -115,7 +115,7 @@ class EISAnalysisFrame(ttk.Frame):
         # pantallas chicas (touchscreen del Pi) no se corte Clear all. ---
         toolbar = ttk.Frame(self)
         toolbar.pack(side=ttk.TOP, fill=ttk.X, padx=6, pady=(6, 2))
-        ttk.Button(toolbar, text="📂 Load CSV", bootstyle="secondary", command=self.load_csv).pack(
+        ttk.Button(toolbar, text="📂 Load", bootstyle="secondary", command=self.load_file).pack(
             side=ttk.LEFT, padx=3
         )
         ttk.Button(
@@ -273,53 +273,52 @@ class EISAnalysisFrame(ttk.Frame):
     # ------------------------------------------------------------------
     # Carga / siembra
     # ------------------------------------------------------------------
-    def load_csv(self):
-        """Carga un CSV de EIS guardado por EventEmstatFrame.save_data. Lee por
-        NOMBRE de header (Z_real/Z_imag/freq_Hz/Z_mod/E_V/t_s + cycle/run) y agrupa
-        por (run, cycle) en espectros."""
+    def load_file(self):
+        """Carga la hoja `data` de un libro EIS guardado por EventEmstatFrame.save_data.
+        Lee por NOMBRE de header (Z_real/Z_imag/freq_Hz/Z_mod/E_V/t_s + cycle/run) y
+        agrupa por (run, cycle) en espectros."""
         path = askopenfilename(
-            title="Select EIS CSV",
+            title="Select EIS data file",
             initialdir=experiment_dir("eis"),
-            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+            filetypes=XLSX_FILETYPES,
         )
         if not path:
             return
         try:
-            with open(path, newline="") as f:
-                reader = csv.reader(f, skipinitialspace=True)
-                header = [h.strip() for h in (next(reader, None) or [])]
-                col = {name: i for i, name in enumerate(header)}
-                present = [k for k in EIS_KEYS if k in col]
-                if "Z_real" not in present and "Z_mod" not in present:
-                    self._set_status(
-                        "Not an EIS CSV (no Z_real / Z_mod column). Use the EIS data files."
-                    )
-                    return
-                ci = col.get("cycle")
-                ri = col.get("run")
-                groups = {}  # (run, cycle) → {key: [vals]}
-                e_by_group = {}  # (run, cycle) → primer E_V (para etiqueta)
-                for row in reader:
+            rows = read_sheet_text(path, "data") or []
+            header = [h.strip() for h in (rows[0] if rows else [])]
+            col = {name: i for i, name in enumerate(header)}
+            present = [k for k in EIS_KEYS if k in col]
+            if "Z_real" not in present and "Z_mod" not in present:
+                self._set_status(
+                    "Not an EIS data file (no Z_real / Z_mod column). Use the EIS data files."
+                )
+                return
+            ci = col.get("cycle")
+            ri = col.get("run")
+            groups = {}  # (run, cycle) → {key: [vals]}
+            e_by_group = {}  # (run, cycle) → primer E_V (para etiqueta)
+            for row in rows[1:]:
+                try:
+                    cyc = int(float(row[ci])) if ci is not None and row[ci] != "" else 0
+                    run = int(float(row[ri])) if ri is not None and row[ri] != "" else 0
+                except (ValueError, IndexError):
+                    cyc, run = 0, 0
+                bucket = groups.setdefault((run, cyc), {k: [] for k in present})
+                ok = True
+                vals = {}
+                for k in present:
                     try:
-                        cyc = int(float(row[ci])) if ci is not None and row[ci] != "" else 0
-                        run = int(float(row[ri])) if ri is not None and row[ri] != "" else 0
+                        vals[k] = float(row[col[k]])
                     except (ValueError, IndexError):
-                        cyc, run = 0, 0
-                    bucket = groups.setdefault((run, cyc), {k: [] for k in present})
-                    ok = True
-                    vals = {}
-                    for k in present:
-                        try:
-                            vals[k] = float(row[col[k]])
-                        except (ValueError, IndexError):
-                            ok = False
-                            break
-                    if not ok:
-                        continue
-                    for k in present:
-                        bucket[k].append(vals[k])
-                    if "E_V" in vals:
-                        e_by_group.setdefault((run, cyc), vals["E_V"])
+                        ok = False
+                        break
+                if not ok:
+                    continue
+                for k in present:
+                    bucket[k].append(vals[k])
+                if "E_V" in vals:
+                    e_by_group.setdefault((run, cyc), vals["E_V"])
         except Exception as e:
             self._set_status(f"Error loading data: {e}")
             return
@@ -333,7 +332,7 @@ class EISAnalysisFrame(ttk.Frame):
     def _seed_from_total_data(self, total_data):
         """Siembra la pestaña con los eventos de la corrida EIS en memoria
         (total_data): cada evento trae freq_Hz/Z_real/Z_imag/Z_mod/E_V/t_s según el
-        modo. Agrupa por (run, cycle) igual que el CSV."""
+        modo. Agrupa por (run, cycle) igual que la hoja `data`."""
         if not total_data:
             return
         groups = {}
@@ -483,7 +482,7 @@ class EISAnalysisFrame(ttk.Frame):
     def _apply_rename(self, ref, new_name):
         """Aplica el nombre nuevo al experimento o espectro y refresca todo lo que lo
         usa (árbol, leyenda del plot, tabla de resultados). Solo en memoria: el Export
-        CSV lo conserva, pero recargar el eis_data_*.csv crudo re-deduce el nombre."""
+        lo conserva, pero recargar el eis_data_*.xlsx crudo re-deduce el nombre."""
         if ref[0] == "exp":
             ref[1].name = new_name
         else:
@@ -879,13 +878,12 @@ class EISAnalysisFrame(ttk.Frame):
             )
 
     def export_results(self):
-        """Exporta dos archivos paralelos (espejo de la pestaña Peaks):
+        """Exporta UN libro (espejo de la pestaña Peaks):
 
-        - `<base>_spectra.csv`: SIEMPRE (si hay al menos un espectro). Datos punto-a-
-          punto de TODOS los espectros (sin importar visibilidad, decisión Q3), header
-          fijo EIS_SPECTRA_COLS. Reimportable con import_spectra() conservando nombres.
-        - `<base>.csv` (el path elegido): solo si hay al menos una medición Nyquist
-          (Rs/Rct/Warburg). Mismo formato de mediciones de siempre.
+        - hoja `spectra`: SIEMPRE (si hay al menos un espectro). Datos punto-a-punto
+          de TODOS los espectros (sin importar visibilidad, decisión Q3), header fijo
+          EIS_SPECTRA_COLS. Reimportable con import_spectra() conservando nombres.
+        - hoja `nyquist`: solo si hay al menos una medición Nyquist (Rs/Rct/Warburg).
 
         El gate es "¿hay espectros?", no "¿hay mediciones?" (decisión Q2): permite
         guardar las curvas usadas para análisis sin tener que volver a escogerlas."""
@@ -893,7 +891,7 @@ class EISAnalysisFrame(ttk.Frame):
             self._set_status("No spectra to export. Load or seed an EIS run first.")
             return
 
-        # Mediciones (puede no haber ninguna): se escribirá solo si hay filas.
+        # Mediciones (puede no haber ninguna): la hoja se escribe solo si hay filas.
         meas_rows = []
         for exp in self.experiments:
             for sp in exp.spectra:
@@ -904,78 +902,61 @@ class EISAnalysisFrame(ttk.Frame):
                     [
                         exp.name,
                         sp.name,
-                        m.get("Rs", ""),
-                        m.get("Rct", ""),
-                        m.get("warb_len", ""),
-                        m.get("warb_angle", ""),
+                        m.get("Rs"),
+                        m.get("Rct"),
+                        m.get("warb_len"),
+                        m.get("warb_angle"),
                     ]
                 )
 
         path = asksaveasfilename(
             title="Export EIS analysis",
-            defaultextension=".csv",
-            initialfile=f"eis_analysis_{time.strftime('%Y%m%d_%H%M')}.csv",
-            filetypes=[("CSV files", "*.csv")],
+            defaultextension=".xlsx",
+            initialfile=f"eis_analysis_{time.strftime('%Y%m%d_%H%M')}.xlsx",
+            filetypes=XLSX_FILETYPES,
         )
         if not path:
             return
+        path = xlsx_path(path)
 
-        # --- Datos de espectros (siempre) → "<base>_spectra.csv" ---
-        base, ext = os.path.splitext(path)
-        spectra_path = f"{base}_spectra{ext or '.csv'}"
-        n_pts = 0
-        try:
-            with open(spectra_path, "w", newline="", encoding="utf-8") as f:
-                w = csv.writer(f)
-                w.writerow(["experiment", "spectrum", "point_idx", *EIS_SPECTRA_COLS])
-                for exp in self.experiments:
-                    for sp in exp.spectra:
-                        arrays = {k: sp.data.get(k) for k in EIS_SPECTRA_COLS}
-                        n = max((len(a) for a in arrays.values() if a is not None), default=0)
-                        for i in range(n):
-                            row = [exp.name, sp.name, i]
-                            for k in EIS_SPECTRA_COLS:
-                                a = arrays[k]
-                                row.append(f"{a[i]:.9g}" if a is not None and i < len(a) else "")
-                            w.writerow(row)
-                            n_pts += 1
-        except Exception as e:
-            self._set_status(f"Export error (spectra file): {e}")
-            return
-
-        # --- Mediciones (solo si hay) → el path elegido ---
+        spectra: list[list] = [["experiment", "spectrum", "point_idx", *EIS_SPECTRA_COLS]]
+        for exp in self.experiments:
+            for sp in exp.spectra:
+                arrays = {k: sp.data.get(k) for k in EIS_SPECTRA_COLS}
+                n = max((len(a) for a in arrays.values() if a is not None), default=0)
+                for i in range(n):
+                    row = [exp.name, sp.name, i]
+                    for k in EIS_SPECTRA_COLS:
+                        a = arrays[k]
+                        row.append(a[i] if a is not None and i < len(a) else None)
+                    spectra.append(row)
+        sheets = {"spectra": spectra}
         if meas_rows:
-            try:
-                with open(path, "w", newline="", encoding="utf-8") as f:
-                    w = csv.writer(f)
-                    w.writerow(
-                        [
-                            "experiment",
-                            "spectrum",
-                            "Rs_ohm",
-                            "Rct_ohm",
-                            "warburg_len_ohm",
-                            "warburg_angle_deg",
-                        ]
-                    )
-                    w.writerows(meas_rows)
-            except Exception as e:
-                self._set_status(
-                    f"Spectra exported ({n_pts} pts), but error writing measurements: {e}"
-                )
-                return
-            self._set_status(
-                f"Exported {len(meas_rows)} measurement(s) → {os.path.basename(path)}; "
-                f"{n_pts} spectrum point(s) → {os.path.basename(spectra_path)}."
-            )
-        else:
-            self._set_status(
-                f"Exported {n_pts} spectrum point(s) → {os.path.basename(spectra_path)}; "
-                "no measurements to write."
-            )
+            sheets["nyquist"] = [
+                [
+                    "experiment",
+                    "spectrum",
+                    "Rs_ohm",
+                    "Rct_ohm",
+                    "warburg_len_ohm",
+                    "warburg_angle_deg",
+                ]
+            ] + meas_rows
+        try:
+            write_workbook(path, sheets)
+        except Exception as e:
+            self._set_status(f"Export error: {e}")
+            return
+        meas_note = (
+            f"{len(meas_rows)} measurement(s)" if meas_rows else "no measurements to write"
+        )
+        self._set_status(
+            f"Exported {len(spectra) - 1} spectrum point(s), {meas_note} "
+            f"→ {os.path.basename(path)}."
+        )
 
     def import_spectra(self):
-        """Importa un archivo "_spectra.csv" generado por export_results, conservando
+        """Importa la hoja `spectra` de un export_results, conservando
         los nombres de experimento y espectro (espejo de PeakAnalysisFrame.import_analysis).
 
         Agrupa por (experiment, spectrum); lee cada columna de EIS_SPECTRA_COLS por
@@ -984,49 +965,45 @@ class EISAnalysisFrame(ttk.Frame):
         el Z_mod del archivo se conserva tal cual. Hace append (no reemplaza) y de-
         duplica nombres de experimento colisionantes con sufijo _1, _2, …"""
         path = askopenfilename(
-            title="Select spectra CSV (EIS export)",
-            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+            title="Select EIS analysis export",
+            filetypes=XLSX_FILETYPES,
         )
         if not path:
             return
         try:
-            with open(path, newline="", encoding="utf-8") as f:
-                reader = csv.reader(f, skipinitialspace=True)
-                header = [h.strip() for h in (next(reader, None) or [])]
-                col = {name: i for i, name in enumerate(header)}
-                if (
-                    "experiment" not in col
-                    or "spectrum" not in col
-                    or not any(k in col for k in ("Z_real", "Z_imag", "Z_mod"))
-                ):
-                    self._set_status(
-                        "Not a spectra file. Export produces a file ending in _spectra.csv — "
-                        "select that one."
-                    )
-                    return
-                data_keys = [k for k in EIS_SPECTRA_COLS if k in col]
-                # exp_name → {spectrum_name → {key: [vals]}} (orden de inserción)
-                groups = {}
-                for row in reader:
+            rows = read_sheet_text(path, "spectra") or []
+            header = [h.strip() for h in (rows[0] if rows else [])]
+            col = {name: i for i, name in enumerate(header)}
+            if (
+                "experiment" not in col
+                or "spectrum" not in col
+                or not any(k in col for k in ("Z_real", "Z_imag", "Z_mod"))
+            ):
+                self._set_status("Not an EIS analysis export (missing 'spectra' sheet).")
+                return
+            data_keys = [k for k in EIS_SPECTRA_COLS if k in col]
+            # exp_name → {spectrum_name → {key: [vals]}} (orden de inserción)
+            groups = {}
+            for row in rows[1:]:
+                try:
+                    exp_name = row[col["experiment"]].strip()
+                    spec_name = row[col["spectrum"]].strip()
+                except IndexError:
+                    continue
+                spec_d = groups.setdefault(exp_name, {}).setdefault(
+                    spec_name, {k: [] for k in data_keys}
+                )
+                for k in data_keys:
                     try:
-                        exp_name = row[col["experiment"]].strip()
-                        spec_name = row[col["spectrum"]].strip()
+                        cell = row[col[k]]
                     except IndexError:
                         continue
-                    spec_d = groups.setdefault(exp_name, {}).setdefault(
-                        spec_name, {k: [] for k in data_keys}
-                    )
-                    for k in data_keys:
-                        try:
-                            cell = row[col[k]]
-                        except IndexError:
-                            continue
-                        if cell == "":
-                            continue
-                        try:
-                            spec_d[k].append(float(cell))
-                        except ValueError:
-                            pass
+                    if cell == "":
+                        continue
+                    try:
+                        spec_d[k].append(float(cell))
+                    except ValueError:
+                        pass
         except Exception as e:
             self._set_status(f"Import error: {e}")
             return

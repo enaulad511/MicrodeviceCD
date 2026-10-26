@@ -1,5 +1,7 @@
 # Eje temporal real de la curva de temperatura (PCR)
 
+> **26/10/2026:** el guardado pasó a `.xlsx` ([almacenamiento_por_experimento.md](almacenamiento_por_experimento.md)): `t_s` sigue siendo la 3ª columna de la hoja `temperature`; `start`, `cols` y la cadencia (`dt_mean`…) son filas de la hoja `metadata`. `_cadence_summary` → `_cadence_meta`, `_read_temp_csv` → `_read_temp_rows`, `load_csv` → `load_file`.
+
 El plot de temperatura de [ui/PcrFrame.py](../ui/PcrFrame.py) y el eje del tab de
 análisis pasan de **índice de muestra** a **segundos reales medidos**. Este documento
 existe porque el cambio nace de corregir una premisa equivocada que contaminaba dos

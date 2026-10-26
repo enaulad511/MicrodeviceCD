@@ -1,5 +1,7 @@
 # Análisis PCR (pestaña «PCR» de AnalysisWindow)
 
+> **26/10/2026:** el guardado pasó a `.xlsx` ([almacenamiento_por_experimento.md](almacenamiento_por_experimento.md)): Load carga un solo `<slug>_pcr_data_<ts>.xlsx` (ya no se empareja el hermano `_photodetector_data_`); Export escribe un libro con hojas `bundle` + `rates` (antes `<name>.csv` + `_rates.csv`). `load_csv`/`_read_temp_csv` → `load_file`/`_read_temp_rows`.
+
 Pestaña de análisis para las corridas de [ui/PcrFrame.py](../ui/PcrFrame.py): carga los
 datos guardados (temperatura + fotodetector), dibuja las curvas y mide **tasas de
 calentamiento y enfriamiento** picando dos puntos sobre la curva de temperatura.

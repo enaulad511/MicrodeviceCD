@@ -1,5 +1,7 @@
 # Salvaguarda de tiempo por fase en el ciclado PCR
 
+> **26/10/2026:** el guardado pasó a `.xlsx` ([almacenamiento_por_experimento.md](almacenamiento_por_experimento.md)): la metadata va a la hoja `metadata` (filas `timeout_cfg`, `failed_cycles`, `timeouts`, `fresh`; `_timeouts_summary` → `_timeouts_meta`) y la columna `timeouts` a la hoja `photodetector`.
+
 Archivos modificados: `ui/PcrFrame.py` · `resources/settings.json` · `templates/utils.py`
 
 ## 1. El problema

@@ -12,6 +12,7 @@ from ttkbootstrap.scrolled import ScrolledFrame
 
 from templates.constants import font_entry
 from templates.utils import read_settings_from_file
+from templates.xlsx_io import XLSX_FILETYPES, write_workbook, xlsx_path
 from ui.KeyboardFrame import NumericKeyboard
 
 __author__ = "Edisson A. Naula"
@@ -151,19 +152,20 @@ class PhotoreceptorFrame(ttk.Frame):
             parent=self,
             title="Save photoreceptor data",
             initialdir="files",
-            initialfile=f"photoreceptor_data_{timestamp}.csv",
-            defaultextension=".csv",
-            filetypes=[("CSV files", "*.csv"), ("All", "*.*")],
+            initialfile=f"photoreceptor_data_{timestamp}.xlsx",
+            defaultextension=".xlsx",
+            filetypes=XLSX_FILETYPES,
         )
         if not filename:
             print("Save cancelled")
             return
-        if not filename.lower().endswith(".csv"):
-            filename += ".csv"
-        with open(filename, "w") as f:
-            f.write("Time (s),Intensity\n")
-            for t, d in zip(self.timestamps, self.data):
-                f.write(f"{t:.3f},{d}\n")
+        filename = xlsx_path(filename)
+        rows = [[round(t, 3), d] for t, d in zip(self.timestamps, self.data)]
+        try:
+            write_workbook(filename, {"data": [["Time (s)", "Intensity"]] + rows})
+        except Exception as e:
+            print(f"Error saving data: {e}")
+            return
         print(f"Data saved to {filename}")
 
     def adquirir_dato(self):

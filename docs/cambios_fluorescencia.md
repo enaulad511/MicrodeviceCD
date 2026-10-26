@@ -1,5 +1,7 @@
 # Cambios: lectura de fluorescencia continua + estimación de tiempo
 
+> **26/10/2026:** el guardado pasó a `.xlsx` ([almacenamiento_por_experimento.md](almacenamiento_por_experimento.md)): `photodetector_data_*.csv` / `photodetector_raw_*.csv` son las hojas `photodetector` / `photodetector_raw` del libro de la corrida, y la metadata va a la hoja `metadata` (`fluor_*`).
+
 Archivo modificado: `ui/PcrFrame.py`
 
 ## 1. `_read_fluorescence` — muestreo continuo

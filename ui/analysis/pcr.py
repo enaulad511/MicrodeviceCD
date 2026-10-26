@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-import csv
 import os
 import time
 from tkinter.filedialog import askopenfilename, asksaveasfilename
@@ -10,6 +9,13 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolb
 from matplotlib.figure import Figure
 
 from templates.utils import experiment_dir
+from templates.xlsx_io import (
+    XLSX_FILETYPES,
+    read_sheet_text,
+    read_sheets_text,
+    write_workbook,
+    xlsx_path,
+)
 from ui.analysis.common import plt
 
 
@@ -173,7 +179,7 @@ class PcrAnalysisFrame(ttk.Frame):
         # --- Toolbar fila 1: archivo (izq) + globales (der) ---
         toolbar = ttk.Frame(self)
         toolbar.pack(side=ttk.TOP, fill=ttk.X, padx=6, pady=(6, 2))
-        ttk.Button(toolbar, text="📂 Load CSV", bootstyle="secondary", command=self.load_csv).pack(
+        ttk.Button(toolbar, text="📂 Load", bootstyle="secondary", command=self.load_file).pack(
             side=ttk.LEFT, padx=3
         )
         ttk.Button(
@@ -1046,50 +1052,45 @@ class PcrAnalysisFrame(ttk.Frame):
         self.canvas.draw_idle()
         self._set_status("Cleared.")
 
-    # --------------------------------------------------------- Carga CSV
-    def _read_temp_csv(self, path):
-        """Serie(s) de temperatura: primera fila = prefijo/metadatos (se salta), luego
-        un valor por fila (decisión Q5/executive: el prefijo no se parsea).
+    # --------------------------------------------------------- Carga xlsx
+    @staticmethod
+    def _read_temp_rows(rows):
+        """Serie(s) de temperatura de la hoja `temperature` (la fila de encabezado ya
+        se saltó). Se lee por POSICIÓN: los nombres de col 0/1 dependen de la fuente
+        de temperatura elegida en la corrida.
 
-        Devuelve `(primario, secundario, tiempos)`. El CSV actual de PcrFrame trae tres
-        columnas `[primario, secundario, t_s]`; los anteriores tienen dos o una sola, y
-        lo ausente sale vacío. Las listas quedan alineadas por muestra (una fila con
-        primario no parseable descarta también su secundario y su tiempo). Si ninguna
-        muestra trajo secundario (todo NaN) se devuelve `[]` para no dibujar overlay; si
-        ninguna trajo tiempo, `[]` deja que el eje se sintetice con el dt de la pestaña."""
+        Devuelve `(primario, secundario, tiempos)`: cols `[primario, secundario, t_s]`;
+        las corridas viejas convertidas pueden traer dos o una sola, y lo ausente sale
+        vacío. Las listas quedan alineadas por muestra (una fila con primario no
+        parseable descarta también su secundario y su tiempo). Si ninguna muestra trajo
+        secundario (todo NaN) se devuelve `[]` para no dibujar overlay; si ninguna trajo
+        tiempo, `[]` deja que el eje se sintetice con el dt de la pestaña."""
         vals, vals2, vals3 = [], [], []
-        try:
-            with open(path, newline="") as f:
-                reader = csv.reader(f, skipinitialspace=True)
-                next(reader, None)  # prefijo (self.prefix_row de PcrFrame)
-                for row in reader:
-                    if not row:
-                        continue
-                    try:
-                        vals.append(float(row[0]))
-                    except (ValueError, TypeError):
-                        continue
-                    # 2ª columna = secundario (CSV nuevo); ausente/vacía en los viejos.
-                    if len(row) > 1 and row[1].strip() != "":
-                        try:
-                            vals2.append(float(row[1]))
-                        except (ValueError, TypeError):
-                            vals2.append(float("nan"))
-                    else:
-                        vals2.append(float("nan"))
-                    # 3ª columna = t_s, tiempo real de adquisición en segundos desde el
-                    # inicio de la corrida (ver docs/pcr_eje_tiempo.md).
-                    if len(row) > 2 and row[2].strip() != "":
-                        try:
-                            vals3.append(float(row[2]))
-                        except (ValueError, TypeError):
-                            vals3.append(float("nan"))
-                    else:
-                        vals3.append(float("nan"))
-        except Exception as e:
-            self._set_status(f"Error loading temperature: {e}")
-            return None
-        if not any(v == v for v in vals3):  # todo NaN → CSV viejo, eje sintético
+        for row in rows:
+            if not row:
+                continue
+            try:
+                vals.append(float(row[0]))
+            except (ValueError, TypeError):
+                continue
+            # 2ª columna = secundario; ausente/vacía en las corridas viejas.
+            if len(row) > 1 and row[1].strip() != "":
+                try:
+                    vals2.append(float(row[1]))
+                except (ValueError, TypeError):
+                    vals2.append(float("nan"))
+            else:
+                vals2.append(float("nan"))
+            # 3ª columna = t_s, tiempo real de adquisición en segundos desde el
+            # inicio de la corrida (ver docs/pcr_eje_tiempo.md).
+            if len(row) > 2 and row[2].strip() != "":
+                try:
+                    vals3.append(float(row[2]))
+                except (ValueError, TypeError):
+                    vals3.append(float("nan"))
+            else:
+                vals3.append(float("nan"))
+        if not any(v == v for v in vals3):  # todo NaN → corrida vieja, eje sintético
             vals3 = []
         else:
             # Un NaN suelto solo puede venir del desfase de a lo más una muestra que
@@ -1102,53 +1103,49 @@ class PcrAnalysisFrame(ttk.Frame):
             vals2 = []
         return vals, vals2, vals3
 
-    def _read_photo_csv(self, path):
+    @staticmethod
+    def _read_photo_rows(rows):
+        """Columna `photodetector` (por nombre) de la hoja homónima, una fila por ciclo."""
+        header = [h.strip() for h in rows[0]] if rows else []
+        col = header.index("photodetector") if "photodetector" in header else 0
         vals = []
-        try:
-            with open(path, newline="") as f:
-                reader = csv.reader(f, skipinitialspace=True)
-                next(reader, None)  # header "photodetector"
-                for row in reader:
-                    if not row:
-                        continue
-                    try:
-                        vals.append(float(row[0]))
-                    except (ValueError, TypeError):
-                        continue
-        except Exception:
-            return None
+        for row in rows[1:]:
+            try:
+                vals.append(float(row[col]))
+            except (ValueError, TypeError, IndexError):
+                continue
         return vals
 
-    def load_csv(self):
-        """Carga la corrida: se elige el *_temperature_data_*.csv y se busca el hermano
-        *_photodetector_data_*.csv en la misma carpeta (decisión Q5)."""
+    def load_file(self):
+        """Carga una corrida: el libro `<slug>_pcr_data_<ts>.xlsx` de PcrFrame, con las
+        hojas `temperature` y `photodetector` (ya no hay hermanos que emparejar)."""
         path = askopenfilename(
-            title="Select PCR temperature CSV",
+            title="Select PCR run",
             initialdir=experiment_dir("pcr"),
-            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+            filetypes=XLSX_FILETYPES,
         )
         if not path:
             return
-        result = self._read_temp_csv(path)
-        if result is None:
+        try:
+            sheets = read_sheets_text(path)
+        except Exception as e:
+            self._set_status(f"Error loading run: {e}")
             return
-        temps, temps2, times = result
+        if "temperature" not in sheets:
+            self._set_status("Not a PCR run (missing 'temperature' sheet).")
+            return
+        temps, temps2, times = self._read_temp_rows(sheets["temperature"][1:])
         if not temps:
             self._set_status("No temperature data parsed from file.")
             return
         base = os.path.basename(path)
         photo = []
-        photo_note = ""
-        if "temperature_data" in base:
-            cand = os.path.join(
-                os.path.dirname(path), base.replace("temperature_data", "photodetector_data")
-            )
-            if os.path.exists(cand):
-                photo = self._read_photo_csv(cand) or []
-                photo_note = f"; photo {len(photo)} cyc"
-            else:
-                photo_note = "; no photo sibling"
-        name = self._unique_name(os.path.splitext(base)[0].replace("_temperature_data", ""))
+        if "photodetector" in sheets:
+            photo = self._read_photo_rows(sheets["photodetector"])
+            photo_note = f"; photo {len(photo)} cyc"
+        else:
+            photo_note = "; no photodetector sheet"
+        name = self._unique_name(os.path.splitext(base)[0].replace("_pcr_data", ""))
         self.experiments.append(
             PcrExperiment(
                 name=name, temps=temps, photo=photo, temps_secondary=temps2, times=times
@@ -1170,94 +1167,79 @@ class PcrAnalysisFrame(ttk.Frame):
 
     # --------------------------------------------------------- Export / Import
     def export_results(self):
-        """Exporta un bundle re-importable (temperatura + fotodetector + dt + segmentos)
-        y un resumen de tasas legible aparte (decisión Q10)."""
+        """Exporta UN libro: hoja `bundle` re-importable (temperatura + fotodetector + dt
+        + segmentos) y hoja `rates` con el resumen de tasas legible (decisión Q10)."""
         if not self.experiments:
             self._set_status("Nothing to export.")
             return
         path = asksaveasfilename(
             title="Export PCR analysis",
-            defaultextension=".csv",
-            initialfile=f"pcr_analysis_{time.strftime('%Y%m%d_%H%M')}.csv",
-            filetypes=[("CSV files", "*.csv")],
+            defaultextension=".xlsx",
+            initialfile=f"pcr_analysis_{time.strftime('%Y%m%d_%H%M')}.xlsx",
+            filetypes=XLSX_FILETYPES,
         )
         if not path:
             return
+        path = xlsx_path(path)
         dt = self._dt()
+        bundle: list[list] = [
+            ["record", "experiment", "i", "a", "b", "value"],
+            ["dt", None, None, None, None, dt],
+        ]
+        lo, hi = self._window()
+        if lo is not None and hi is not None:
+            bundle.append(["window", None, None, lo, hi, None])
+        for exp in self.experiments:
+            bundle.extend(["temp", exp.name, i, None, None, v] for i, v in enumerate(exp.temps))
+            # Overlay secundario (solo lectura): registro 'temp2' para round-trip.
+            # Exports sin él → import sin overlay.
+            bundle.extend(
+                ["temp2", exp.name, i, None, None, v] for i, v in enumerate(exp.temps_secondary)
+            )
+            # Eje temporal real: registro 'time' para round-trip. Sin él, el
+            # experimento importado cae al dt legado.
+            bundle.extend(["time", exp.name, i, None, None, v] for i, v in enumerate(exp.times))
+            bundle.extend(["photo", exp.name, i, None, None, v] for i, v in enumerate(exp.photo))
+            bundle.extend(["segment", exp.name, None, seg.ia, seg.ib, None] for seg in exp.segments)
+
+        rates: list[list] = [
+            [
+                "experiment", "segment", "type", "t_a_s", "t_b_s",
+                "T_a_C", "T_b_C", "dT_C", "dt_s", "rate_C_per_s",
+            ]
+        ]
+        blank = [None] * 6
+        for exp in self.experiments:
+            heats, cools = [], []
+            for k, seg in enumerate(exp.segments, start=1):
+                m = exp.seg_metrics(seg, dt)
+                if m is None:
+                    continue
+                t_a, t_b, T_a, T_b, d_temp, d_time, rate = m
+                typ = "heating" if rate >= 0 else "cooling"
+                (heats if rate >= 0 else cools).append(rate)
+                rates.append([exp.name, f"seg{k}", typ, t_a, t_b, T_a, T_b, d_temp, d_time, rate])
+            if heats:
+                rates.append([exp.name, "mean_heating", "heating", *blank, float(np.mean(heats))])
+                rates.append([exp.name, "std_heating", "heating", *blank, float(np.std(heats))])
+            if cools:
+                rates.append([exp.name, "mean_cooling", "cooling", *blank, float(np.mean(cools))])
+                rates.append([exp.name, "std_cooling", "cooling", *blank, float(np.std(cools))])
         try:
-            with open(path, "w", newline="", encoding="utf-8") as f:
-                w = csv.writer(f)
-                w.writerow(["record", "experiment", "i", "a", "b", "value"])
-                w.writerow(["dt", "", "", "", "", f"{dt:.9g}"])
-                lo, hi = self._window()
-                if lo is not None and hi is not None:
-                    w.writerow(["window", "", "", lo, hi, ""])
-                for exp in self.experiments:
-                    for i, v in enumerate(exp.temps):
-                        w.writerow(["temp", exp.name, i, "", "", f"{v:.9g}"])
-                    # Overlay secundario (solo lectura): registro 'temp2' para
-                    # round-trip. Bundles viejos no lo traen → import sin overlay.
-                    for i, v in enumerate(exp.temps_secondary):
-                        w.writerow(["temp2", exp.name, i, "", "", f"{v:.9g}"])
-                    # Eje temporal real: registro 'time' para round-trip. Los bundles
-                    # anteriores no lo traen → el experimento importado cae al dt legado.
-                    for i, v in enumerate(exp.times):
-                        w.writerow(["time", exp.name, i, "", "", f"{v:.9g}"])
-                    for i, v in enumerate(exp.photo):
-                        w.writerow(["photo", exp.name, i, "", "", f"{v:.9g}"])
-                    for seg in exp.segments:
-                        w.writerow(["segment", exp.name, "", seg.ia, seg.ib, ""])
+            write_workbook(path, {"bundle": bundle, "rates": rates})
         except Exception as e:
             self._set_status(f"Export error: {e}")
             return
-
-        base, ext = os.path.splitext(path)
-        rates_path = f"{base}_rates{ext or '.csv'}"
-        try:
-            with open(rates_path, "w", newline="", encoding="utf-8") as f:
-                w = csv.writer(f)
-                w.writerow(
-                    [
-                        "experiment", "segment", "type", "t_a_s", "t_b_s",
-                        "T_a_C", "T_b_C", "dT_C", "dt_s", "rate_C_per_s",
-                    ]
-                )
-                for exp in self.experiments:
-                    heats, cools = [], []
-                    for k, seg in enumerate(exp.segments, start=1):
-                        m = exp.seg_metrics(seg, dt)
-                        if m is None:
-                            continue
-                        t_a, t_b, T_a, T_b, d_temp, d_time, rate = m
-                        typ = "heating" if rate >= 0 else "cooling"
-                        (heats if rate >= 0 else cools).append(rate)
-                        w.writerow(
-                            [
-                                exp.name, f"seg{k}", typ, f"{t_a:.6g}", f"{t_b:.6g}",
-                                f"{T_a:.6g}", f"{T_b:.6g}", f"{d_temp:.6g}",
-                                f"{d_time:.6g}", f"{rate:.6g}",
-                            ]
-                        )
-                    if heats:
-                        w.writerow([exp.name, "mean_heating", "heating", "", "", "", "", "", "", f"{np.mean(heats):.6g}"])
-                        w.writerow([exp.name, "std_heating", "heating", "", "", "", "", "", "", f"{np.std(heats):.6g}"])
-                    if cools:
-                        w.writerow([exp.name, "mean_cooling", "cooling", "", "", "", "", "", "", f"{np.mean(cools):.6g}"])
-                        w.writerow([exp.name, "std_cooling", "cooling", "", "", "", "", "", "", f"{np.std(cools):.6g}"])
-        except Exception as e:
-            self._set_status(f"Bundle exported, but rates summary failed: {e}")
-            return
         self._set_status(
-            f"Exported {len(self.experiments)} experiment(s) → {os.path.basename(path)} "
-            f"(+ {os.path.basename(rates_path)})."
+            f"Exported {len(self.experiments)} experiment(s) → {os.path.basename(path)}."
         )
 
     def import_analysis(self):
-        """Importa un bundle generado por export_results: reconstruye múltiples
+        """Importa la hoja `bundle` de un export_results: reconstruye múltiples
         experimentos con sus segmentos y el dt global (decisión Q10)."""
         path = askopenfilename(
-            title="Select PCR analysis bundle CSV",
-            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+            title="Select PCR analysis export",
+            filetypes=XLSX_FILETYPES,
         )
         if not path:
             return
@@ -1266,76 +1248,75 @@ class PcrAnalysisFrame(ttk.Frame):
         temps, temps2, photos, segs, order = {}, {}, {}, {}, []
         times = {}
         try:
-            with open(path, newline="", encoding="utf-8") as f:
-                reader = csv.reader(f, skipinitialspace=True)
-                header = [h.strip() for h in (next(reader, None) or [])]
-                if "record" not in header:
-                    self._set_status(
-                        "Not a PCR analysis bundle (missing 'record' column). Export "
-                        "produces two files — select the main one (not _rates.csv)."
-                    )
-                    return
-                col = {n: i for i, n in enumerate(header)}
-
-                def cell(row, key):
-                    i = col.get(key)
-                    return row[i] if i is not None and i < len(row) else ""
-
-                for row in reader:
-                    if not row:
-                        continue
-                    rec = cell(row, "record").strip()
-                    if rec == "dt":
-                        try:
-                            dt_val = float(cell(row, "value"))
-                        except (ValueError, TypeError):
-                            pass
-                        continue
-                    if rec == "window":
-                        try:
-                            win_lo = int(float(cell(row, "a")))
-                            win_hi = int(float(cell(row, "b")))
-                        except (ValueError, TypeError):
-                            pass
-                        continue
-                    name = cell(row, "experiment").strip()
-                    if not name:
-                        continue
-                    if name not in temps:
-                        temps[name] = {}
-                        temps2[name] = {}
-                        times[name] = {}
-                        photos[name] = {}
-                        segs[name] = []
-                        order.append(name)
-                    if rec == "temp":
-                        try:
-                            temps[name][int(float(cell(row, "i")))] = float(cell(row, "value"))
-                        except (ValueError, TypeError):
-                            pass
-                    elif rec == "temp2":
-                        try:
-                            temps2[name][int(float(cell(row, "i")))] = float(cell(row, "value"))
-                        except (ValueError, TypeError):
-                            pass
-                    elif rec == "time":
-                        try:
-                            times[name][int(float(cell(row, "i")))] = float(cell(row, "value"))
-                        except (ValueError, TypeError):
-                            pass
-                    elif rec == "photo":
-                        try:
-                            photos[name][int(float(cell(row, "i")))] = float(cell(row, "value"))
-                        except (ValueError, TypeError):
-                            pass
-                    elif rec == "segment":
-                        try:
-                            segs[name].append((int(float(cell(row, "a"))), int(float(cell(row, "b")))))
-                        except (ValueError, TypeError):
-                            pass
+            rows = read_sheet_text(path, "bundle")
         except Exception as e:
             self._set_status(f"Import error: {e}")
             return
+        if not rows:
+            self._set_status("Not a PCR analysis export (missing 'bundle' sheet).")
+            return
+        header = [h.strip() for h in rows[0]]
+        if "record" not in header:
+            self._set_status("Not a PCR analysis export (missing 'record' column).")
+            return
+        col = {n: i for i, n in enumerate(header)}
+
+        def cell(row, key):
+            i = col.get(key)
+            return row[i] if i is not None and i < len(row) else ""
+
+        for row in rows[1:]:
+            if not row:
+                continue
+            rec = cell(row, "record").strip()
+            if rec == "dt":
+                try:
+                    dt_val = float(cell(row, "value"))
+                except (ValueError, TypeError):
+                    pass
+                continue
+            if rec == "window":
+                try:
+                    win_lo = int(float(cell(row, "a")))
+                    win_hi = int(float(cell(row, "b")))
+                except (ValueError, TypeError):
+                    pass
+                continue
+            name = cell(row, "experiment").strip()
+            if not name:
+                continue
+            if name not in temps:
+                temps[name] = {}
+                temps2[name] = {}
+                times[name] = {}
+                photos[name] = {}
+                segs[name] = []
+                order.append(name)
+            if rec == "temp":
+                try:
+                    temps[name][int(float(cell(row, "i")))] = float(cell(row, "value"))
+                except (ValueError, TypeError):
+                    pass
+            elif rec == "temp2":
+                try:
+                    temps2[name][int(float(cell(row, "i")))] = float(cell(row, "value"))
+                except (ValueError, TypeError):
+                    pass
+            elif rec == "time":
+                try:
+                    times[name][int(float(cell(row, "i")))] = float(cell(row, "value"))
+                except (ValueError, TypeError):
+                    pass
+            elif rec == "photo":
+                try:
+                    photos[name][int(float(cell(row, "i")))] = float(cell(row, "value"))
+                except (ValueError, TypeError):
+                    pass
+            elif rec == "segment":
+                try:
+                    segs[name].append((int(float(cell(row, "a"))), int(float(cell(row, "b")))))
+                except (ValueError, TypeError):
+                    pass
         if not order:
             self._set_status("No experiments parsed from file.")
             return

@@ -1,5 +1,7 @@
 # SWV — Pre-tratamiento fuera del plot (conservado en el CSV)
 
+> **26/10/2026:** el guardado pasó a `.xlsx` ([almacenamiento_por_experimento.md](almacenamiento_por_experimento.md)): «el CSV» es la hoja `data` del `.xlsx` de `save_data`; la columna `phase` no cambió.
+
 En SWV el pre-tratamiento (condition + deposition + equilibration) **emite datos** (cada fase es
 un `meas_loop_ca` con `pck_add e`/`pck_add i`), pero esos puntos no son parte del voltamograma:
 aparecen como clusters a potencial constante (E_con, E_dep, E_begin) que ensucian el plot E vs I.

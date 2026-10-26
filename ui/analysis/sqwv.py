@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-import csv
 import os
 import re
 import time
@@ -11,13 +10,14 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolb
 from matplotlib.figure import Figure
 
 from templates.utils import experiment_dir
+from templates.xlsx_io import XLSX_FILETYPES, read_sheet_text, write_workbook, xlsx_path
 from ui.analysis.common import CycleCurve, Experiment, _apply_filter, plt
 
 
 # ---------------------------------------------------------------------------
 # Detección de picos SWV (múltiples picos, ambas direcciones, con prominencia)
 # ---------------------------------------------------------------------------
-# Etiquetas de líneas cargadas por EventPlotter desde un CSV SWV: "<base>-r<run>c<cycle>".
+# Etiquetas de líneas cargadas por EventPlotter desde un archivo SWV: "<base>-r<run>c<cycle>".
 _SQWV_LBL_RE = re.compile(r"^(.+)-r(\d+)c(\d+)$")
 
 
@@ -118,7 +118,7 @@ class SqwvAnalysisFrame(ttk.Frame):
         self._pick_cid: int | None = None
 
         self._build_ui()
-        # Siembra: corrida SWV en memoria (total_data, sin pre-tratamiento) + curvas CSV
+        # Siembra: corrida SWV en memoria (total_data, sin pre-tratamiento) + curvas cargadas
         # ya cargadas en el plotter (loaded_lines). Solo para un plotter SWV.
         if plotter is not None and getattr(plotter, "method", "") == "sqwv":
             self._seed_from_plotter(plotter)
@@ -131,7 +131,7 @@ class SqwvAnalysisFrame(ttk.Frame):
         # pantallas chicas (touchscreen del Pi) no se corten Clear all / Legend. ---
         toolbar = ttk.Frame(self)
         toolbar.pack(side=ttk.TOP, fill=ttk.X, padx=6, pady=(6, 2))
-        ttk.Button(toolbar, text="📂 Load CSV", bootstyle="secondary", command=self.load_csv).pack(
+        ttk.Button(toolbar, text="📂 Load", bootstyle="secondary", command=self.load_file).pack(
             side=ttk.LEFT, padx=3
         )
         ttk.Button(
@@ -325,7 +325,7 @@ class SqwvAnalysisFrame(ttk.Frame):
 
     # ------------------------------------------------------ Siembra / estado
     def _seed_from_plotter(self, plotter):
-        """Corrida SWV en memoria (total_data, sin pre-tratamiento) + curvas CSV ya
+        """Corrida SWV en memoria (total_data, sin pre-tratamiento) + curvas cargadas ya
         cargadas en el plotter. La corrida en vivo se agrupa por 'run'; el barrido es
         un único ciclo por run, así que el ítem es la corrida."""
         xk = getattr(plotter, "x_key", "E_V") or "E_V"
@@ -354,7 +354,7 @@ class SqwvAnalysisFrame(ttk.Frame):
         self._snapshot_loaded_lines(plotter)
 
     def _snapshot_loaded_lines(self, plotter):
-        """Curvas cargadas desde CSV en el plotter (loaded_lines), agrupadas por archivo."""
+        """Curvas cargadas desde archivo en el plotter (loaded_lines), agrupadas por archivo."""
         groups = {}  # base → list[(run, cycle, xs, ys)]
         for line in getattr(plotter, "loaded_lines", []):
             try:
@@ -714,48 +714,48 @@ class SqwvAnalysisFrame(ttk.Frame):
         self._set_status("Cleared.")
 
     # ------------------------------------------------------ Load / Import
-    def load_csv(self):
-        """Carga un CSV guardado por EventPlotter.save_data (un archivo = un experimento,
-        agrupado por 'run'). Excluye filas de pre-tratamiento (columna 'phase')."""
+    def load_file(self):
+        """Carga la hoja `data` de un libro guardado por EventPlotter.save_data (un
+        archivo = un experimento, agrupado por 'run'). Excluye filas de pre-tratamiento
+        (columna 'phase')."""
         path = askopenfilename(
-            title="Select SWV CSV (one experiment)",
+            title="Select SWV data file (one experiment)",
             initialdir=experiment_dir("sqwv"),
-            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+            filetypes=XLSX_FILETYPES,
         )
         if not path:
             return
         groups = {}  # (run, cycle) → ([xs], [ys])
         try:
-            with open(path, newline="") as f:
-                reader = csv.reader(f, skipinitialspace=True)
-                header = [h.strip() for h in (next(reader, None) or [])]
-                col = {name: i for i, name in enumerate(header)}
-                xi = col.get("E_V", 1)
-                yi = col.get("I_A", 2)
-                ci = col.get("cycle", 3)
-                ri = col.get("run", 4)
-                pi = col.get("phase", None)
-                for row in reader:
-                    if len(row) <= max(xi, yi):
-                        continue
-                    if pi is not None and len(row) > pi and row[pi].strip() == "pretreatment":
-                        continue
-                    try:
-                        x = float(row[xi])
-                        y = float(row[yi])
-                    except (ValueError, IndexError):
-                        continue
-                    try:
-                        cycle = int(float(row[ci])) if len(row) > ci and row[ci].strip() else 0
-                    except ValueError:
-                        cycle = 0
-                    try:
-                        run = int(float(row[ri])) if len(row) > ri and row[ri].strip() else 0
-                    except ValueError:
-                        run = 0
-                    groups.setdefault((run, cycle), ([], []))
-                    groups[(run, cycle)][0].append(x)
-                    groups[(run, cycle)][1].append(y)
+            rows = read_sheet_text(path, "data") or []
+            header = [h.strip() for h in (rows[0] if rows else [])]
+            col = {name: i for i, name in enumerate(header)}
+            xi = col.get("E_V", 1)
+            yi = col.get("I_A", 2)
+            ci = col.get("cycle", 3)
+            ri = col.get("run", 4)
+            pi = col.get("phase", None)
+            for row in rows[1:]:
+                if len(row) <= max(xi, yi):
+                    continue
+                if pi is not None and len(row) > pi and row[pi].strip() == "pretreatment":
+                    continue
+                try:
+                    x = float(row[xi])
+                    y = float(row[yi])
+                except (ValueError, IndexError):
+                    continue
+                try:
+                    cycle = int(float(row[ci])) if len(row) > ci and row[ci].strip() else 0
+                except ValueError:
+                    cycle = 0
+                try:
+                    run = int(float(row[ri])) if len(row) > ri and row[ri].strip() else 0
+                except ValueError:
+                    run = 0
+                groups.setdefault((run, cycle), ([], []))
+                groups[(run, cycle)][0].append(x)
+                groups[(run, cycle)][1].append(y)
         except Exception as e:
             self._set_status(f"Error loading data: {e}")
             return
@@ -775,38 +775,35 @@ class SqwvAnalysisFrame(ttk.Frame):
         self._set_status(f"Loaded '{exp_name}' with {len(exp.cycles)} run(s).")
 
     def import_analysis(self):
-        """Importa un archivo _curves.csv generado por export_results (espejo de
+        """Importa la hoja `curves` de un export_results (espejo de
         PeakAnalysisFrame.import_analysis; agrupa por experiment → run via y_raw)."""
         path = askopenfilename(
-            title="Select curves CSV (SWV analysis export)",
-            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+            title="Select SWV analysis export",
+            filetypes=XLSX_FILETYPES,
         )
         if not path:
             return
         try:
-            with open(path, newline="", encoding="utf-8") as f:
-                reader = csv.reader(f, skipinitialspace=True)
-                header = [h.strip() for h in (next(reader, None) or [])]
-                if "y_raw" not in header:
-                    self._set_status(
-                        "Not a curves file. Export produces two files — select the one ending in _curves.csv."
-                    )
-                    return
-                col = {name: i for i, name in enumerate(header)}
-                groups = {}
-                for row in reader:
-                    if len(row) <= max(col["x"], col["y_raw"]):
-                        continue
-                    try:
-                        exp_name = row[col["experiment"]].strip()
-                        run_name = row[col["run"]].strip()
-                        x = float(row[col["x"]])
-                        y = float(row[col["y_raw"]])
-                    except (ValueError, IndexError, KeyError):
-                        continue
-                    groups.setdefault(exp_name, {}).setdefault(run_name, ([], []))
-                    groups[exp_name][run_name][0].append(x)
-                    groups[exp_name][run_name][1].append(y)
+            rows = read_sheet_text(path, "curves") or []
+            header = [h.strip() for h in (rows[0] if rows else [])]
+            if "y_raw" not in header:
+                self._set_status("Not an SWV analysis export (missing 'curves' sheet).")
+                return
+            col = {name: i for i, name in enumerate(header)}
+            groups = {}
+            for row in rows[1:]:
+                if len(row) <= max(col["x"], col["y_raw"]):
+                    continue
+                try:
+                    exp_name = row[col["experiment"]].strip()
+                    run_name = row[col["run"]].strip()
+                    x = float(row[col["x"]])
+                    y = float(row[col["y_raw"]])
+                except (ValueError, IndexError, KeyError):
+                    continue
+                groups.setdefault(exp_name, {}).setdefault(run_name, ([], []))
+                groups[exp_name][run_name][0].append(x)
+                groups[exp_name][run_name][1].append(y)
         except Exception as e:
             self._set_status(f"Import error: {e}")
             return
@@ -832,9 +829,9 @@ class SqwvAnalysisFrame(ttk.Frame):
         self._set_status(f"Imported {added} experiment(s) from {os.path.basename(path)}.")
 
     def export_results(self):
-        """Exporta dos archivos paralelos (espejo de PeakAnalysisFrame):
-        - el path elegido: un pico por fila (experiment, run, type, E_peak, I_peak).
-        - "<base>_curves.csv": curvas punto-a-punto (crudo + filtrado) para reimportar.
+        """Exporta UN libro (espejo de PeakAnalysisFrame):
+        - hoja `peaks`: un pico por fila (experiment, run, type, E_peak, I_peak).
+        - hoja `curves`: curvas punto-a-punto (crudo + filtrado) para reimportar.
         """
         rows = []
         for exp in self.experiments:
@@ -842,60 +839,53 @@ class SqwvAnalysisFrame(ttk.Frame):
                 if not c.visible:
                     continue
                 for x, y in c.max_points:
-                    rows.append([exp.name, c.name, "max", f"{x:.9g}", f"{y:.9g}"])
+                    rows.append([exp.name, c.name, "max", x, y])
                 for x, y in c.min_points:
-                    rows.append([exp.name, c.name, "min", f"{x:.9g}", f"{y:.9g}"])
+                    rows.append([exp.name, c.name, "min", x, y])
         if not any(c.visible for e in self.experiments for c in e.cycles):
             self._set_status("Nothing to export. Load or seed a run first.")
             return
         path = asksaveasfilename(
             title="Export SWV peaks",
-            defaultextension=".csv",
-            initialfile=f"sqwv_peaks_{time.strftime('%Y%m%d_%H%M')}.csv",
-            filetypes=[("CSV files", "*.csv")],
+            defaultextension=".xlsx",
+            initialfile=f"sqwv_peaks_{time.strftime('%Y%m%d_%H%M')}.xlsx",
+            filetypes=XLSX_FILETYPES,
         )
         if not path:
             return
+        path = xlsx_path(path)
+        fkind = self.filter_var.get()
+        fwin = max(1, self.filter_window_var.get() or 1)
+        curves: list[list] = [
+            ["experiment", "run", "point_idx", "x", "y_raw", "y_filtered",
+             "filter", "filter_window"]
+        ]
+        for exp in self.experiments:
+            for c in exp.cycles:
+                if not c.visible:
+                    continue
+                ys_f = c.ys_filtered
+                if ys_f is None or len(ys_f) != len(c.ys):
+                    ys_f = _apply_filter(c.ys, fkind, fwin) if fkind != "none" else c.ys
+                for i in range(len(c.xs)):
+                    curves.append(
+                        [exp.name, c.name, i, c.xs[i], c.ys[i], ys_f[i], fkind,
+                         fwin if fkind != "none" else None]
+                    )
         try:
-            with open(path, "w", newline="", encoding="utf-8") as f:
-                w = csv.writer(f)
-                w.writerow(["experiment", "run", "type", "E_peak_V", "I_peak_A"])
-                w.writerows(rows)
+            write_workbook(
+                path,
+                {
+                    "peaks": [["experiment", "run", "type", "E_peak_V", "I_peak_A"]] + rows,
+                    "curves": curves,
+                },
+            )
         except Exception as e:
             self._set_status(f"Export error: {e}")
             return
-
-        base, ext = os.path.splitext(path)
-        curves_path = f"{base}_curves{ext or '.csv'}"
-        fkind = self.filter_var.get()
-        fwin = max(1, self.filter_window_var.get() or 1)
-        n_pts = 0
-        try:
-            with open(curves_path, "w", newline="", encoding="utf-8") as f:
-                w = csv.writer(f)
-                w.writerow(
-                    ["experiment", "run", "point_idx", "x", "y_raw", "y_filtered",
-                     "filter", "filter_window"]
-                )
-                for exp in self.experiments:
-                    for c in exp.cycles:
-                        if not c.visible:
-                            continue
-                        ys_f = c.ys_filtered
-                        if ys_f is None or len(ys_f) != len(c.ys):
-                            ys_f = _apply_filter(c.ys, fkind, fwin) if fkind != "none" else c.ys
-                        for i in range(len(c.xs)):
-                            w.writerow(
-                                [exp.name, c.name, i, f"{c.xs[i]:.9g}", f"{c.ys[i]:.9g}",
-                                 f"{ys_f[i]:.9g}", fkind, fwin if fkind != "none" else ""]
-                            )
-                            n_pts += 1
-        except Exception as e:
-            self._set_status(f"Peaks exported, but error writing curves file: {e}")
-            return
         self._set_status(
-            f"Exported {len(rows)} peak(s) → {os.path.basename(path)}; "
-            f"{n_pts} curve point(s) → {os.path.basename(curves_path)}."
+            f"Exported {len(rows)} peak(s) and {len(curves) - 1} curve point(s) "
+            f"→ {os.path.basename(path)}."
         )
 
 

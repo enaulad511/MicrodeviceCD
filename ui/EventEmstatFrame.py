@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-import csv
 import json
 import os
 import queue
@@ -8,6 +7,7 @@ import socket
 import threading
 import time
 from collections import deque
+from datetime import datetime
 from typing import Callable
 
 import matplotlib
@@ -28,6 +28,7 @@ import ttkbootstrap as ttk
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 
 from templates.utils import experiment_dir
+from templates.xlsx_io import XLSX_FILETYPES, read_sheet_text, write_workbook, xlsx_path
 
 
 class EventPlotter(ttk.Frame):
@@ -112,8 +113,9 @@ class EventPlotter(ttk.Frame):
         self.q_udp_lines = queue.Queue(maxsize=20000)  # tap UDP paralelo
         self.storage_dict = {}  # registro parcial de informacion
         self.total_data = []  # registro total de informacion
-        self.loaded_lines = []  # Line2D agregadas desde archivos CSV cargados
-        self.filename_meta = {}  # metadatos (motor, etc.) para incluir en el nombre del CSV
+        self.loaded_lines = []  # Line2D agregadas desde archivos cargados
+        self.filename_meta = {}  # metadatos (motor, etc.) para el nombre del archivo y la hoja runs
+        self.runs_meta = []  # una entrada por corrida en total_data (hoja `runs` del xlsx)
         self.stop_event = threading.Event()
         self._send_lock = threading.Lock()  # serializa sock.sendall entre hilos
         self.reader_th = None
@@ -123,7 +125,7 @@ class EventPlotter(ttk.Frame):
         self.udp_port = udp_port
         self.udp_sock = None
         self.udp_reader_th = None
-        # Selector de transporte que alimenta la gráfica/CSV (default TCP).
+        # Selector de transporte que alimenta la gráfica/archivo guardado (default TCP).
         self.transport_var = tk.StringVar(value="TCP")
         # Retención de datos entre corridas (checkbox). OFF (default): cada Start limpia
         # la corrida anterior. ON: apila cada corrida como traza(s) separada(s).
@@ -336,7 +338,7 @@ class EventPlotter(ttk.Frame):
             self.q_tcp_lines.queue.clear()
 
         # Retención entre corridas. OFF: limpia la corrida anterior (conserva las líneas
-        # cargadas de CSV); la nueva arranca con offset 0. ON: apila la nueva corrida
+        # cargadas de archivo); la nueva arranca con offset 0. ON: apila la nueva corrida
         # sobre lo que ya esté graficado (offset = clave máxima + 1, sin limpiar).
         if not self.keep_data_var.get():
             self._reset_live_plot()
@@ -345,6 +347,17 @@ class EventPlotter(ttk.Frame):
             self.plot_run_offset = (max(self.lines_by_m) + 1) if self.lines_by_m else 0
         self.run_index += 1
         self._run_td_start = len(self.total_data)
+        # Parámetros de ESTA corrida para la hoja `runs` (payload_exp se sobrescribe
+        # en la siguiente; con Keep runs el archivo mezcla varias).
+        self.runs_meta.append(
+            {
+                "run": self.run_index,
+                "method": self.method,
+                "start": datetime.now().isoformat(timespec="seconds"),
+                **self.filename_meta,
+                **(self.payload_exp or {}),
+            }
+        )
 
         # Socket UDP del tap (broadcast 5005, paralelo al control TCP). Si falla el
         # bind (p.ej. dev/Windows sin red), degrada a TCP-only sin abortar la corrida.
@@ -474,6 +487,7 @@ class EventPlotter(ttk.Frame):
         """Limpia datos y resetea el gráfico (wipe total: incluye líneas cargadas)."""
         self.storage_dict.clear()
         self.total_data.clear()
+        self.runs_meta.clear()
         self.merged_by_seq.clear()
         self.x_by_m.clear()
         self.y_by_m.clear()
@@ -496,7 +510,7 @@ class EventPlotter(ttk.Frame):
 
     def _reset_live_plot(self):
         """Limpia SOLO los datos de experimento en vivo (deja las líneas cargadas de
-        CSV en self.loaded_lines). Lo usa start() cuando 'Keep runs' está apagado para
+        archivo en self.loaded_lines). Lo usa start() cuando 'Keep runs' está apagado para
         empezar una corrida en limpio sin borrar las trazas de referencia."""
         for ln in self.lines_by_m.values():
             try:
@@ -509,6 +523,7 @@ class EventPlotter(ttk.Frame):
         self.key_meta.clear()
         self.cycle_label_values.clear()
         self.total_data.clear()
+        self.runs_meta.clear()
         self.merged_by_seq.clear()
         with self.q_points.mutex:
             self.q_points.queue.clear()
@@ -516,9 +531,8 @@ class EventPlotter(ttk.Frame):
         self.run_index = 0
 
     def save_data(self):
-        """
-        Create CSV from data stored
-        """
+        """Guarda UN libro .xlsx: hoja `data` (un evento por fila) y hoja `runs` (una
+        fila por corrida con método, canal, inicio, motor y parámetros del payload)."""
         if self.running:
             self._set_status("Stop aquisition before saving data.")
             return
@@ -528,20 +542,19 @@ class EventPlotter(ttk.Frame):
         print("Saving data …")
         save_dir = experiment_dir(self.method)
         suffix = self._build_filename_suffix()
-        initialfile = f"{self.method}_data_{time.strftime('%Y%m%d_%H%M%S')}{suffix}.csv"
+        initialfile = f"{self.method}_data_{time.strftime('%Y%m%d_%H%M%S')}{suffix}.xlsx"
         filename = asksaveasfilename(
             parent=self,
             title="Save data",
             initialdir=save_dir,
             initialfile=initialfile,
-            defaultextension=".csv",
-            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+            defaultextension=".xlsx",
+            filetypes=XLSX_FILETYPES,
         )
         if not filename:
             self._set_status("Save cancelled.")
             return
-        if not filename.lower().endswith(".csv"):
-            filename += ".csv"
+        filename = xlsx_path(filename)
         # Columnas extra TRAILING (Load solo lee las 5 primeras, así que no rompen
         # la recarga): campos EIS presentes en los eventos que no sean ya x/y, mas la
         # fase SWV ("pretreatment"/"sweep") para distinguir el pre-tratamiento conservado.
@@ -550,21 +563,31 @@ class EventPlotter(ttk.Frame):
             for k in ("freq_Hz", "E_V", "t_s", "Z_mod", "phase")
             if k not in (self.x_key, self.y_key) and any(k in ev for ev in self.total_data)
         ]
+        data: list[list] = [["sample", self.x_key, self.y_key, "cycle", "run", *extra_keys]]
+        data.extend(
+            [
+                index,
+                event.get(self.x_key),
+                event.get(self.y_key),
+                event.get("cycle"),
+                event.get("run", 1),
+                *(event.get(k) for k in extra_keys),
+            ]
+            for index, event in enumerate(self.total_data)
+        )
         try:
-            with open(filename, "w") as f:
-                header = f"sample,{self.x_key}, {self.y_key}, cycle, run"
-                header += "".join(f", {k}" for k in extra_keys)
-                f.write(header + "\n")
-                for index, event in enumerate(self.total_data):
-                    row = (
-                        f"{index}, {event.get(self.x_key)}, {event.get(self.y_key)},"
-                        f" {event.get('cycle')}, {event.get('run', 1)}"
-                    )
-                    row += "".join(f", {event.get(k, '')}" for k in extra_keys)
-                    f.write(row + "\n")
+            write_workbook(filename, {"data": data, "runs": self._runs_sheet()})
             self._set_status(f"Data saved to file: {os.path.basename(filename)}")
         except Exception as e:
             self._set_status(f"Error saving data: {e}")
+
+    def _runs_sheet(self):
+        """Hoja `runs`: columnas = unión de claves de todas las corridas (Keep runs puede
+        mezclar corridas con parámetros distintos), en orden de aparición."""
+        keys = []
+        for meta in self.runs_meta:
+            keys.extend(k for k in meta if k not in keys)
+        return [keys] + [[meta.get(k) for k in keys] for meta in self.runs_meta]
 
     def _build_filename_suffix(self):
         """Construye un sufijo '_k1v1_k2v2…' a partir de self.filename_meta."""
@@ -578,37 +601,35 @@ class EventPlotter(ttk.Frame):
         return "_" + "_".join(parts) if parts else ""
 
     def load_data(self):
-        """Carga un CSV previamente guardado por save_data y lo grafica como
+        """Carga la hoja `data` de un libro guardado por save_data y la grafica como
         líneas adicionales (una por ciclo) sobre el mismo eje, sin tocar las
         mediciones live almacenadas en self.lines_by_m."""
         path = askopenfilename(
-            title="Select CSV to load",
+            title="Select data file to load",
             initialdir=experiment_dir(self.method),
-            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+            filetypes=XLSX_FILETYPES,
         )
         if not path:
             self._set_status("No file selected.")
             return
-        # Agrupa por (run, cycle): un CSV multi-corrida recarga como trazas distintas.
+        # Agrupa por (run, cycle): un archivo multi-corrida recarga como trazas distintas.
         # La columna 'run' es opcional (trailing); si falta se asume run=0 (compat).
-        cycles_x = {}
-        cycles_y = {}
+        cycles_x: dict[tuple[int, int], list[float]] = {}
+        cycles_y: dict[tuple[int, int], list[float]] = {}
         try:
-            with open(path, newline="") as f:
-                reader = csv.reader(f, skipinitialspace=True)
-                next(reader, None)  # descarta header
-                for row in reader:
-                    if len(row) < 4:
-                        continue
-                    try:
-                        x = float(row[1])
-                        y = float(row[2])
-                        cycle = int(float(row[3]))
-                        run = int(float(row[4])) if len(row) >= 5 else 0
-                    except (ValueError, TypeError):
-                        continue
-                    cycles_x.setdefault((run, cycle), []).append(x)
-                    cycles_y.setdefault((run, cycle), []).append(y)
+            rows = read_sheet_text(path, "data") or []
+            for row in rows[1:]:
+                if len(row) < 4:
+                    continue
+                try:
+                    x = float(row[1])
+                    y = float(row[2])
+                    cycle = int(float(row[3]))
+                    run = int(float(row[4])) if len(row) >= 5 else 0
+                except (ValueError, TypeError):
+                    continue
+                cycles_x.setdefault((run, cycle), []).append(x)
+                cycles_y.setdefault((run, cycle), []).append(y)
         except Exception as e:
             self._set_status(f"Error loading data: {e}")
             print(f"Error loading data: {e}")
@@ -980,12 +1001,12 @@ class EventPlotter(ttk.Frame):
                 if selected:  # el transporte elegido alimenta la gráfica en vivo
                     event["run"] = self.run_index
                     # El pre-tratamiento SWV (phase="pretreatment") se CONSERVA en
-                    # total_data (CSV) pero NO se grafica: solo aporta ruido (clusters a
+                    # total_data (se guarda) pero NO se grafica: solo aporta ruido (clusters a
                     # E constante). Solo los puntos del barrido alimentan la gráfica.
                     self.total_data.append(event)
                     if event.get("phase") != "pretreatment":
                         # Clave de línea desplazada por corrida (retención): cycle crudo se
-                        # conserva en el evento; run etiqueta la corrida para leyenda/CSV.
+                        # conserva en el evento; run etiqueta la corrida para leyenda/archivo.
                         cyc = event.get("cycle", 0)
                         m = self.plot_run_offset + cyc
                         self.key_meta.setdefault(m, (self.run_index, cyc))
@@ -1130,7 +1151,7 @@ class EventPlotter(ttk.Frame):
             self.cycle_label_values.pop(m, None)
 
         for ev in ordered:
-            # El pre-tratamiento SWV queda en total_data (CSV) pero fuera del plot,
+            # El pre-tratamiento SWV queda en total_data (archivo guardado) pero fuera del plot,
             # igual que en vivo (ver _handle_emstat_msg).
             if ev.get("phase") == "pretreatment":
                 continue
@@ -1281,7 +1302,7 @@ class EventPlotter(ttk.Frame):
                     labels.append(f"R{run}c{cyc}")
                 else:
                     labels.append(f"R{run}")
-        # Agrega líneas cargadas desde CSV (usa su propio label, omite ocultas)
+        # Agrega líneas cargadas desde archivo (usa su propio label, omite ocultas)
         for line in self.loaded_lines:
             if not line.get_visible():
                 continue
@@ -1402,7 +1423,7 @@ class LegendManagerWindow(ttk.Toplevel):
         self.protocol("WM_DELETE_WINDOW", self.on_close)
 
     def refresh_list(self):
-        """Recarga la lista con mediciones live y líneas cargadas desde CSV."""
+        """Recarga la lista con mediciones live y líneas cargadas desde archivo."""
         self.listbox.delete(0, ttk.END)
         self.entry_refs = []
         # Buffer diferido para legends live (commit al cerrar)
@@ -1411,10 +1432,10 @@ class LegendManagerWindow(ttk.Toplevel):
         for i, name in enumerate(self.lines_list):
             self.listbox.insert(ttk.END, f"[live] {name}")
             self.entry_refs.append(("live", i))
-        # Líneas cargadas desde CSV: editar/eliminar/ocultar inmediato
+        # Líneas cargadas desde archivo: editar/eliminar/ocultar inmediato
         for line in self.plotter.loaded_lines:
             mark = "👁" if line.get_visible() else "🚫"
-            self.listbox.insert(ttk.END, f"[csv {mark}] {line.get_label()}")
+            self.listbox.insert(ttk.END, f"[file {mark}] {line.get_label()}")
             self.entry_refs.append(("loaded", line))
 
     def add_legend(self):

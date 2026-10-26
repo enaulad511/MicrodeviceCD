@@ -23,6 +23,7 @@ from templates.utils import (
     temp_source_labels,
     write_temp_source,
 )
+from templates.xlsx_io import XLSX_FILETYPES, write_workbook, xlsx_path
 from ui.KeyboardFrame import NumericKeyboard
 
 
@@ -145,8 +146,8 @@ class TemperatureFrame(ttk.Frame):
 
         ttk.Button(
             control_frame,
-            text="Save CSV",
-            command=self.guardar_csv,
+            text="Save data",
+            command=self.guardar_datos,
             style="success.TButton",
         ).grid(row=1, column=3, padx=(2, 20), pady=5, sticky="we")
 
@@ -277,9 +278,8 @@ class TemperatureFrame(ttk.Frame):
 
     # ----------------- Persistencia -----------------
 
-    def guardar_csv(self):
-        """Guarda los datos en un CSV simple en el directorio actual."""
-        import csv
+    def guardar_datos(self):
+        """Guarda los datos en un libro .xlsx (hoja `data`)."""
         from datetime import datetime
 
         if not self.timestamps:
@@ -292,26 +292,26 @@ class TemperatureFrame(ttk.Frame):
             parent=self,
             title="Save temperature data",
             initialdir="files",
-            initialfile=f"temperature_log_{fecha}.csv",
-            defaultextension=".csv",
-            filetypes=[("CSV files", "*.csv"), ("All", "*.*")],
+            initialfile=f"temperature_log_{fecha}.xlsx",
+            defaultextension=".xlsx",
+            filetypes=XLSX_FILETYPES,
         )
         if not nombre:
             print("Save cancelled")
             return
-        if not nombre.lower().endswith(".csv"):
-            nombre += ".csv"
+        nombre = xlsx_path(nombre)
 
         unidad = self.unit_var.get()
+        rows = [["t (s)", f"Temp {temp_source_label(self.temp_source)} ({unidad})"]]
+        rows.extend(
+            [round(t, 3), round(self._convert_units(c), 3)]
+            for t, c in zip(self.timestamps, self.temps)
+        )
         try:
-            with open(nombre, "w", newline="", encoding="utf-8") as f:
-                writer = csv.writer(f)
-                writer.writerow(["t (s)", f"Temp {temp_source_label(self.temp_source)} ({unidad})"])
-                for t, c in zip(self.timestamps, self.temps):
-                    writer.writerow([f"{t:.3f}", f"{self._convert_units(c):.3f}"])
-            print(f"CSV saved: {nombre}")
+            write_workbook(nombre, {"data": rows})
+            print(f"Data saved: {nombre}")
         except Exception as e:
-            print(f"Error saving CSV: {e}")
+            print(f"Error saving data: {e}")
 
     # ----------------- Lectores de ejemplo -----------------
 

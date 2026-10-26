@@ -1,5 +1,7 @@
 # Selector de fuente de temperatura
 
+> **26/10/2026:** el guardado pasó a `.xlsx` ([almacenamiento_por_experimento.md](almacenamiento_por_experimento.md)): el `prefix_col` del CSV PCR son las filas `temp_source`/`cols` de la hoja `metadata`, el CSV de tres columnas es la hoja `temperature` y el CSV largo de Quick Control es la hoja `data` de `unified_*.xlsx`.
+
 ## Qué es
 
 El broadcast UDP del disco (`...UDP:<t_amb>:<t_obj>:<t_tc>`) trae **tres**

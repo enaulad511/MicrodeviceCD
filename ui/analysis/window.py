@@ -55,7 +55,7 @@ class AnalysisWindow(ttk.Toplevel):
             return self.peaks
 
     def _active_load(self):
-        self._active_tab().load_csv()
+        self._active_tab().load_file()
 
     def _active_import(self):
         tab = self._active_tab()

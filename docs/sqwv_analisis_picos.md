@@ -1,5 +1,7 @@
 # Análisis de picos SQWV
 
+> **26/10/2026:** el guardado pasó a `.xlsx` ([almacenamiento_por_experimento.md](almacenamiento_por_experimento.md)): Load lee la hoja `data`; Export escribe un libro `peaks` + `curves` (antes `<base>.csv` + `_curves.csv`) e Import lee la hoja `curves`.
+
 Pestaña de análisis dedicada a **detectar múltiples picos** en las corridas de SQWV y
 reportar `E_pico` / `I_pico` en cada punto. A diferencia de la pestaña de picos CV
 (`PeakAnalysisFrame`), **no calcula tendencia** entre experimentos: el énfasis es el

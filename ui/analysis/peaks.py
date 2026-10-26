@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-import csv
 import os
 import re
 import time
@@ -11,6 +10,13 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolb
 from matplotlib.figure import Figure
 
 from templates.utils import experiment_dir
+from templates.xlsx_io import (
+    XLSX_FILETYPES,
+    num_or_text,
+    read_sheet_text,
+    write_workbook,
+    xlsx_path,
+)
 from ui.analysis.common import CycleCurve, Experiment, _apply_filter, plt
 
 
@@ -110,7 +116,7 @@ class PeakAnalysisFrame(ttk.Frame):
         toolbar = ttk.Frame(self)
         toolbar.pack(side=ttk.TOP, fill=ttk.X, padx=6, pady=(6, 2))
 
-        ttk.Button(toolbar, text="📂 Load CSV", bootstyle="secondary", command=self.load_csv).pack(
+        ttk.Button(toolbar, text="📂 Load", bootstyle="secondary", command=self.load_file).pack(
             side=ttk.LEFT, padx=3
         )
         ttk.Button(
@@ -581,32 +587,31 @@ class PeakAnalysisFrame(ttk.Frame):
     # ---------------------------------------------------------------------
     # Acciones
     # ---------------------------------------------------------------------
-    def load_csv(self):
-        """Carga un CSV (un experimento) — crea un Experiment con N ciclos."""
+    def load_file(self):
+        """Carga la hoja `data` de un libro (un experimento) — crea un Experiment con
+        N ciclos."""
         path = askopenfilename(
-            title="Select CSV (one experiment)",
+            title="Select data file (one experiment)",
             initialdir=experiment_dir("cv"),
-            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+            filetypes=XLSX_FILETYPES,
         )
         if not path:
             return
-        cycles_x = {}
-        cycles_y = {}
+        cycles_x: dict[int, list[float]] = {}
+        cycles_y: dict[int, list[float]] = {}
         try:
-            with open(path, newline="") as f:
-                reader = csv.reader(f, skipinitialspace=True)
-                next(reader, None)
-                for row in reader:
-                    if len(row) < 4:
-                        continue
-                    try:
-                        x = float(row[1])
-                        y = float(row[2])
-                        cycle = int(float(row[3]))
-                    except (ValueError, TypeError):
-                        continue
-                    cycles_x.setdefault(cycle, []).append(x)
-                    cycles_y.setdefault(cycle, []).append(y)
+            rows = read_sheet_text(path, "data") or []
+            for row in rows[1:]:
+                if len(row) < 4:
+                    continue
+                try:
+                    x = float(row[1])
+                    y = float(row[2])
+                    cycle = int(float(row[3]))
+                except (ValueError, TypeError):
+                    continue
+                cycles_x.setdefault(cycle, []).append(x)
+                cycles_y.setdefault(cycle, []).append(y)
         except Exception as e:
             self._set_status(f"Error loading data: {e}")
             return
@@ -847,87 +852,79 @@ class PeakAnalysisFrame(ttk.Frame):
         )
 
     def export_results(self):
-        """Exporta la tabla de resultados y, en archivo aparte, las curvas filtradas."""
+        """Exporta UN libro: hoja `results` (la tabla de resultados) y hoja `curves`
+        (las curvas filtradas, reimportables)."""
         rows = []
         for exp_iid in self.tree_res.get_children():
             exp_name = self.tree_res.item(exp_iid, "text")
             exp_vals = self.tree_res.item(exp_iid, "values")
-            rows.append((exp_name, "", *exp_vals))
+            rows.append([exp_name, None, *map(num_or_text, exp_vals)])
             for ch_iid in self.tree_res.get_children(exp_iid):
                 ch_name = self.tree_res.item(ch_iid, "text")
                 ch_vals = self.tree_res.item(ch_iid, "values")
-                rows.append((exp_name, ch_name, *ch_vals))
+                rows.append([exp_name, ch_name, *map(num_or_text, ch_vals)])
         if not rows:
             self._set_status("No results to export. Run Compute first.")
             return
         path = asksaveasfilename(
             title="Export results",
-            defaultextension=".csv",
-            initialfile=f"analysis_{time.strftime('%Y%m%d_%H%M')}.csv",
-            filetypes=[("CSV files", "*.csv")],
+            defaultextension=".xlsx",
+            initialfile=f"analysis_{time.strftime('%Y%m%d_%H%M')}.xlsx",
+            filetypes=XLSX_FILETYPES,
         )
         if not path:
             return
+        path = xlsx_path(path)
+        fkind = self.filter_var.get()
+        fwin = max(1, self.filter_window_var.get() or 1)
+        curves: list[list] = [
+            [
+                "experiment",
+                "cycle",
+                "point_idx",
+                "x",
+                "y_raw",
+                "y_filtered",
+                "filter",
+                "filter_window",
+            ]
+        ]
+        for exp in self.experiments:
+            vis = exp.visible_cycles
+            if not vis:
+                continue
+            for c in vis:
+                ys_f = c.ys_filtered
+                if ys_f is None or len(ys_f) != len(c.ys):
+                    ys_f = _apply_filter(c.ys, fkind, fwin) if fkind != "none" else c.ys
+                for i in range(len(c.xs)):
+                    curves.append(
+                        [
+                            exp.name,
+                            c.name,
+                            i,
+                            c.xs[i],
+                            c.ys[i],
+                            ys_f[i],
+                            fkind,
+                            fwin if fkind != "none" else None,
+                        ]
+                    )
         try:
-            with open(path, "w", newline="", encoding="utf-8") as f:
-                w = csv.writer(f)
-                w.writerow(["experiment", "cycle", "exp_idx", "type", "n", "x", "y", "std"])
-                w.writerows(rows)
+            write_workbook(
+                path,
+                {
+                    "results": [["experiment", "cycle", "exp_idx", "type", "n", "x", "y", "std"]]
+                    + rows,
+                    "curves": curves,
+                },
+            )
         except Exception as e:
             self._set_status(f"Export error: {e}")
             return
-
-        # Curvas filtradas en archivo paralelo "<path>_curves.csv"
-        base, ext = os.path.splitext(path)
-        curves_path = f"{base}_curves{ext or '.csv'}"
-        fkind = self.filter_var.get()
-        fwin = max(1, self.filter_window_var.get() or 1)
-        n_pts = 0
-        try:
-            with open(curves_path, "w", newline="", encoding="utf-8") as f:
-                w = csv.writer(f)
-                w.writerow(
-                    [
-                        "experiment",
-                        "cycle",
-                        "point_idx",
-                        "x",
-                        "y_raw",
-                        "y_filtered",
-                        "filter",
-                        "filter_window",
-                    ]
-                )
-                exp_idx = 0
-                for exp in self.experiments:
-                    vis = exp.visible_cycles
-                    if not vis:
-                        continue
-                    exp_idx += 1
-                    for c in vis:
-                        ys_f = c.ys_filtered
-                        if ys_f is None or len(ys_f) != len(c.ys):
-                            ys_f = _apply_filter(c.ys, fkind, fwin) if fkind != "none" else c.ys
-                        for i in range(len(c.xs)):
-                            w.writerow(
-                                [
-                                    exp.name,
-                                    c.name,
-                                    i,
-                                    f"{c.xs[i]:.9g}",
-                                    f"{c.ys[i]:.9g}",
-                                    f"{ys_f[i]:.9g}",
-                                    fkind,
-                                    fwin if fkind != "none" else "",
-                                ]
-                            )
-                            n_pts += 1
-        except Exception as e:
-            self._set_status(f"Results exported, but error writing curves file: {e}")
-            return
         self._set_status(
-            f"Exported {len(rows)} result row(s) → {os.path.basename(path)}; "
-            f"{n_pts} curve point(s) → {os.path.basename(curves_path)}."
+            f"Exported {len(rows)} result row(s) and {len(curves) - 1} curve point(s) "
+            f"→ {os.path.basename(path)}."
         )
 
     def toggle_legend(self):
@@ -956,38 +953,35 @@ class PeakAnalysisFrame(ttk.Frame):
         self._set_status("Cleared.")
 
     def import_analysis(self):
-        """Importa un archivo _curves.csv generado por export_results."""
+        """Importa la hoja `curves` de un export_results."""
         path = askopenfilename(
-            title="Select curves CSV (analysis export)",
-            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+            title="Select analysis export",
+            filetypes=XLSX_FILETYPES,
         )
         if not path:
             return
         try:
-            with open(path, newline="", encoding="utf-8") as f:
-                reader = csv.reader(f, skipinitialspace=True)
-                header = [h.strip() for h in (next(reader, None) or [])]
-                if "y_raw" not in header:
-                    self._set_status(
-                        "Not a curves file. Export produces two files — select the one ending in _curves.csv."
-                    )
-                    return
-                col = {name: i for i, name in enumerate(header)}
-                # group rows by experiment → cycle (preserves insertion order)
-                groups = {}
-                for row in reader:
-                    if len(row) <= max(col["x"], col["y_raw"]):
-                        continue
-                    try:
-                        exp_name = row[col["experiment"]].strip()
-                        cycle_name = row[col["cycle"]].strip()
-                        x = float(row[col["x"]])
-                        y = float(row[col["y_raw"]])
-                    except (ValueError, IndexError):
-                        continue
-                    groups.setdefault(exp_name, {}).setdefault(cycle_name, ([], []))
-                    groups[exp_name][cycle_name][0].append(x)
-                    groups[exp_name][cycle_name][1].append(y)
+            rows = read_sheet_text(path, "curves") or []
+            header = [h.strip() for h in (rows[0] if rows else [])]
+            if "y_raw" not in header:
+                self._set_status("Not an analysis export (missing 'curves' sheet).")
+                return
+            col = {name: i for i, name in enumerate(header)}
+            # group rows by experiment → cycle (preserves insertion order)
+            groups = {}
+            for row in rows[1:]:
+                if len(row) <= max(col["x"], col["y_raw"]):
+                    continue
+                try:
+                    exp_name = row[col["experiment"]].strip()
+                    cycle_name = row[col["cycle"]].strip()
+                    x = float(row[col["x"]])
+                    y = float(row[col["y_raw"]])
+                except (ValueError, IndexError):
+                    continue
+                groups.setdefault(exp_name, {}).setdefault(cycle_name, ([], []))
+                groups[exp_name][cycle_name][0].append(x)
+                groups[exp_name][cycle_name][1].append(y)
         except Exception as e:
             self._set_status(f"Import error: {e}")
             return

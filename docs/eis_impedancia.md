@@ -1,5 +1,7 @@
 # EIS — Espectroscopia de Impedancia Electroquímica
 
+> **26/10/2026:** el guardado pasó a `.xlsx` ([almacenamiento_por_experimento.md](almacenamiento_por_experimento.md)): Load lee la hoja `data` de `eis_data_*.xlsx`; Export escribe un libro con `spectra` (siempre) + `nyquist` (si hay mediciones), antes `_spectra.csv` + `<base>.csv`; Import lee `spectra`.
+
 Nuevo tipo de experimento electroquímico, con estructura análoga a CV/SQWV. La fuente
 de verdad del protocolo sigue siendo el firmware del Pico (ver
 [emstat_abort_y_canal.md](emstat_abort_y_canal.md) para la cadena de transporte y el

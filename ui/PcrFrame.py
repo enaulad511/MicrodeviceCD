@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 
+import os
 import re
 import threading
 import time
@@ -31,6 +32,7 @@ from templates.utils import (
     temp_source_label_by_index,
     write_temp_source,
 )
+from templates.xlsx_io import flatten_settings, kv_rows, write_workbook
 from ui.KeyboardFrame import NumericKeyboard
 
 # spinMotorRPM_ramped se importa lazy desde Drivers.DriverStepperSys dentro de
@@ -648,13 +650,19 @@ class PCRFrame(ttk.Frame):
         self.frame_entries = ttk.Frame(self.content_frame)
         self.frame_entries.grid(row=1, column=0, sticky="nswe")
         self.frame_entries.columnconfigure(0, weight=1)
-        self.prefix_row = "temps_pcr"
+        # Metadata de la corrida (pares clave/valor, fijados al arrancar), snapshot de
+        # settings.json leído al arrancar y encabezado de la hoja temperature.
+        self.meta_pairs: list = []
+        self.run_settings: dict = {}
+        self.temp_cols = ["primary", "secondary", "t_s", "cycle", "phase", "heater_on_s"]
+        # Resultado del guardado automático de fin de corrida, para mostrarlo en la UI.
+        self._save_note = ""
 
         callbacks = {
             "callback_generate_profile": self.callback_generate_profile,
             "callback_start_experiment": self.callback_start_experiment,
             "callback_stop_experiment": self.callback_stop_experiment,
-            "callback_save_data": self.save_data_temps_file,
+            "callback_save_data": self._on_save_button,
         }
         self.entries = create_widgets_pcr(self.frame_entries)
         self.keyboard = NumericKeyboard(self, scroll_host=self.content_frame, width=260, height=150)
@@ -1532,6 +1540,9 @@ class PCRFrame(ttk.Frame):
             self._ui_poll_active = False
             self.update_graph_temperature()
             self._restore_input_ui()
+            if self._save_note:
+                self.svar_status.set(f"{self.svar_status.get()}\n{self._save_note}")
+                self._save_note = ""
             return
 
         self.after(500, self._ui_poll_loop)
@@ -1712,8 +1723,8 @@ class PCRFrame(ttk.Frame):
         self.ax_photo.set_ylim(ymin - margin, ymax + margin)
         self.canvas.draw_idle()
 
-    def _cadence_summary(self):
-        """Resumen de la cadencia real de muestreo, para la fila de metadata.
+    def _cadence_meta(self):
+        """Pares de la cadencia real de muestreo, para la hoja de metadata.
 
         La cadencia no es un parámetro del host: la fija el firmware del disco
         (sample_ms) y la degradan las pérdidas del broadcast UDP — el cliente
@@ -1724,66 +1735,84 @@ class PCRFrame(ttk.Frame):
         """
         t = self.data_time
         if len(t) < 2:
-            return f"-n: {len(t)}"
+            return [("n", len(t))]
         deltas = sorted(t[i + 1] - t[i] for i in range(len(t) - 1))
         dt_mean = (t[-1] - t[0]) / (len(t) - 1)
         p95 = deltas[min(len(deltas) - 1, int(0.95 * len(deltas)))]
-        return (
-            f"-dt_mean: {dt_mean:.4f}-dt_p95: {p95:.4f}-dt_max: {deltas[-1]:.4f}"
-            f"-n: {len(t)}-span: {t[-1] - t[0]:.1f}"
-        )
+        return [
+            ("dt_mean", round(dt_mean, 4)),
+            ("dt_p95", round(p95, 4)),
+            ("dt_max", round(deltas[-1], 4)),
+            ("n", len(t)),
+            ("span", round(t[-1] - t[0], 1)),
+        ]
 
-    def _timeouts_summary(self):
-        """Salvaguarda de fases para la fila de metadata: config efectiva + cada
+    def _timeouts_meta(self):
+        """Salvaguarda de fases para la hoja de metadata: config efectiva + cada
         timeout (ciclo, fase, duración/límite, temperatura alcanzada/objetivo).
 
         Archivar el límite junto a lo que de verdad tardó es lo que permite
         reajustar factor/piso con datos en vez de a ojo.
         """
         cfg = self.timeout_cfg
-        out = (
-            f"-timeout_cfg: x{cfg['factor']:g} floor {cfg['floor_s']:g}s "
-            f"{cfg['s_per_c']:g}s/C cool {cfg['cool_s_per_c']:g}s/C "
-            f"stop +{self.cool_margin_c:g}C max_failed {cfg['max_failed']}"
-            f"-failed_cycles: {'|'.join(str(c) for c in self.failed_cycles) or 'none'}"
-        )
         events = "|".join(
             f"c{c} {code} {el:.1f}/{lim:.1f}s {temp:.1f}/{target:g}C"
             for c, code, el, lim, temp, target in self.phase_timeouts
         )
         # Frescura: config + último umbral efectivo (0 = no llegó a medirse cadencia).
         fc = self.fresh_cfg
-        fresh = f"-fresh: x{fc['factor']:g} cap {fc['cap_s']:g}s eff {self.fresh_age_s:.3f}s"
-        return out + f"-timeouts: {events or 'none'}" + fresh
+        return [
+            (
+                "timeout_cfg",
+                f"x{cfg['factor']:g} floor {cfg['floor_s']:g}s "
+                f"{cfg['s_per_c']:g}s/C cool {cfg['cool_s_per_c']:g}s/C "
+                f"stop +{self.cool_margin_c:g}C max_failed {cfg['max_failed']}",
+            ),
+            ("failed_cycles", "|".join(str(c) for c in self.failed_cycles) or "none"),
+            ("timeouts", events or "none"),
+            ("fresh", f"x{fc['factor']:g} cap {fc['cap_s']:g}s eff {self.fresh_age_s:.3f}s"),
+        ]
+
+    def _run_meta(self):
+        """Metadata completa de la corrida: receta/config (fijada al arrancar) +
+        lo medido al final (cadencia, timeouts, frescura, adaptativo)."""
+        return (
+            list(self.meta_pairs)
+            + self._cadence_meta()
+            + self._timeouts_meta()
+            + [("adaptive", self._adaptive_summary())]
+        )
 
     def save_data_temps_file(self):
-        import csv
+        """Guarda la corrida en UN libro ``<slug>_pcr_data_<ts>.xlsx`` (hojas
+        metadata, settings, temperature, photodetector, photodetector_raw).
+
+        Si el xlsx falla (openpyxl ausente en el Pi, error de escritura) se cae a
+        los 3 CSV de siempre para no perder una corrida de una hora; tools/
+        csv_to_xlsx.py los convierte después. Devuelve el mensaje para la UI (no
+        toca Tk: se llama también desde el hilo del experimento).
+        """
         from itertools import zip_longest
 
-        timestamp = datetime.now()
         # Prefijo con el nombre del protocolo (proyecto PCR activo) saneado.
         slug = _project_slug(self.active_project_name)
-        ts = timestamp.strftime("%Y%m%d_%H%M%S")
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         save_dir = experiment_dir("pcr")
-        filename = f"{save_dir}/{slug}_temperature_data_{ts}.csv"
-        with open(filename, "w", newline="") as file:
-            writer = csv.writer(file)
-            # Fila 0: prefijo/metadata (una celda; incluye la identidad de columnas
-            # "cols: <primario>|<secundario>|t_s|cycle|phase|heater_on_s" y el resumen de
-            # cadencia medido). El loader del análisis la salta y lee por posición,
-            # así que crecer la fila de metadata y agregar columnas al final es seguro.
-            writer.writerow(
-                [
-                    self.prefix_row
-                    + self._cadence_summary()
-                    + self._timeouts_summary()
-                    + self._adaptive_summary()
-                ]
-            )
-            # Seis columnas alineadas por muestra: [primario, secundario, t_s,
-            # cycle, phase, heater_on_s]. Se anexan juntas en
-            # update_displayed_temperature; zip_longest cubre un desfase de a lo más
-            # una muestra si el paro cayó entre los append.
+        meta = self._run_meta()
+        # Seis columnas alineadas por muestra: [primario, secundario, t_s, cycle,
+        # phase, heater_on_s]. Se anexan juntas en update_displayed_temperature;
+        # zip_longest cubre un desfase de a lo más una muestra si el paro cayó entre
+        # los append. El loader del análisis lee las cols 0–2 por posición, así que
+        # agregar columnas al final es seguro.
+        temp_rows = [
+            [
+                p,
+                s,
+                round(t, 4) if t is not None else None,
+                c,
+                ph,
+                round(h, 4) if h is not None else None,
+            ]
             for p, s, t, c, ph, h in zip_longest(
                 self.data_temperature,
                 self.data_temperature_secondary,
@@ -1791,35 +1820,69 @@ class PCRFrame(ttk.Frame):
                 self.data_cycle,
                 self.data_phase,
                 self.data_heater_on,
-            ):
-                writer.writerow(
-                    [
-                        p if p is not None else "",
-                        s if s is not None else "",
-                        f"{t:.4f}" if t is not None else "",
-                        c if c is not None else "",
-                        ph if ph is not None else "",
-                        f"{h:.4f}" if h is not None else "",
-                    ]
-                )
-        print(f"Data saved to {filename}")
-        filename_photo = f"{save_dir}/{slug}_photodetector_data_{ts}.csv"
-        with open(filename_photo, "w", newline="") as file:
-            writer = csv.writer(file)
-            # 2ª columna: fases abandonadas por la salvaguarda en el ciclo de esa
-            # lectura ("high_ramp|cooling"; vacía = ciclo limpio). Fila k = ciclo k,
-            # la última = lectura final. El loader del análisis lee solo la col 0.
-            writer.writerow(["photodetector", "timeouts"])
-            for phot, tos in zip_longest(self.data_photodetector, self.data_photo_timeouts):
-                writer.writerow([phot if phot is not None else "", tos or ""])
+            )
+        ]
+        # timeouts: fases abandonadas por la salvaguarda en el ciclo de esa lectura
+        # ("high_ramp|cooling"; vacía = ciclo limpio). Fila k = ciclo k, la última =
+        # lectura final. El loader del análisis lee solo la columna photodetector.
+        photo_rows = [
+            [k, phot, tos or None]
+            for k, (phot, tos) in enumerate(
+                zip_longest(self.data_photodetector, self.data_photo_timeouts), start=1
+            )
+        ]
         # Serie temporal cruda en formato largo (una fila por muestra)
-        filename_raw = f"{save_dir}/{slug}_photodetector_raw_{ts}.csv"
-        with open(filename_raw, "w", newline="") as file:
+        raw_rows = [
+            [cycle, round(t_rel, 3), int(light_on), voltage]
+            for cycle, samples in enumerate(self.data_photodetector_series, start=1)
+            for t_rel, light_on, voltage in samples
+        ]
+        filename = f"{save_dir}/{slug}_pcr_data_{ts}.xlsx"
+        try:
+            write_workbook(
+                filename,
+                {
+                    "metadata": kv_rows(meta),
+                    "settings": kv_rows(flatten_settings(self.run_settings)),
+                    "temperature": [self.temp_cols] + temp_rows,
+                    "photodetector": [["cycle", "photodetector", "timeouts"]] + photo_rows,
+                    "photodetector_raw": [["cycle", "t_rel_s", "light_on", "voltage"]] + raw_rows,
+                },
+            )
+        except Exception as e:
+            print(f"xlsx save failed ({e}); falling back to CSV")
+            try:
+                self._save_csv_fallback(save_dir, slug, ts, meta, temp_rows, photo_rows, raw_rows)
+            except Exception as e2:
+                print(f"CSV fallback failed: {e2}")
+                return f"Error: data NOT saved (xlsx: {e}; csv: {e2})"
+            return f"Saved as CSV in {save_dir} (xlsx failed: {e})"
+        print(f"Data saved to {filename}")
+        return f"Data saved to {os.path.basename(filename)}"
+
+    @staticmethod
+    def _save_csv_fallback(save_dir, slug, ts, meta, temp_rows, photo_rows, raw_rows):
+        """Respaldo: los 3 CSV del formato anterior (metadata en una celda)."""
+        import csv
+
+        def blank(v):
+            return "" if v is None else v
+
+        with open(f"{save_dir}/{slug}_temperature_data_{ts}.csv", "w", newline="") as file:
+            writer = csv.writer(file)
+            writer.writerow(["-".join(f"{k}: {v}" for k, v in meta)])
+            writer.writerows([blank(v) for v in row] for row in temp_rows)
+        with open(f"{save_dir}/{slug}_photodetector_data_{ts}.csv", "w", newline="") as file:
+            writer = csv.writer(file)
+            writer.writerow(["photodetector", "timeouts"])
+            writer.writerows([blank(phot), blank(tos)] for _k, phot, tos in photo_rows)
+        with open(f"{save_dir}/{slug}_photodetector_raw_{ts}.csv", "w", newline="") as file:
             writer = csv.writer(file)
             writer.writerow(["cycle", "t_rel_s", "light_on", "voltage"])
-            for cycle, samples in enumerate(self.data_photodetector_series, start=1):
-                for t_rel, light_on, voltage in samples:
-                    writer.writerow([cycle, f"{t_rel:.3f}", light_on, f"{voltage}"])
+            writer.writerows(raw_rows)
+
+    def _on_save_button(self):
+        self.svar_status.set(self.save_data_temps_file())
 
     def _ensure_ads(self) -> bool:
         if self.ads is not None:
@@ -1897,6 +1960,7 @@ class PCRFrame(ttk.Frame):
         print(f"Temp watchdog window: {self.temp_dead_s} s")
         self.init_temperature_graph()
         self._ui_poll_graph_counter = 0
+        self._save_note = ""  # no arrastrar el de una corrida anterior
         self._ui_poll_active = True
         self.after(500, self._ui_poll_loop)
         # Aquí y no al poner running_experiment: si leer las entradas fallara, las
@@ -2285,11 +2349,11 @@ class PCRFrame(ttk.Frame):
         """Control adaptativo para la metadata: off, o la config y lo aprendido al final."""
         cfg = self.adapt_cfg
         if not cfg["enabled"]:
-            return "-adaptive: off"
+            return "off"
         bias = " ".join(f"{k} {v:.3f}" for k, v in sorted(self._adapt_bias.items())) or "none"
         coast = " ".join(f"{k} {v:.1f}" for k, v in sorted(self._adapt_coast.items())) or "none"
         return (
-            f"-adaptive: on ff {cfg['ff_slope']:g}/{cfg['ff_t0']:g}C learn {cfg['ff_learn']:g}"
+            f"on ff {cfg['ff_slope']:g}/{cfg['ff_t0']:g}C learn {cfg['ff_learn']:g}"
             f" hold kp {cfg['hold_kp']:g} ki {cfg['hold_ki']:g} imax {cfg['hold_imax']:g}"
             f" coast init {cfg['coast_init']:g}C learn {cfg['coast_learn']:g}"
             f" | bias {bias} | coast {coast}"
@@ -2555,6 +2619,9 @@ class PCRFrame(ttk.Frame):
         self.start_final_ext_time = 0.0
 
         settings = read_settings_from_file()
+        # Snapshot de la configuración con la que corre (hoja "settings" del xlsx):
+        # cada archivo dice con qué sintonización se midió.
+        self.run_settings = settings
         pidGains = settings.get("pidControllerRPM", {})
         try:
             ts = float(pidGains.get("ts_pcr", 0.02))
@@ -2605,31 +2672,43 @@ class PCRFrame(ttk.Frame):
             project_label = "_last_run (sin guardar)"
         else:
             project_label = self.active_project_name
-        # Identidad de columnas del CSV de temperatura: col0=primario, col1=secundario.
+        # Identidad de columnas de la hoja temperature: col0=primario, col1=secundario.
         primary_label = temp_source_label(self.temp_source)
         secondary_label = temp_source_label_by_index(self._secondary_idx())
+        self.temp_cols = [primary_label, secondary_label, "t_s", "cycle", "phase", "heater_on_s"]
         fc = self.fluor_cfg
         # OJO: "ts" es el periodo del lazo PI, NO la cadencia de muestreo (esa la
-        # manda el firmware del disco y ahora se mide: ver _cadence_summary).
+        # manda el firmware del disco y ahora se mide: ver _cadence_meta).
         # "start" ancla el eje t_s —que es relativo— al reloj de pared, para poder
         # correlacionar esta corrida con otros logs sin pagar una columna por muestra.
-        prefix_col = (
-            f"project: {project_label}"
-            f"-high_temp: {high_temp}-low_temp: {low_temp}-time_high: {time_high}"
-            f"-time_low: {time_low}-cycles: {cycles}-rpm: {rpm}"
-            f"-denat_temp: {denat_temp}-denat_time: {denat_time}"
+        self.meta_pairs = [
+            ("project", project_label),
+            ("high_temp", high_temp),
+            ("low_temp", low_temp),
+            ("time_high", time_high),
+            ("time_low", time_low),
+            ("cycles", cycles),
+            ("rpm", rpm),
+            ("denat_temp", denat_temp),
+            ("denat_time", denat_time),
             # La receta completa: sin estos, la extensión de Newn1 hubo que deducirla
             # de la curva (docs/pcr_pendientes.md punto 5).
-            f"-ext_temp: {ext_temp}-ext_time: {ext_time}-ext_time_final: {ext_time_final}"
-            f"-initial_spin: {initial_spin_time}-ts: {ts}"
-            f"-temp_source: {primary_label}"
+            ("ext_temp", ext_temp),
+            ("ext_time", ext_time),
+            ("ext_time_final", ext_time_final),
+            ("initial_spin", initial_spin_time),
+            ("ts", ts),
+            ("temp_source", primary_label),
             # Ventanas de fluorescencia efectivas (configurables en settings.json).
-            f"-fluor: pre {fc['pre_sleep_s']:g}s base {fc['baseline_s']:g}s"
-            f" light {fc['light_s']:g}s post {fc['post_s']:g}s"
-            f" dt {fc['sample_dt_s']:g}s avg {fc['averages']}"
-            f"-start:{datetime.fromtimestamp(self.start_pcr_time).isoformat(timespec='seconds')}"
-            f"-cols: {primary_label}|{secondary_label}|t_s|cycle|phase|heater_on_s"
-        )
+            ("fluor_pre_s", fc["pre_sleep_s"]),
+            ("fluor_baseline_s", fc["baseline_s"]),
+            ("fluor_light_s", fc["light_s"]),
+            ("fluor_post_s", fc["post_s"]),
+            ("fluor_sample_dt_s", fc["sample_dt_s"]),
+            ("fluor_averages", fc["averages"]),
+            ("start", datetime.fromtimestamp(self.start_pcr_time).isoformat(timespec="seconds")),
+            ("cols", "|".join(self.temp_cols)),
+        ]
         self.temp = 20.0
         self.client_temperature = UdpClient(
             port=5005,
@@ -2640,10 +2719,8 @@ class PCRFrame(ttk.Frame):
             on_message=lambda t, a, t_d: self.update_displayed_temperature(t, a, t_d),
             parse_float=True,  # Arduino sends a numeric string,
             stop_event=self.stop_udp_listenner,
-            prefixCol=prefix_col,
             save_data=False,
         )
-        self.prefix_row = prefix_col
         self.client_temperature.start()
         self._enter_phase("initial")
         from Drivers.DriverStepperSys import DriverStepperSys, spinMotorRPM_ramped
@@ -2788,7 +2865,8 @@ class PCRFrame(ttk.Frame):
                 print(f"Final fluorescence delta voltage: {v_fluo_final}")
                 self._enter_phase("done")
 
-            self.save_data_temps_file()
+            # Hilo del experimento: el mensaje lo muestra _ui_poll_loop al terminar.
+            self._save_note = self.save_data_temps_file()
 
         except Exception as e:
             print(f"exception in experiment: {e}")
