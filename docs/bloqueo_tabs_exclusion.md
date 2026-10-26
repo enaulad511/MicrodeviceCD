@@ -45,7 +45,7 @@ Dueños y cuándo bloquean:
 
 | Dueño | Frame | Bloquea | Desbloquea |
 |---|---|---|---|
-| `pcr` | `PCRFrame` | justo antes de arrancar el hilo del experimento ([ui/PcrFrame.py:1728](../ui/PcrFrame.py#L1728)) | `_restore_input_ui` ([ui/PcrFrame.py:2462](../ui/PcrFrame.py#L2462)): fin natural (lo detecta `_ui_poll_loop`) y Stop |
+| `pcr` | `PCRFrame` | justo antes de arrancar el hilo del experimento ([ui/PcrFrame.py:2033](../ui/PcrFrame.py#L2033)) | `_restore_input_ui`, cuando `_ui_poll_loop` ve que el hilo terminó (apagado + guardado), en todo camino de salida ([pcr_fin_corrida.md](pcr_fin_corrida.md)) |
 | `electrochem` | `ElectrochemicalFrame._on_run_state` | `EventPlotter.start()` ([ui/EventEmstatFrame.py:319](../ui/EventEmstatFrame.py#L319)) | `EventPlotter.stop()`, vía `after(0)` ([ui/EventEmstatFrame.py:441](../ui/EventEmstatFrame.py#L441)) |
 | `quick` | `QuickControlFrame._update_lock` | motor, algún LED o lectura activa | todo apagado |
 | `disc` | `ControlDiscFrame._lock_while_running` | arranca un hilo de motor | el hilo termina (sondeo `after(200)`) |
@@ -58,10 +58,11 @@ Detalles que importan:
 - **PCR bloquea después de leer las entradas, no al poner
   `running_experiment`.** Si un `float()` de las entradas fallara, las tabs no
   quedan bloqueadas para siempre. Desbloquea en `_restore_input_ui` porque es
-  el punto que PCR ya usa para decir "terminó, se puede volver a correr" en
-  ambos caminos. En el Stop, el join (hasta 3 s) y el teardown forzado ocurren
-  dentro del mismo callback del hilo de UI, así que nadie puede hacer clic en
-  otra tab antes de que terminen.
+  el punto que PCR ya usa para decir "terminó, se puede volver a correr". Desde
+  el 26/10/2026 el Stop ya no espera ni restaura la UI. Solo señaliza, y el poll
+  llama a `_restore_input_ui` cuando el hilo apagó el hardware y guardó, así que
+  las tabs siguen bloqueadas durante el guardado (~3 s en el Pi). Antes, el
+  `join` de 3 s congelaba la UI ([pcr_fin_corrida.md](pcr_fin_corrida.md) §3).
 - **Electrochemical usa un hook nuevo, `EventPlotter.on_run_state(running)`**
   ([ui/EventEmstatFrame.py:83](../ui/EventEmstatFrame.py#L83)), con el mismo
   espíritu que `on_first_data`. Se invoca **siempre en el hilo de UI**:

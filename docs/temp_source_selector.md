@@ -256,7 +256,7 @@ par IR Object ↔ Termocupla: el **primario** (regula el PID) y el **secundario*
   **start-gate** en `experiment_pcr` espera hasta `pidControllerRPM.temp_start_wait_s`
   (default 3 s, `PCR_TEMP_START_WAIT_S`; configurable desde el 13/10/2026) una
   primera lectura válida de cualquiera de los dos (`_temp_ever_valid`); si no llega,
-  no arranca (retorna dentro del `try`, el `finally` desmonta). Un glitch UDP puntual
+  no arranca (retorna y `experiment_pcr` desmonta sin guardar; [pcr_fin_corrida.md](pcr_fin_corrida.md)). Un glitch UDP puntual
   no detiene: los valores sostenidos mantienen plot/CSV hasta que se cumpla la ventana.
 
 ### 10. Ciclo de vida del socket: lo cierra el hilo receptor (14/10/2026)

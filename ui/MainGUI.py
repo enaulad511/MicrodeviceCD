@@ -3,13 +3,14 @@
 __author__ = "Edisson A. Naula"
 __date__ = "$ 08/10/2025  at 09:35 a.m. $"
 
-from ui.PcrFrame import PCRFrame
+from ui.PcrFrame import PCR_STOP_GIVEUP_S, PCRFrame
 from Drivers.ClientUDP import UdpClient
 from templates.constants import font_buttons_small, font_footer, font_options, font_text
 from ui.ConfigFrame import ConfigFrame
 from ui.TemperatureFrame import TemperatureFrame
 
 import platform
+import time
 
 import ttkbootstrap as ttk
 from PIL import Image, ImageTk
@@ -95,6 +96,8 @@ class MainGUI(ttk.Window):
         self.frame_m_control = None
         self.config_frame = None
         self.project_key = None
+        self.tab_pcr: "PCRFrame | None" = None
+        self._closing = False  # cierre pedido; esperando a que PCR guarde
         self.title("\u03bcAA")
         self.style_gui = configure_styles()
         self.ip_sender = "localhost"
@@ -395,6 +398,37 @@ class MainGUI(ttk.Window):
         self.client_tester.start()
 
     def on_close_window(self):
+        # Con una corrida PCR activa no se cierra sin confirmar: se detiene y la
+        # ventana espera a que el hilo apague el hardware y guarde (el status de la
+        # tab PCR muestra "Saving data…"). Antes la corrida seguía sin UI, con el
+        # heater, y se perdía entera. Ver docs/pcr_fin_corrida.md.
+        pcr = self.tab_pcr
+        if pcr is not None and pcr.running_experiment:
+            if self._closing:
+                return
+            from tkinter import messagebox
+
+            if not messagebox.askyesno(
+                "PCR run in progress",
+                "A PCR run is in progress. Stop it, save its data and close?",
+                parent=self,
+            ):
+                return
+            self._closing = True
+            pcr.request_stop("app_closed")
+            self._close_when_pcr_done(time.time())
+            return
+        self.destroy()
+        self.quit()
+
+    def _close_when_pcr_done(self, t0):
+        # Tope por si el hilo se colgó: al destruir, PCRFrame._on_destroy vuelve a
+        # pedir el paro y el hilo (no daemon) termina igual antes de que salga el
+        # proceso.
+        pcr = self.tab_pcr
+        if pcr is not None and pcr.running_experiment and time.time() - t0 < PCR_STOP_GIVEUP_S:
+            self.after(200, lambda: self._close_when_pcr_done(t0))  # pyrefly: ignore
+            return
         self.destroy()
         self.quit()
 

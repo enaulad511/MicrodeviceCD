@@ -10,22 +10,30 @@ Leyenda:
 - **DEV**: código o decisión, sin equipo.
 - Prioridad: ⬆ alta, ➖ media, ⬇ baja.
 
-Actualizado: 14/10/2026.
+Actualizado: 26/10/2026.
 
 ## Preparación común antes de cualquier prueba en el equipo
 
-- [ ] **Commitear y subir** lo que sigue local. Hoy son `ui/PcrFrame.py` (frescura por p90)
-      y varios `docs/`. Sin esto, el Pi corre el código anterior.
-- [ ] **En el Pi, `update_repo`.** En la restauración elegir `1` (la config previa). El
+Hecha el 26/10/2026 para la prueba del control adaptativo (código en `0c1693a`, subido).
+Los dos primeros pasos se repiten cada vez que haya código local sin subir.
+
+- [x] **Commitear y subir** lo que sigue local. Sin esto, el Pi corre el código anterior.
+- [x] **En el Pi, `update_repo`.** En la restauración elegir `1` (la config previa). El
       paso 4 siembra las claves nuevas de `settings.json` sin tocar lo afinado.
-- [ ] **`power_save` apagado:** `iw dev wlan0 get power_save` → `off`. Si vuelve a `on`,
+- [x] **`power_save` apagado:** `iw dev wlan0 get power_save` → `off`. Si vuelve a `on`,
       la temperatura llega cada 0.3 s ([pcr_eje_tiempo.md](pcr_eje_tiempo.md) §6).
-- [ ] ⬆ HW — **`pip install openpyxl` en el Pi** (dependencia nueva del guardado .xlsx).
-      Sin ella la app arranca, pero cada guardado cae al respaldo CSV o da error. Luego
-      convertir lo viejo con `tools/csv_to_xlsx.py`
-      ([almacenamiento_por_experimento.md](almacenamiento_por_experimento.md) §7).
+- [x] **`openpyxl` instalado en el Pi** (dependencia del guardado .xlsx). Sin ella la app
+      arranca, pero cada guardado cae al respaldo CSV o da error.
 
 ## PCR (control térmico)
+
+- [ ] ⬆ HW — **Primera corrida real con guardado .xlsx** (se cierra con la prueba del
+      adaptativo): sale un solo `<slug>_pcr_data_<ts>.xlsx` con sus 5 hojas y el status
+      **no** avisa del respaldo CSV. En el Pi ya se midió el guardado: 3.2 s la corrida
+      más grande ([almacenamiento_por_experimento.md](almacenamiento_por_experimento.md) §7).
+      Mismo día, fin de corrida nuevo: ver "Saving data…" y luego `Data saved to …`, con
+      `end = done` en la metadata. Si se puede, una corrida corta con Stop a mitad
+      ([pcr_fin_corrida.md](pcr_fin_corrida.md) §7).
 
 - [ ] ⬆ HW — **Corrida de validación de los cambios del 13–14/10**: frescura, salvaguarda
       de fases, fuzzy corregido, rampa a ext del ciclo 1 y metadata nueva. Checklist
@@ -72,7 +80,7 @@ Actualizado: 14/10/2026.
   Detalle en [sqwv_plot_precondicionamiento.md](sqwv_plot_precondicionamiento.md) y
   [sqwv_motor_pretratamiento.md](sqwv_motor_pretratamiento.md).
 - [ ] ➖ HW — **Keep runs:** seis casos (trazas R1/R2, sin marcar, apilado, Save/Load
-      multi-corrida, CSV viejo, etiquetas CV) ([emstat_keep_runs.md](emstat_keep_runs.md)
+      multi-corrida, CSV viejo convertido, etiquetas CV) ([emstat_keep_runs.md](emstat_keep_runs.md)
       §6).
 - [ ] ➖ HW — **EIS:**
   - acondicionamiento opcional;
@@ -98,6 +106,10 @@ Actualizado: 14/10/2026.
       `timeouts` del de fotodetector para segmentar automáticamente y excluir ciclos
       fallidos. Es una decisión de diseño: ¿cómo convive con la selección manual a dos
       clics? ([pcr_pendientes.md](pcr_pendientes.md) 8, [pcr_analisis.md](pcr_analisis.md)).
+- [ ] ⬇ DEV — **Convertir las carpetas de OneDrive** (`PostDoct/FilesCodes`, incluida
+      `PCR/`) con `tools/csv_to_xlsx.py`. Al 26/10 seguían solo en CSV. Solo hace falta
+      para abrirlas en la pestaña de análisis, porque los notebooks siguen leyendo CSV
+      ([almacenamiento_por_experimento.md](almacenamiento_por_experimento.md) §4).
 
 ## Control manual (Quick Control)
 
@@ -111,6 +123,19 @@ Actualizado: 14/10/2026.
       ([FluorReader](../firmware/FluorReader/README.md) §6).
 - [ ] ⬇ HW — **DisckWifiArduino:** el broadcast dirigido llega en el hotspot real
       ([DisckWifiArduino](../firmware/DisckWifiArduino/README.md) §5).
+
+## Cerrado recientemente (26/10/2026)
+
+- **Un solo .xlsx por guardado**, con hojas, en vez de varios CSV. Hay respaldo CSV en
+  PCR y conversor de lo viejo. `openpyxl` está instalado en el Pi y los `files/` del Pi y
+  local ya están convertidos
+  ([almacenamiento_por_experimento.md](almacenamiento_por_experimento.md)).
+- **La corrida PCR ya no se pierde.** Se guarda en todo camino de salida: excepción,
+  aborto, Stop o cierre de la app. Primero se apaga el hardware. El Stop ya no congela la
+  UI y el cierre de la ventana pide confirmación y espera al guardado. La metadata trae
+  `end`. Además se corrigieron los stop-events reusados tras un aborto y la UI colgada si
+  fallaba la preparación. Queda fuera el corte de luz
+  ([pcr_fin_corrida.md](pcr_fin_corrida.md)).
 
 ## Cerrado recientemente (13–14/10/2026)
 
@@ -139,4 +164,4 @@ Actualizado: 14/10/2026.
   [mlx90614_emisividad.md](mlx90614_emisividad.md) §6).
 
 __author__ = "Edisson A. Naula"
-__date__ = "$ 14/10/2026 $"
+__date__ = "$ 26/10/2026 $"

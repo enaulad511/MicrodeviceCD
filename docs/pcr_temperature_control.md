@@ -131,8 +131,9 @@ cualquier fase sin la clave conserva el comportamiento PI puro previo.
   en denat); el blast lo re-arma de forma idempotente, así que un periodo de lecturas
   viejas no lo deja apagado de forma latente.
 - Tanto el blast como el PI respetan `stop_event` (`stop_udp_listenner`): un Stop sale
-  de ambos lazos. El `finally` de `experiment_pcr` apaga y cierra el pin en
-  `_teardown_hardware`.
+  de ambos lazos. Al salir por cualquier camino, `experiment_pcr` (el envoltorio del
+  hilo) apaga y cierra el pin en `_teardown_hardware` antes de guardar
+  ([pcr_fin_corrida.md](pcr_fin_corrida.md)).
 - El riesgo de *runaway* del blast inline de denat queda **cerrado** al compartir la
   guarda de `MAX_AGE`.
 - No se introducen escrituras CSV nuevas; el flag `dev` no se ve afectado.

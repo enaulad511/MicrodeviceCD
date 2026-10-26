@@ -4,6 +4,7 @@ import os
 import re
 import threading
 import time
+import traceback
 from collections import deque
 from datetime import datetime
 from tkinter import filedialog
@@ -79,6 +80,12 @@ PCR_TEMP_START_WAIT_S = 3.0
 # Sin lectura fresca de ninguno de los dos → detener. Es solo el DEFAULT: el valor
 # efectivo es pidControllerRPM.temp_stale_s de settings.json (_read_temp_dead_s).
 PCR_TEMP_DEAD_S = 10.0
+# Stop (docs/pcr_fin_corrida.md): si el hilo del experimento no llegó a su cierre en
+# PCR_STOP_FORCE_S (colgado en una espera), la UI fuerza el apagado del hardware. Si
+# tras PCR_STOP_GIVEUP_S sigue vivo, la UI se restaura igual (Start sigue bloqueado
+# mientras viva). Cubre de sobra la reacción al Stop + el guardado (~3 s en el Pi).
+PCR_STOP_FORCE_S = 3.0
+PCR_STOP_GIVEUP_S = 30.0
 
 
 def _read_temp_dead_s():
@@ -630,8 +637,8 @@ class PCRFrame(ttk.Frame):
         # segmento final en vez de caer al tiempo teórico ya agotado por el error
         # acumulado entre ciclos.
         self.start_final_ext_time = 0.0
-        self.stop_event_motor = None
-        self.stop_udp_listenner = None
+        self.stop_event_motor: "threading.Event | None" = None
+        self.stop_udp_listenner: "threading.Event | None" = None
         self.thread_experiment = None
         self.client_temperature = None
         self.temp_update_counter = 0
@@ -657,6 +664,21 @@ class PCRFrame(ttk.Frame):
         self.temp_cols = ["primary", "secondary", "t_s", "cycle", "phase", "heater_on_s"]
         # Resultado del guardado automático de fin de corrida, para mostrarlo en la UI.
         self._save_note = ""
+        # Cierre de la corrida (docs/pcr_fin_corrida.md): cómo terminó (fila "end" de
+        # la metadata), si pasó el start-gate (solo entonces hay datos que guardar), si
+        # el hilo ya está en su cierre (apagar + guardar) y el Stop pedido (cuándo y
+        # por qué). running_experiment sigue True hasta que el hilo terminó TODO.
+        self._run_end = ""
+        self._run_started = False
+        self._run_closing = False
+        self._stop_requested_at = 0.0
+        self._stop_reason = ""
+        self._stop_forced = False
+        self._photo_plotted_n = 0
+        # Tick pendiente de _ui_poll_loop (se cancela al cerrar la app).
+        self._poll_after_id: "str | None" = None
+        # Teardown desde dos hilos (cierre del experimento y red de seguridad del Stop).
+        self._teardown_lock = threading.Lock()
 
         callbacks = {
             "callback_generate_profile": self.callback_generate_profile,
@@ -708,6 +730,7 @@ class PCRFrame(ttk.Frame):
         # Auto-carga del proyecto inicial (cascada last_used -> last_run -> Default).
         # Al final de __init__: ya existen profile_frame/canvas que usa la preview.
         self._load_initial_project()
+        self.bind("<Destroy>", self._on_destroy)
 
     def _build_source_selector(self, master):
         """Combobox 'Temp source:' que fija qué temperatura del disco regula el PID.
@@ -1457,7 +1480,13 @@ class PCRFrame(ttk.Frame):
         solo señaliza los stop-events y marca la fase — el finally del hilo del
         experimento desmonta y _ui_poll_loop restaura la UI al ver running=False.
         """
-        if not self.running_experiment or not self._temp_ever_valid or self._temp_abort_triggered:
+        # _run_closing: el UDP ya se cerró a propósito (apagar + guardar); no es una caída.
+        if (
+            not self.running_experiment
+            or not self._temp_ever_valid
+            or self._temp_abort_triggered
+            or self._run_closing
+        ):
             return
         last_fresh = max(
             self._chan_last_good[self.temp_source_idx],
@@ -1469,10 +1498,9 @@ class PCRFrame(ttk.Frame):
             print(
                 f"Aborting PCR: both pair sensors stale > {self.temp_dead_s}s — stopping experiment"
             )
-            if self.stop_udp_listenner is not None:
-                self.stop_udp_listenner.set()
-            if self.stop_event_motor is not None:
-                self.stop_event_motor.set()
+            # El motivo va aparte: el hilo puede pasar a otra fase antes de ver el
+            # stop y sobrescribir phase_code (la fila "end" lo perdía).
+            self.request_stop("aborted_sensors")
 
     def _ui_poll_loop(self):
         """Actualiza la UI desde el hilo principal (scheduled via after). Un solo hilo."""
@@ -1522,30 +1550,49 @@ class PCRFrame(ttk.Frame):
         # valor previo. El patrón anterior (get().split("\n") + parchar índices)
         # asumía "una línea por slot"; al mover State a su propia línea, las líneas
         # viejas dejaban de sobreescribirse y el label crecía sin límite.
+        # Cierre en curso: el hilo ya apaga y guarda (~3 s en el Pi) o aún sale tras Stop.
+        closing_note = ""
+        if self.running_experiment:
+            if self._run_closing and self._run_started:
+                closing_note = "\nSaving data…"
+            elif self._stop_requested_at:
+                closing_note = "\nStopping…"
         self.svar_status.set(
             f"Temperature: {self.temp:.2f} °C [{src_label}]{extras}{warn}\n"
             f"State: {self.fase}{timeout_note}\n"
-            f"{msg_elapsed_time}"
+            f"{msg_elapsed_time}{closing_note}"
         )
 
         self._ui_poll_graph_counter += 1
         if self._ui_poll_graph_counter >= 5:
             self._ui_poll_graph_counter = 0
             self.update_graph_temperature()
+        # La gráfica del fotodetector se refresca aquí y no desde el hilo del
+        # experimento: ese hilo nunca toca Tk (tras cerrar la ventana, eso lanza
+        # RuntimeError y la corrida se perdía).
+        if len(self.data_photodetector) != self._photo_plotted_n:
+            self._photo_plotted_n = len(self.data_photodetector)
+            self.update_graph_photodetector()
 
-        if not self.running_experiment:
-            # El experimento terminó por sí mismo (finally del hilo) — no vía Stop.
-            # Restaura los inputs aquí, en el hilo principal (Tkinter no es
-            # thread-safe), igual que hace Stop, y detén el poll.
+        gave_up = self._check_stop_timeouts()
+        if not self.running_experiment or gave_up:
+            # El hilo terminó TODO (apagó y guardó; experiment_pcr pone
+            # running_experiment=False al final), sea fin natural, Stop, aborto o
+            # error. Restaura los inputs aquí, en el hilo principal (Tkinter no es
+            # thread-safe), y detén el poll.
             self._ui_poll_active = False
             self.update_graph_temperature()
             self._restore_input_ui()
+            if gave_up:
+                print("warning: experiment thread still alive, restoring the UI anyway")
+                self._save_note = "Warning: the run did not finish cleanly; data may not be saved"
+            self._stop_requested_at = 0.0
             if self._save_note:
                 self.svar_status.set(f"{self.svar_status.get()}\n{self._save_note}")
                 self._save_note = ""
             return
 
-        self.after(500, self._ui_poll_loop)
+        self._poll_after_id = self.after(500, self._ui_poll_loop)  # pyrefly: ignore
 
     def _estimate_remaining_time(self, elapsed_pcr_time):
         # Antes de completar el primer ciclo no hay medición fiable: estima por
@@ -1775,9 +1822,10 @@ class PCRFrame(ttk.Frame):
 
     def _run_meta(self):
         """Metadata completa de la corrida: receta/config (fijada al arrancar) +
-        lo medido al final (cadencia, timeouts, frescura, adaptativo)."""
+        lo medido al final (cómo terminó, cadencia, timeouts, frescura, adaptativo)."""
         return (
             list(self.meta_pairs)
+            + [("end", self._run_end)]
             + self._cadence_meta()
             + self._timeouts_meta()
             + [("adaptive", self._adaptive_summary())]
@@ -1904,6 +1952,12 @@ class PCRFrame(ttk.Frame):
 
     def callback_start_experiment(self):
         if self.running_experiment:
+            # Con la UI ya restaurada solo pasa si el hilo anterior no terminó
+            # (PCR_STOP_GIVEUP_S): no arrancar otro encima del que sigue vivo.
+            if not self._ui_poll_active:
+                self.svar_status.set(
+                    "The previous run is still finishing; try again or restart the app"
+                )
             return
         if not self._ensure_ads():
             self.svar_status.set("Error: ADS1115 not available")
@@ -1961,8 +2015,19 @@ class PCRFrame(ttk.Frame):
         self.init_temperature_graph()
         self._ui_poll_graph_counter = 0
         self._save_note = ""  # no arrastrar el de una corrida anterior
+        self._run_end = ""
+        self._run_started = False
+        self._run_closing = False
+        self._stop_requested_at = 0.0
+        self._stop_reason = ""
+        self._stop_forced = False
+        self._photo_plotted_n = 0
+        # Eventos nuevos en cada corrida: un aborto (watchdog, timeouts) los deja
+        # activados y la corrida siguiente los heredaba, con lo que paraba al arrancar.
+        self.stop_udp_listenner = threading.Event()
+        self.stop_event_motor = threading.Event()
         self._ui_poll_active = True
-        self.after(500, self._ui_poll_loop)
+        self._poll_after_id = self.after(500, self._ui_poll_loop)  # pyrefly: ignore
         # Aquí y no al poner running_experiment: si leer las entradas fallara, las
         # tabs no quedan bloqueadas. Se desbloquea en _restore_input_ui.
         self._set_tabs_locked(True)
@@ -2444,7 +2509,7 @@ class PCRFrame(ttk.Frame):
         self.data_photodetector_series.append(samples)
         # Ancla para estadística: fases abandonadas en el ciclo de esta lectura.
         self.data_photo_timeouts.append("|".join(self._cycle_timeouts))
-        self.after(1, lambda: self.update_graph_photodetector())
+        # La gráfica la refresca _ui_poll_loop: este hilo no toca Tk.
         return delta
 
     def _run_cycle(
@@ -2589,7 +2654,69 @@ class PCRFrame(ttk.Frame):
         else:
             self.consec_failed_cycles = 0
 
-    def experiment_pcr(
+    def experiment_pcr(self, *args):
+        """Hilo del experimento (``args`` = los de ``_run_pcr``).
+
+        Termine como termine la corrida —fin natural, Stop, aborto, excepción
+        (incluso en la preparación) o cierre de la app— apaga el hardware PRIMERO,
+        después guarda lo medido y al final pone ``running_experiment = False``, que
+        es la señal para que ``_ui_poll_loop`` restaure la UI y muestre el resultado.
+        Antes una excepción saltaba el guardado y la corrida se perdía entera. Nunca
+        toca Tk. Ver docs/pcr_fin_corrida.md.
+        """
+        error = None
+        try:
+            self._run_pcr(*args)
+        except Exception as e:
+            print(f"exception in experiment: {e}")
+            traceback.print_exc()
+            error = e
+        self._run_closing = True
+        try:
+            self._teardown_hardware()
+            self._run_end = self._end_reason(error)
+            print(f"PCR run end: {self._run_end}")
+            note = self.save_data_temps_file() if self._run_started else ""
+            self._save_note = self._end_note(note)
+        except Exception as e:
+            traceback.print_exc()
+            self._save_note = f"Error closing the run: {e}"
+        finally:
+            self.running_experiment = False
+
+    def _end_reason(self, error):
+        """Cómo terminó la corrida (fila ``end`` de la metadata).
+
+        Primero el motivo del paro pedido (Stop, cierre de la app, abortos del
+        watchdog o de la salvaguarda), aunque luego salte una excepción: es
+        consecuencia del paro (p. ej. el teardown forzado cerró un pin) y la traza
+        queda en el log. aborted_start no pide paro: solo deja su fase.
+        """
+        if self._stop_reason:
+            return self._stop_reason
+        if self.phase_code.startswith("aborted"):
+            return self.phase_code
+        if error is not None:
+            return f"error: {type(error).__name__}: {error}"
+        return self.phase_code
+
+    def _end_note(self, save_note):
+        """Mensaje final para el status: cómo terminó + resultado del guardado."""
+        end = self._run_end
+        if end.startswith("error"):
+            prefix = f"Run failed ({end[len('error: '):]}). "
+        elif end == "stopped":
+            prefix = "Stopped. "
+        elif end.startswith("aborted") and end in PCR_PHASE_LABELS:
+            # El State puede mostrar una fase posterior al aborto: decirlo aquí.
+            prefix = f"{PCR_PHASE_LABELS[end]}. "
+        else:
+            prefix = ""
+        if not prefix and not save_note:
+            return ""
+        return f"{prefix}{save_note or 'No data saved.'}"
+
+    def _run_pcr(
         self,
         high_temp,
         low_temp,
@@ -2605,6 +2732,8 @@ class PCRFrame(ttk.Frame):
         ext_time_final,
         initial_spin_time,
     ):
+        # Cuerpo de la corrida. El cierre (apagar, guardar, marcar el fin) es de
+        # experiment_pcr: aquí no hay try/finally, una excepción simplemente sube.
         global thread_motor, sistemaMotor
 
         self.stop_udp_listenner = (
@@ -2728,187 +2857,179 @@ class PCRFrame(ttk.Frame):
         # start_pcr_time NO se fija aquí: lo hace callback_start_experiment antes
         # de crear este hilo y el cliente UDP (ver allí el porqué).
 
-        try:
-            # Start-gate: no arrancar el ciclado si al inicio ninguno de los dos
-            # sensores del par entrega lectura válida dentro de temp_start_wait_s.
-            # El cliente UDP ya corre; esperamos a _temp_ever_valid (lo marca
-            # update_displayed_temperature en la primera lectura buena). Al retornar
-            # aquí, el finally desmonta el hardware y _ui_poll_loop restaura la UI.
-            gate_deadline = time.time() + start_wait_s
-            while not self._temp_ever_valid and time.time() < gate_deadline:
-                if self.stop_udp_listenner.is_set():
-                    return
-                time.sleep(0.05)
-            if not self._temp_ever_valid:
-                self._enter_phase("aborted_start")
-                print("PCR not started: both pair sensors unavailable at start")
+        # Start-gate: no arrancar el ciclado si al inicio ninguno de los dos
+        # sensores del par entrega lectura válida dentro de temp_start_wait_s.
+        # El cliente UDP ya corre; esperamos a _temp_ever_valid (lo marca
+        # update_displayed_temperature en la primera lectura buena). Al retornar
+        # aquí, experiment_pcr desmonta el hardware (sin guardar: no hubo corrida) y
+        # _ui_poll_loop restaura la UI.
+        gate_deadline = time.time() + start_wait_s
+        while not self._temp_ever_valid and time.time() < gate_deadline:
+            if self.stop_udp_listenner.is_set():
                 return
+            time.sleep(0.05)
+        if not self._temp_ever_valid:
+            self._enter_phase("aborted_start")
+            print("PCR not started: both pair sensors unavailable at start")
+            return
+        # Pasó el start-gate: desde aquí hay una corrida que guardar (experiment_pcr).
+        self._run_started = True
 
-            acceleration = float(pidGains.get("acceleration_spin", 200.0))
-            direction = "CW"
-            if sistemaMotor is None:
-                print("Creating new driver instance")
-                sistemaMotor = DriverStepperSys(
-                    en_pin=12, enable_active_high=False, uart_port=serial_port_encoder
-                )
-
-            self.stop_event_motor = (
-                threading.Event() if self.stop_event_motor is None else self.stop_event_motor
+        acceleration = float(pidGains.get("acceleration_spin", 200.0))
+        direction = "CW"
+        if sistemaMotor is None:
+            print("Creating new driver instance")
+            sistemaMotor = DriverStepperSys(
+                en_pin=12, enable_active_high=False, uart_port=serial_port_encoder
             )
 
-            # Spin inicial con tiempo específico
-            spinMotorRPM_ramped(
-                direction,
-                rpm,
-                ts,
-                acceleration,
-                900.0,
-                True,
-                sistemaMotor,
-                time_exp=initial_spin_time,
-                stop_func=lambda: self.stop_event_motor.is_set(),
-                stop_event=self.stop_event_motor,
-            )
-            from Drivers.DriverGPIO import GPIOPin
+        self.stop_event_motor = (
+            threading.Event() if self.stop_event_motor is None else self.stop_event_motor
+        )
 
-            # Envuelto en _HeaterMeter: cada escritura se contabiliza para la
-            # columna heater_on_s. Nunca escribir el GPIOPin crudo.
-            self.pin_heating = _HeaterMeter(
-                GPIOPin(
-                    led_heatin_pin,
-                    chip=chip_rasp,
-                    consumer="led-heating-ui",
-                    active_low=False,
-                )
-            )
-            self.pin_pcr = GPIOPin(
-                led_fluorescence_pin,
+        # Spin inicial con tiempo específico
+        spinMotorRPM_ramped(
+            direction,
+            rpm,
+            ts,
+            acceleration,
+            900.0,
+            True,
+            sistemaMotor,
+            time_exp=initial_spin_time,
+            stop_func=lambda: self.stop_event_motor.is_set(),
+            stop_event=self.stop_event_motor,
+        )
+        from Drivers.DriverGPIO import GPIOPin
+
+        # Envuelto en _HeaterMeter: cada escritura se contabiliza para la
+        # columna heater_on_s. Nunca escribir el GPIOPin crudo.
+        self.pin_heating = _HeaterMeter(
+            GPIOPin(
+                led_heatin_pin,
                 chip=chip_rasp,
-                consumer="test_pcr",
+                consumer="led-heating-ui",
                 active_low=False,
             )
-            self.pin_pcr.set_output(initial_high=False)
+        )
+        self.pin_pcr = GPIOPin(
+            led_fluorescence_pin,
+            chip=chip_rasp,
+            consumer="test_pcr",
+            active_low=False,
+        )
+        self.pin_pcr.set_output(initial_high=False)
 
-            # ----- Denaturación: mismo principio que "Reach High temp":
-            # feed-forward a potencia plena hasta ff_frac_denat*setpoint y luego PI
-            # (ganancias difusas + anti-windup + descarte de temperatura vieja).
-            # Si denat_time <= 0 se omite por completo (arrancamos en frío); en ese
-            # caso el primer ciclo debe alcanzar High de verdad (denat_skipped).
-            denat_skipped = _skip(denat_time)
-            if not denat_skipped:
-                self._reach_phase("denat_ramp", denat_temp, "denat", ts, break_if_below=False)
+        # ----- Denaturación: mismo principio que "Reach High temp":
+        # feed-forward a potencia plena hasta ff_frac_denat*setpoint y luego PI
+        # (ganancias difusas + anti-windup + descarte de temperatura vieja).
+        # Si denat_time <= 0 se omite por completo (arrancamos en frío); en ese
+        # caso el primer ciclo debe alcanzar High de verdad (denat_skipped).
+        denat_skipped = _skip(denat_time)
+        if not denat_skipped:
+            self._reach_phase("denat_ramp", denat_temp, "denat", ts, break_if_below=False)
 
-                # ----- Denaturation Hold
-                self._enter_phase("denat_hold")
-                self._hold_phase("h_denat", denat_temp, denat_time, ts)
-                print(f"Denaturation complete, temperature: {self.temp} °C")
-            else:
-                print("Skipping Denaturation phase: time <= 0")
+            # ----- Denaturation Hold
+            self._enter_phase("denat_hold")
+            self._hold_phase("h_denat", denat_temp, denat_time, ts)
+            print(f"Denaturation complete, temperature: {self.temp} °C")
+        else:
+            print("Skipping Denaturation phase: time <= 0")
 
-            # ----- Ciclos PCR
-            for idx in range(cycles):
-                if self.stop_udp_listenner.is_set():
-                    break
-                print(f"start cycle {idx}")
-                self._run_cycle(
-                    idx,
-                    high_temp,
-                    low_temp,
-                    time_high,
-                    time_low,
-                    rpm,
-                    direction,
-                    acceleration,
-                    ts,
-                    ext_time,
-                    ext_temp,
-                    ads,
-                    denat_skipped=denat_skipped,
+        # ----- Ciclos PCR
+        for idx in range(cycles):
+            if self.stop_udp_listenner.is_set():
+                break
+            print(f"start cycle {idx}")
+            self._run_cycle(
+                idx,
+                high_temp,
+                low_temp,
+                time_high,
+                time_low,
+                rpm,
+                direction,
+                acceleration,
+                ts,
+                ext_time,
+                ext_temp,
+                ads,
+                denat_skipped=denat_skipped,
+            )
+            # Fallos aislados se toleran (el ciclo siguiente suele recuperarse);
+            # una racha de max_failed ciclos seguidos ya es un problema real
+            # (heater o motor muertos) y seguir solo gasta tiempo y muestra.
+            # Mismo apagado que el watchdog: los stop-events cortan el resto y
+            # los datos se guardan igual (experiment_pcr).
+            max_failed = self.timeout_cfg["max_failed"]
+            if 0 < max_failed <= self.consec_failed_cycles:
+                self._enter_phase("aborted_timeouts")
+                print(
+                    f"Aborting PCR: {self.consec_failed_cycles} consecutive cycles "
+                    f"with phase timeouts (max_failed_cycles={max_failed})"
                 )
-                # Fallos aislados se toleran (el ciclo siguiente suele recuperarse);
-                # una racha de max_failed ciclos seguidos ya es un problema real
-                # (heater o motor muertos) y seguir solo gasta tiempo y muestra.
-                # Mismo apagado que el watchdog: los stop-events cortan el resto y
-                # el CSV se guarda igual abajo.
-                max_failed = self.timeout_cfg["max_failed"]
-                if 0 < max_failed <= self.consec_failed_cycles:
-                    self._enter_phase("aborted_timeouts")
-                    print(
-                        f"Aborting PCR: {self.consec_failed_cycles} consecutive cycles "
-                        f"with phase timeouts (max_failed_cycles={max_failed})"
-                    )
-                    self.stop_udp_listenner.set()
-                    if self.stop_event_motor is not None:
-                        self.stop_event_motor.set()
-                    break
+                self.request_stop("aborted_timeouts")
+                break
 
-            # ----- Extensión final + lectura de fluorescencia (solo si no se detuvo).
-            # El hold final se omite si ext_time_final <= 0, pero la lectura de
-            # fluorescencia final SIEMPRE se realiza (la medición no se salta).
-            if not self.stop_udp_listenner.is_set():
-                print("PCR cycles complete, reading fluorescence")
-                # Fuera del ciclado: cycle vuelve a 0 (la fase dice que es el cierre).
-                self.cycle_current = 0
-                self._cycle_timeouts = []  # la lectura final no hereda los del último ciclo
-                self._enter_phase("final_ext")
-                # Ancla del cronómetro del segmento final (hold + lectura final).
-                # Se pone siempre, incluso si el hold se omite (ext_time_final<=0),
-                # para que la lectura final igual cuente hacia abajo.
-                self.start_final_ext_time = time.time()
-                if not _skip(ext_time_final):
-                    self._hold_phase("h_ext", ext_temp, ext_time_final, ts)
-                else:
-                    print("Skipping Final Extension hold: time <= 0")
-                self._enter_phase("final_read")
-                time.sleep(self.fluor_cfg["pre_sleep_s"])
-                v_fluo_final = self._read_fluorescence(ads)
-                print(f"Final fluorescence delta voltage: {v_fluo_final}")
-                self._enter_phase("done")
-
-            # Hilo del experimento: el mensaje lo muestra _ui_poll_loop al terminar.
-            self._save_note = self.save_data_temps_file()
-
-        except Exception as e:
-            print(f"exception in experiment: {e}")
-        finally:
-            self._teardown_hardware()
+        # ----- Extensión final + lectura de fluorescencia (solo si no se detuvo).
+        # El hold final se omite si ext_time_final <= 0, pero la lectura de
+        # fluorescencia final SIEMPRE se realiza (la medición no se salta).
+        if not self.stop_udp_listenner.is_set():
+            print("PCR cycles complete, reading fluorescence")
+            # Fuera del ciclado: cycle vuelve a 0 (la fase dice que es el cierre).
+            self.cycle_current = 0
+            self._cycle_timeouts = []  # la lectura final no hereda los del último ciclo
+            self._enter_phase("final_ext")
+            # Ancla del cronómetro del segmento final (hold + lectura final).
+            # Se pone siempre, incluso si el hold se omite (ext_time_final<=0),
+            # para que la lectura final igual cuente hacia abajo.
+            self.start_final_ext_time = time.time()
+            if not _skip(ext_time_final):
+                self._hold_phase("h_ext", ext_temp, ext_time_final, ts)
+            else:
+                print("Skipping Final Extension hold: time <= 0")
+            self._enter_phase("final_read")
+            time.sleep(self.fluor_cfg["pre_sleep_s"])
+            v_fluo_final = self._read_fluorescence(ads)
+            print(f"Final fluorescence delta voltage: {v_fluo_final}")
+            self._enter_phase("done")
 
     def _teardown_hardware(self):
-        # Cierre idempotente de hardware: motor, UDP, pines GPIO. Seguro de invocar
-        # desde el hilo del experimento (en finally) o desde el hilo de UI (Stop).
+        # Cierre idempotente de hardware: motor, UDP, pines GPIO. Lo invoca el hilo
+        # del experimento al cerrar (experiment_pcr) y, como red de seguridad, el de
+        # UI (_check_stop_timeouts); el lock evita que los dos cierren a la vez. No
+        # toca running_experiment: el fin lo marca experiment_pcr tras guardar.
         global sistemaMotor
-        if sistemaMotor is not None:
-            try:
-                sistemaMotor.stop()
-            except Exception as e:
-                print(f"error stopping motor: {e}")
-            try:
-                sistemaMotor.close()
-            except Exception as e:
-                print(f"error closing motor: {e}")
-            sistemaMotor = None
-        if self.client_temperature is not None:
-            try:
-                self.client_temperature.stop()
-            except Exception as e:
-                print(f"error stopping udp client: {e}")
-        if self.pin_heating is not None:
-            try:
-                self.pin_heating.write(False)  # pyrefly: ignore
-                self.pin_heating.close()
-            except Exception as e:
-                print(f"error closing pin_heating: {e}")
-            self.pin_heating = None
-        if self.pin_pcr is not None:
-            try:
-                self.pin_pcr.write(False)  # pyrefly: ignore
-                self.pin_pcr.close()
-            except Exception as e:
-                print(f"error closing pin_pcr: {e}")
-            self.pin_pcr = None
-        # No se toca _ui_poll_active aquí: dejamos que _ui_poll_loop detecte el fin
-        # (running_experiment=False) y restaure los inputs en el hilo principal.
-        self.running_experiment = False
+        with self._teardown_lock:
+            if sistemaMotor is not None:
+                try:
+                    sistemaMotor.stop()
+                except Exception as e:
+                    print(f"error stopping motor: {e}")
+                try:
+                    sistemaMotor.close()
+                except Exception as e:
+                    print(f"error closing motor: {e}")
+                sistemaMotor = None
+            if self.client_temperature is not None:
+                try:
+                    self.client_temperature.stop()
+                except Exception as e:
+                    print(f"error stopping udp client: {e}")
+            if self.pin_heating is not None:
+                try:
+                    self.pin_heating.write(False)  # pyrefly: ignore
+                    self.pin_heating.close()
+                except Exception as e:
+                    print(f"error closing pin_heating: {e}")
+                self.pin_heating = None
+            if self.pin_pcr is not None:
+                try:
+                    self.pin_pcr.write(False)  # pyrefly: ignore
+                    self.pin_pcr.close()
+                except Exception as e:
+                    print(f"error closing pin_pcr: {e}")
+                self.pin_pcr = None
 
     def _restore_input_ui(self):
         # Vuelve a mostrar los inputs y la barra de proyectos (ocultados al iniciar).
@@ -2930,22 +3051,64 @@ class PCRFrame(ttk.Frame):
                 print(f"Error in lock_tabs_callback: {e}")
 
     def callback_stop_experiment(self):
-        # Restaura UI y dispara la salida ordenada del hilo del experimento.
-        # El propio finally del experimento llama a _teardown_hardware; aquí solo
-        # señalizamos, esperamos al hilo, y tiramos red de seguridad si se colgó.
-        self._restore_input_ui()
-        if self.stop_event_motor is None or self.stop_udp_listenner is None:
+        # Solo señaliza: el hilo sale, apaga, guarda y _ui_poll_loop restaura la UI
+        # cuando terminó (status "Stopping…" / "Saving data…" mientras tanto). Antes
+        # esperaba al hilo aquí (join de 3 s) con la UI congelada; con el guardado
+        # .xlsx (~3 s en el Pi) el poll acababa antes que el guardado y su mensaje se
+        # perdía. Las redes de seguridad (hilo colgado) están en _check_stop_timeouts.
+        thread = self.thread_experiment
+        if thread is None or not thread.is_alive():
             print("No experiment running")
             self.running_experiment = False
+            self._restore_input_ui()
             return
-        self.stop_event_motor.set()
-        self.stop_udp_listenner.set()
-        if self.thread_experiment is not None:
-            self.thread_experiment.join(timeout=3.0)
-            if self.thread_experiment.is_alive():
-                print("warning: experiment thread did not exit within 3s, forcing teardown")
-        # Red de seguridad: si el finally del experimento ya corrió, esto es no-op.
-        self._teardown_hardware()
-        self.stop_event_motor = None
-        self.stop_udp_listenner = None
-        self.thread_experiment = None
+        self.request_stop("stopped")
+
+    def request_stop(self, reason):
+        """Pide al hilo del experimento que termine. ``reason`` va a la fila ``end``
+        de la metadata: "stopped" (botón Stop), "app_closed" (cierre de la app),
+        "aborted_sensors" (watchdog), "aborted_timeouts" (salvaguarda de fases).
+        Idempotente: gana el primer motivo."""
+        if not self._stop_requested_at:
+            self._stop_requested_at = time.time()
+            self._stop_reason = reason
+        for event in (self.stop_event_motor, self.stop_udp_listenner):
+            if event is not None:
+                event.set()
+
+    def _check_stop_timeouts(self):
+        """Redes de seguridad del Stop, desde _ui_poll_loop (hilo de UI).
+
+        Si el hilo no llegó a su cierre en PCR_STOP_FORCE_S (colgado en una espera),
+        apaga el hardware desde aquí, como hacía el Stop de antes tras su join. True
+        si pasó PCR_STOP_GIVEUP_S y el hilo sigue vivo: la UI se restaura igual.
+        """
+        if not self._stop_requested_at or not self.running_experiment:
+            return False
+        waited = time.time() - self._stop_requested_at
+        if waited > PCR_STOP_FORCE_S and not self._run_closing and not self._stop_forced:
+            self._stop_forced = True
+            print(
+                f"warning: experiment thread did not exit within {PCR_STOP_FORCE_S:g}s,"
+                " forcing teardown"
+            )
+            self._teardown_hardware()
+        return waited > PCR_STOP_GIVEUP_S
+
+    def _on_destroy(self, event=None):
+        """Cierre de la app con una corrida activa: pide el paro. El hilo (no daemon)
+        apaga el hardware y guarda aunque la ventana ya no exista, y el proceso sale
+        cuando termina. MainGUI.on_close_window ya pide confirmación y espera al
+        guardado; esto cubre cualquier otro camino de cierre."""
+        if event is not None and event.widget is not self:
+            return
+        self._ui_poll_active = False
+        if self._poll_after_id is not None:
+            try:
+                # Un tick pendiente dispararía contra un comando Tcl ya borrado.
+                self.after_cancel(self._poll_after_id)
+            except Exception:
+                pass
+            self._poll_after_id = None
+        if self.running_experiment:
+            self.request_stop("app_closed")

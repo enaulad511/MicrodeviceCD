@@ -83,7 +83,9 @@ los valores nuevos son los exactos.
   confiable porque la fecha y los negativos llevan guiones. Claves: receta (`project`,
   `high_temp` … `initial_spin`), `ts`, `temp_source`, ventanas de fluorescencia
   (`fluor_pre_s`, `fluor_baseline_s`, `fluor_light_s`, `fluor_post_s`,
-  `fluor_sample_dt_s`, `fluor_averages`), `start`, `cols`, cadencia (`dt_mean`, `dt_p95`,
+  `fluor_sample_dt_s`, `fluor_averages`), `start`, `cols`, `end` (cómo terminó:
+  `done`, `stopped`, `app_closed`, `aborted_*`, `error: …`; desde el 26/10/2026,
+  [pcr_fin_corrida.md](pcr_fin_corrida.md)), cadencia (`dt_mean`, `dt_p95`,
   `dt_max`, `n`, `span`), `timeout_cfg`, `failed_cycles`, `timeouts`, `fresh`,
   `adaptive`.
 - **`settings`**: snapshot **completo** de `settings.json` leído al arrancar la corrida,
@@ -105,9 +107,17 @@ mensaje se muestra al terminar la corrida (`_save_note`, lo pinta `_ui_poll_loop
 del experimento no toca Tk). Los guardados con diálogo **no** tienen respaldo: solo
 mensaje de error, el usuario reintenta.
 
-Costo (PC de desarrollo, corrida tamaño Newn1 de 45 k muestras): escribir ~2 s, leer
-~2.4 s; el xlsx pesa menos que el CSV (2.1 vs 3.05 MB). En el Pi será más lento; la
-escritura corre en el hilo del experimento.
+Costo de la corrida más grande guardada (Newn1 21/10, 45 418 muestras de temperatura +
+1081 de fotodetector crudo). En la PC de desarrollo: escribir ~2 s, leer ~2.4 s. En el Pi
+(26/10/2026, openpyxl 3.1.5): **escribir 3.2 s, leer 3.0 s**, con round-trip exacto. El
+xlsx pesa menos que el CSV (2.15 vs 3.05 MB).
+
+La escritura corre en el hilo del experimento, en el cierre de `experiment_pcr`, y desde
+el 26/10/2026 **en todo camino de salida**: fin natural, Stop, aborto, excepción o cierre
+de la app. Va **después** de `_teardown_hardware`, así que heater, motor y LEDs ya están
+apagados. Mientras dura, el status muestra "Saving data…" y las tabs siguen bloqueadas.
+Antes una excepción saltaba el guardado, y con el Stop el mensaje se perdía porque la UI
+dejaba de esperar a los 3 s ([pcr_fin_corrida.md](pcr_fin_corrida.md)).
 
 ### 3.2 EmStat
 
@@ -201,9 +211,20 @@ Anteriores (carpetas por método):
 
 ## 7. Pendiente (HW)
 
-- [ ] `pip install openpyxl` en el Pi y una corrida PCR real: confirmar el `.xlsx`, el
-  tiempo de escritura al final y que el respaldo CSV no se dispara.
-- [ ] Convertir `files/` del Pi y las carpetas de OneDrive con `tools/csv_to_xlsx.py`.
+- [x] `pip install openpyxl` en el Pi (26/10/2026: 3.1.5 en `../.venv`, Python 3.13.5).
+  El parche de floats exactos (`_exact_floats`) queda activo con esa versión.
+- [x] Tiempo de escritura en el Pi: 3.2 s para la corrida más grande (§3.1).
+- [ ] Corrida PCR real: confirmar que sale el `.xlsx` desde `PcrFrame` (las 5 hojas) y
+  que el respaldo CSV no se dispara. Se cierra con la prueba del control adaptativo.
+- [x] Convertir `files/` del Pi y `files/` local (26/10/2026). En el Pi se verificaron los
+  94 libros contra sus CSV: 1.45 M celdas idénticas, sin restos `.tmp`, y nada quedó sin
+  reconocer. En el local,
+  `unified_temp_All.csv` se saltó porque ya existía un `unified_temp_All.xlsx` hecho a
+  mano el 05/08, que no es el mismo contenido. No afecta: los `unified_*` no tienen
+  loader en la app.
+- [ ] Convertir las carpetas de OneDrive (`PostDoct/FilesCodes`). Al 26/10 seguían solo en
+  CSV (`PCR/`: 363 CSV, ningún .xlsx). Solo hace falta para abrirlas en la pestaña de
+  análisis.
 
 __author__ = "Edisson A. Naula"
 __date__ = "$ 26/10/2026 $"

@@ -101,7 +101,8 @@ está ahí; 🗑 Clean es la pizarra en blanco si la quieren.
 - [ ] Sin marcar, sigue mostrando **solo la última** corrida (comportamiento previo).
 - [ ] OFF → marcar → Start apila sobre la corrida ya en pantalla (no la borra).
 - [ ] Save de un dataset multi-corrida y Load lo recarga como las mismas trazas separadas.
-- [ ] Load de un CSV viejo (sin columna `run`) sigue funcionando (`run=0`).
+- [ ] Load de un CSV viejo convertido a .xlsx (sin columna `run`) sigue funcionando
+  (`run=0`).
 - [ ] CV con varios scans: las etiquetas salen `R1c0…`, `R2c0…` y los ciclos intra-corrida
       se conservan como hoy.
 
