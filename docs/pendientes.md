@@ -27,22 +27,23 @@ Los dos primeros pasos se repiten cada vez que haya código local sin subir.
 
 ## PCR (control térmico)
 
-- [ ] ⬆ HW — **Primera corrida real con guardado .xlsx** (se cierra con la prueba del
-      adaptativo): sale un solo `<slug>_pcr_data_<ts>.xlsx` con sus 5 hojas y el status
-      **no** avisa del respaldo CSV. En el Pi ya se midió el guardado: 3.2 s la corrida
-      más grande ([almacenamiento_por_experimento.md](almacenamiento_por_experimento.md) §7).
-      Mismo día, fin de corrida nuevo: ver "Saving data…" y luego `Data saved to …`, con
-      `end = done` en la metadata. Si se puede, una corrida corta con Stop a mitad
-      ([pcr_fin_corrida.md](pcr_fin_corrida.md) §7).
-
-- [ ] ⬆ HW — **Corrida de validación de los cambios del 13–14/10**: frescura, salvaguarda
-      de fases, fuzzy corregido, rampa a ext del ciclo 1 y metadata nueva. Checklist
-      completa en [pcr_pendientes.md](pcr_pendientes.md) §7. Recomendado: una corrida
-      corta (~5 ciclos) y luego Newn1 completa para comparar. Vigilar **sobreimpulso**.
-- [ ] ⬆ HW — La desnaturalización debe llegar al setpoint; en Newn1 se quedó en 91.5 °C
-      ([pcr_pendientes.md](pcr_pendientes.md) 2).
-- [ ] ➖ HW — Los atascos de la rampa a ext deberían desaparecer sin re-afinar. **No tocar
-      ganancias antes de ver la corrida** ([pcr_pendientes.md](pcr_pendientes.md) 3).
+- [ ] ⬆ HW — **Control adaptativo: correr los arreglos del 26/10 en el equipo.** Se
+      validó ese día (mismo disco, dos cámaras): mejora los *holds* contra el clásico
+      (high en ±0.5 el 57–73 % contra 19–27 %; extensión final 85 % contra 16–26 %), sin
+      timeouts. Después se corrigieron, y se verificaron en tiempo virtual, la semilla de
+      high/ext (un +12 °C en el ciclo 2), el aprendizaje ante saltos del termopar y el
+      freno del *hold*. Sin flashear nada: `update_repo`, y el *seeder* agrega las claves
+      nuevas. Qué revisar: [pcr_control_adaptativo.md](pcr_control_adaptativo.md) §9.
+      `enabled 1` solo en el Pi; la cola de ext (+1 °C) se acepta.
+- [~] ⬆ HW — **Primera corrida real con guardado .xlsx:** las dos corridas del 26/10
+      salieron como un solo `<slug>_pcr_data_<ts>.xlsx` con sus 5 hojas, `end = done` y
+      sin respaldo CSV. En el Pi ya se midió el guardado: 3.2 s la corrida más grande
+      ([almacenamiento_por_experimento.md](almacenamiento_por_experimento.md) §7).
+      Falta confirmar en pantalla "Saving data…" y luego `Data saved to …`, y, si se
+      puede, una corrida corta con Stop a mitad ([pcr_fin_corrida.md](pcr_fin_corrida.md)
+      §7).
+- [~] ➖ HW — **Validación de los cambios del 13–14/10:** casi cerrada el 21/10. Faltan la
+      consola y el uso de CPU ([pcr_pendientes.md](pcr_pendientes.md) §7).
 - [ ] ⬇ DEV — Si `dt_mean` sale entre 0.08 y 0.3 s, evaluar el `SO_RCVBUF` de 512 B de
       `ClientUDP`: descarta lecturas dentro de las ráfagas. No afecta al control
       ([pcr_pendientes.md](pcr_pendientes.md) 7).
@@ -126,6 +127,8 @@ Los dos primeros pasos se repiten cada vez que haya código local sin subir.
 
 ## Cerrado recientemente (26/10/2026)
 
+- **Corrida del 21/10, ya registrada en [pcr_pendientes.md](pcr_pendientes.md) 2 y 3:** la
+  desnaturalización llega al setpoint y la rampa a ext ya no se atasca, sin re-afinar.
 - **Un solo .xlsx por guardado**, con hojas, en vez de varios CSV. Hay respaldo CSV en
   PCR y conversor de lo viejo. `openpyxl` está instalado en el Pi y los `files/` del Pi y
   local ya están convertidos

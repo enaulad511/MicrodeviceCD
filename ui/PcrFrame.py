@@ -246,19 +246,48 @@ PCR_ADAPT_DEFAULTS = {
     "hold_imax": 3.0,
     "hold_tband": 0.05,
     "hold_win": 0.05,
-    "coast_init": 4.0,  # °C de calor en vuelo supuestos antes de medir (discos: 2.7–8.2)
+    "coast_init": 4.0,  # °C de calor en vuelo supuestos en la rampa de denat (una por corrida)
+    # Ídem para high y ext, que ya no heredan el de denat: la rampa de denat arranca en
+    # frío y su calor en vuelo no se parece (26/10/2026: semilla 2.7–5.5 °C, los dos
+    # discos convergieron a 8.4–9.8 °C en high, y el ciclo 2 se pasó +12 °C). Pasarse de
+    # alto es barato: el hold termina el acercamiento.
+    "coast_init_cycle": 8.0,
     "coast_learn": 0.5,  # ganancia del corte: coast += coast_learn·(pico − setpoint)
     "coast_min": 0.5,
     "coast_max": 12.0,
     "coast_window_s": 8.0,  # espera máxima del pico tras cortar
+    # Cambio máximo del corte por rampa (°C; 0 = sin tope). Un salto del termopar que no
+    # se detecta (llega ya en el hold) movía el corte hasta 4 °C de golpe (26/10).
+    "coast_step_max": 2.0,
+    # Subida de la EMA (°C/s) que el heater no puede dar: es un salto del termopar
+    # (contacto, por encima de ~70 °C en algunos discos) y esa rampa no enseña. Medido el
+    # 26/10: sin salto ≤ 18 °C/s, con salto 17–48. 0 = no se filtra.
+    "jump_cps": 20.0,
+    # Potencia máxima del hold sobre el feed-forward (0 = sin tope). Tras un corte
+    # temprano, el P del hold (×2 del fuzzy lejos del setpoint) calentaba a fondo sin
+    # descontar el calor en vuelo y se pasaba hasta +4.5 °C (26/10).
+    "hold_pmax": 0.3,
 }
-PCR_ADAPT_MIN_FULL_S = 1.0  # potencia plena mínima para que el pico enseñe algo
+# Potencia plena mínima para que un pico POR ENCIMA del setpoint enseñe: con un corte
+# inmediato (la rampa arrancó ya pasada del corte) no se midió el calor en vuelo.
+# Quedarse corto enseña siempre (atrasar el corte es la dirección segura). Era 1.0 s:
+# con la semilla de 8 °C la rampa a ext tiene 0.5–1.0 s de potencia plena y no
+# aprendía nunca (simulación y 26/10, disco B).
+PCR_ADAPT_MIN_FULL_S = 0.3
 PCR_ADAPT_PEAK_DROP_C = 0.15  # caída desde el máximo que marca el pico
 # Fin de la subida por calor en vuelo: tasa (°C/s, medida en RATE_WIN_S, que cubre al
 # menos una ráfaga UDP de ~0.27 s) por debajo de la cual ya sube solo por el
 # feed-forward (≤ ~0.5 °C/s en el modelo; el calor en vuelo sube a varios °C/s).
 PCR_ADAPT_RISE_END_CPS = 0.8
 PCR_ADAPT_RATE_WIN_S = 0.6
+# Lapso mínimo para estimar una tasa: las lecturas de una misma ráfaga llegan con ~1 ms
+# de diferencia, y un cociente entre ellas da cientos de °C/s.
+PCR_ADAPT_RATE_MIN_SPAN_S = 0.2
+# Lapso mínimo de la tasa que se compara con jump_cps. Una ráfaga trae lecturas tomadas
+# hasta ~0.24 s antes de llegar, y en lapsos cortos eso infla la tasa. Con 0.45 s,
+# emulando el peor caso sobre las 5 corridas del 21 y 26/10: 79 % de los saltos
+# detectados y 2 falsos positivos en 287 rampas.
+PCR_ADAPT_JUMP_SPAN_S = 0.45
 PCR_ADAPT_LEARN_MAX_ERR_C = 0.75  # solo se aprende el duty de un hold cerca del setpoint
 PCR_ADAPT_LEARN_MIN_S = 2.0  # segunda mitad mínima del hold para aprender el duty
 
@@ -267,7 +296,8 @@ def _adaptive_cfg(d):
     """Parámetros del control adaptativo desde el dict pcr_adaptive, validados.
 
     No numérico o negativo → default. enabled > 0 lo activa. Los pesos de aprendizaje
-    se recortan a [0, 1]; hold_win 0 → default (sin ventana no hay PWM).
+    se recortan a [0, 1]; hold_win 0 → default (sin ventana no hay PWM). coast_step_max,
+    jump_cps y hold_pmax en 0 desactivan su tope o filtro.
     """
     cfg = {k: _cfg_num(d, k, v) for k, v in PCR_ADAPT_DEFAULTS.items()}
     cfg["enabled"] = cfg["enabled"] > 0
@@ -2296,7 +2326,9 @@ class PCRFrame(ttk.Frame):
         que ser el máximo de la subida RÁPIDA: con el feed-forward encendido la
         temperatura sigue subiendo despacio hasta el setpoint, así que con el pico
         completo un corte demasiado temprano también "acertaba", y el aprendizaje
-        quedaba clavado en coast_max (verificado en simulación).
+        quedaba clavado en coast_max (verificado en simulación). El paso se limita a
+        coast_step_max, y una rampa con una subida imposible para el heater (jump_cps:
+        salto del termopar) no enseña.
         """
         cfg = self.adapt_cfg
         pin = self.pin_heating
@@ -2306,9 +2338,11 @@ class PCRFrame(ttk.Frame):
         if break_if_below and self.temp < setpoint:
             return True  # como el clásico: venimos calientes del hold de denat
         params = self._load_phase_pid(pid_phase, ts)
-        coast = self._adapt_coast.get(pid_phase, cfg["coast_init"])
+        seed = cfg["coast_init"] if pid_phase == "denat" else cfg["coast_init_cycle"]
+        coast = self._adapt_coast.get(pid_phase, min(cfg["coast_max"], max(cfg["coast_min"], seed)))
         t_full = time.time()
         seen: deque = deque()  # (temp_ts, temp) de las lecturas recientes, para la tasa
+        max_rate = 0.0  # subida más rápida vista en la rampa (°C/s), para detectar saltos
         while not stop.is_set():
             now = time.time()
             if deadline is not None and now > deadline:
@@ -2320,7 +2354,10 @@ class PCRFrame(ttk.Frame):
                     seen.popleft()
             # Las lecturas llegan en ráfagas cada ~0.27 s y a ~10 °C/s cada una salta
             # ~3 °C: sin extrapolar, el corte llega una ráfaga tarde.
-            rate = (seen[-1][1] - seen[0][1]) / max(seen[-1][0] - seen[0][0], 1e-3)
+            span = seen[-1][0] - seen[0][0]
+            rate = (seen[-1][1] - seen[0][1]) / span if span >= PCR_ADAPT_RATE_MIN_SPAN_S else 0.0
+            if span >= PCR_ADAPT_JUMP_SPAN_S:
+                max_rate = max(max_rate, rate)
             y_est = self.temp + max(0.0, rate) * min(max(now - self.temp_ts, 0.0), 0.5)
             if y_est >= setpoint - coast:
                 break
@@ -2346,20 +2383,26 @@ class PCRFrame(ttk.Frame):
             while now - recent[0][0] > PCR_ADAPT_RATE_WIN_S:
                 recent.popleft()
             rate = (y - recent[0][1]) / max(now - recent[0][0], 1e-3)
+            if now - recent[0][0] >= PCR_ADAPT_JUMP_SPAN_S:
+                max_rate = max(max_rate, rate)
             slow = now - t_cut >= PCR_ADAPT_RATE_WIN_S and rate < PCR_ADAPT_RISE_END_CPS
             if y_max - y >= PCR_ADAPT_PEAK_DROP_C or slow or now - t_cut >= cfg["coast_window_s"]:
                 break
             self._pwm_window(bias, cfg["hold_win"])
         pin.write(False)
-        if full_s >= PCR_ADAPT_MIN_FULL_S and not stop.is_set():
-            new = coast + cfg["coast_learn"] * (y_max - setpoint)
-            self._adapt_coast[pid_phase] = min(cfg["coast_max"], max(cfg["coast_min"], new))
-            if pid_phase == "denat":  # mismo setpoint que high: punto de partida mejor que init
-                self._adapt_coast.setdefault("high", self._adapt_coast["denat"])
-            print(
-                f"Adaptive {pid_phase} ramp: cut at {y_cut:.1f} °C (coast {coast:.1f}), "
-                f"peak {y_max:.1f} °C → coast {self._adapt_coast[pid_phase]:.1f} °C"
-            )
+        if (full_s >= PCR_ADAPT_MIN_FULL_S or y_max < setpoint) and not stop.is_set():
+            head = f"Adaptive {pid_phase} ramp: cut at {y_cut:.1f} °C (coast {coast:.1f}), peak {y_max:.1f} °C"
+            if cfg["jump_cps"] > 0 and max_rate > cfg["jump_cps"]:
+                # El termopar saltó (subida que el heater no puede dar): el pico no es
+                # de la muestra y enseñaría un corte equivocado.
+                self._adapt_coast[pid_phase] = coast
+                print(f"{head}, rise {max_rate:.0f} °C/s (thermocouple jump) → coast kept")
+                return True
+            step = cfg["coast_learn"] * (y_max - setpoint)
+            if cfg["coast_step_max"] > 0:
+                step = max(-cfg["coast_step_max"], min(cfg["coast_step_max"], step))
+            self._adapt_coast[pid_phase] = min(cfg["coast_max"], max(cfg["coast_min"], coast + step))
+            print(f"{head} → coast {self._adapt_coast[pid_phase]:.1f} °C")
         return True
 
     def _hold_adaptive(self, key, setpoint, duration, ts):
@@ -2396,7 +2439,10 @@ class PCRFrame(ttk.Frame):
             kp_dyn, ki_dyn = _fuzzy_gains(error, cfg["hold_kp"], cfg["hold_ki"])
             integ = max(-cfg["hold_imax"], min(cfg["hold_imax"], integ + error * window))
             p_term = 0.0 if abs(error) < cfg["hold_tband"] else kp_dyn * error
-            self._pwm_window(bias + ki_dyn * integ + p_term, window)
+            power = bias + ki_dyn * integ + p_term
+            if cfg["hold_pmax"] > 0:  # freno: sin él, un corte temprano se pasaba
+                power = min(power, bias + cfg["hold_pmax"])
+            self._pwm_window(power, window)
         pin.write(False)
         if mid is None or err_n == 0 or stop.is_set() or cfg["ff_learn"] <= 0:
             return
@@ -2420,7 +2466,9 @@ class PCRFrame(ttk.Frame):
         return (
             f"on ff {cfg['ff_slope']:g}/{cfg['ff_t0']:g}C learn {cfg['ff_learn']:g}"
             f" hold kp {cfg['hold_kp']:g} ki {cfg['hold_ki']:g} imax {cfg['hold_imax']:g}"
-            f" coast init {cfg['coast_init']:g}C learn {cfg['coast_learn']:g}"
+            f" pmax {cfg['hold_pmax']:g}"
+            f" coast init {cfg['coast_init']:g}/{cfg['coast_init_cycle']:g}C learn {cfg['coast_learn']:g}"
+            f" step {cfg['coast_step_max']:g}C jump {cfg['jump_cps']:g}C/s"
             f" | bias {bias} | coast {coast}"
         )
 

@@ -86,5 +86,35 @@ reemplazo debe reproducirlo leyendo el IR. Orden:
    secundario para comparar.
 5. Reajustar el margen de enfriamiento con el IR al mando (§2, giro).
 
+## 5. Dos cámaras más (26/10/2026, receta 85/50/62 °C, control adaptativo)
+
+Corridas `files_test/Newn2_pcr_data_20261026_182410.xlsx` (A) y `…_192302.xlsx` (B),
+con el termopar al mando ([pcr_control_adaptativo.md](pcr_control_adaptativo.md) §6).
+**Son el mismo disco en dos cámaras distintas** (usuario). `ir_vs_tc.py` ahora toma los
+setpoints de la metadata.
+
+| | cámara A | cámara B |
+|---|:-:|:-:|
+| IR − TC a 50 °C | +1.35 | +1.28 |
+| IR − TC a 62 °C | −1.11 | +0.16 |
+| IR − TC a 85 °C (primeros 5 → últimos 5 ciclos) | **−3.47** (−3.3 → −3.9) | −0.44 (−0.1 → −0.6) |
+| ajuste IR = a·TC + b | 0.868·TC + 7.71 | 0.952·TC + 3.51 |
+| ruido en régimen, TC / IR (°C) | 0.135 / 0.080 | 0.118 / 0.082 |
+| saltos > 3 °C entre muestras, TC / IR | **60** / 5 | 5 / 4 |
+
+- **Confirma el §3:** a 50 °C las cinco corridas coinciden (+1.3 a +2.1), y a 85–90 °C
+  se separan (de −4.5 a −0.3). La recta de A es casi la del disco 3 del 21/10
+  (0.868·TC + 7.77), pero el disco 3 casi no tenía saltos: el desfase y los saltos no van
+  juntos.
+- **El desfase es por cámara, no por disco.** En el mismo disco, a 85 °C, A da −3.5 y B
+  −0.4: tanta dispersión como entre discos distintos. Si el PID pasa al IR, la
+  corrección del §4 tendría que ser por cámara (o aprenderse en cada corrida), no por
+  disco.
+- **Saltos del termopar por encima de ~70 °C:** en A, 19 de 34 rampas a high suben más de
+  20 °C/s (el heater llega a ~10 °C/s), y el IR nunca lo hace. Medido contra el nivel
+  del *hold*, el pico del IR es ~1/3 del del termopar. Para cortar una rampa, el IR es
+  la señal más fiable de las dos. Detalle y efecto sobre el control:
+  [pcr_control_adaptativo.md](pcr_control_adaptativo.md) §7.2.
+
 __author__ = "Edisson A. Naula"
-__date__ = "$ 21/10/2026 $"
+__date__ = "$ 26/10/2026 $"

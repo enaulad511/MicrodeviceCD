@@ -62,7 +62,8 @@
         "cool_s_per_c": 1.0,
         "max_failed_cycles": 3.0,
         "fresh_dt_factor": 1.5,
-        "fresh_age_cap_s": 1.0
+        "fresh_age_cap_s": 1.0,
+        "cool_stop_margin_c": 5.5
     },
     "ads_fsr": 0.256,
     "photoreceptor": {
@@ -77,5 +78,21 @@
         "post_s": 0.5,
         "sample_dt_s": 0.1,
         "averages": 4.0
+    },
+    "pcr_adaptive": {
+        "enabled": 0.0,
+        "ff_slope": 0.0043,
+        "ff_t0": 40.0,
+        "ff_learn": 0.5,
+        "hold_kp": 0.1,
+        "hold_ki": 0.03,
+        "hold_imax": 3.0,
+        "hold_tband": 0.05,
+        "hold_win": 0.05,
+        "coast_init": 4.0,
+        "coast_learn": 0.5,
+        "coast_min": 0.5,
+        "coast_max": 12.0,
+        "coast_window_s": 8.0
     }
 }

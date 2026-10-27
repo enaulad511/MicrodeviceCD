@@ -130,10 +130,14 @@ DEFAULT_SETTINGS = {
         "hold_tband": 0.05,
         "hold_win": 0.05,
         "coast_init": 4.0,
+        "coast_init_cycle": 8.0,
         "coast_learn": 0.5,
         "coast_min": 0.5,
         "coast_max": 12.0,
         "coast_window_s": 8.0,
+        "coast_step_max": 2.0,
+        "jump_cps": 20.0,
+        "hold_pmax": 0.3,
     },
 }
 

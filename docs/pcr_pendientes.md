@@ -21,7 +21,7 @@ los defaults del repo.
 | 9 | `PCR_TEMP_START_WAIT_S` sigue hardcodeado | baja | no | **hecho** (`temp_start_wait_s`) |
 | 10 | Zona intermedia de `_fuzzy_gains` (2–5 °C) no hace lo que dice su comentario | baja | no | **hecho** (corregido, continua) |
 | 11 | `DEFAULT_SETTINGS` del repo desfasado del equipo | baja | sí (revisado) | **hecho** (defaults = equipo) |
-| 12 | *Holds* de 90/65 °C oscilan ±2 °C; sobreimpulso de rampas | **alta** | sí (21/10) | **replanteado:** disco nuevo en cada experimento → la planta varía por corrida (retraso del termopar 0.3–1.25 s); 3 discos medidos: la potencia de régimen es constante (≈0.20 a 90 °C) y el calor en vuelo varía (2.7–8 °C). **Implementado como opción** (`pcr_adaptive`, apagado por defecto; [pcr_control_adaptativo.md](pcr_control_adaptativo.md)), verificado en tiempo virtual; falta validar en el equipo |
+| 12 | *Holds* de 90/65 °C oscilan ±2 °C; sobreimpulso de rampas | **alta** | sí (21/10) | **replanteado:** disco nuevo en cada experimento → la planta varía por corrida (retraso del termopar 0.3–1.25 s); 3 discos medidos: la potencia de régimen es constante (≈0.20 a 90 °C) y el calor en vuelo varía (2.7–8 °C). **Implementado como opción** (`pcr_adaptive`, apagado por defecto; [pcr_control_adaptativo.md](pcr_control_adaptativo.md)). **Validado en el equipo (26/10, mismo disco en dos cámaras):** *hold* de high en ±0.5 el 57–73 % (clásico 19–27 %), extensión final 85 % (clásico 16–26 %), sin timeouts. Arreglos de la semilla de high/ext, el freno del *hold* y el aprendizaje ante saltos del termopar **hechos y verificados en tiempo virtual** (doc §9); la cola de ext (+1 °C) se acepta. `enabled 1` solo en el Pi. **Falta correr los arreglos en el equipo** |
 
 ## 0. Qué revisar en cuanto llegue el `settings.json` del Pi
 
@@ -437,7 +437,8 @@ los ítems que dependen de ellos siguen abiertos.
     porque el p90 se adapta a lo que la app recibe de verdad, pero reduce la densidad de
     datos del CSV.
   - Si sale ~0.3, el `power_save` volvió a activarse.
-- [ ] El CSV de fotodetector trae la columna `timeouts`.
+- [x] El CSV de fotodetector trae la columna `timeouts`. (26/10: es la hoja `photodetector`
+      del .xlsx, vacía porque no hubo timeouts.)
 - [ ] Si una rampa se atasca, corta en ~20 s y el ciclo sigue. La línea `State` muestra
       el aviso.
 - [ ] La pestaña de análisis sigue cargando las corridas nuevas y las viejas.
@@ -516,4 +517,4 @@ corrupto o para desarrollo. Las 18 claves que el equipo aún no tiene se le semb
 estos valores tras el update.
 
 __author__ = "Edisson A. Naula"
-__date__ = "$ 14/10/2026 $"
+__date__ = "$ 26/10/2026 $"
