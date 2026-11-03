@@ -12,7 +12,7 @@ los defaults del repo.
 |:-:|-----------|:---------:|:-----------------------------:|--------|
 | 1 | Cadencia de temperatura 0.30 s vs. umbrales de frescura del control | **alta** | sí (revisado) | **(B) hecho** (frescura relativa a la cadencia); (A) **cerrado**: causa `power_save` del Pi (0.307 s = DTIM), apagado de forma persistente el 14/10; llegan en ráfagas → estimador **p90** |
 | 2 | Hold de desnaturalización 2.5 °C por debajo del setpoint | alta | sí (revisado) | **cerrado (21/10)**: media 90.7 °C con sp 90; queda la oscilación (punto 12) |
-| 3 | Causa de los atascos de `ext_ramp` | media | sí (revisado) | **cerrado (21/10)**: 0 atascos en 35 ciclos con (B), como se predijo |
+| 3 | Causa de los atascos de `ext_ramp` | media | sí (revisado) | **cerrado (21/10)**: 0 atascos en 35 ciclos con (B), como se predijo. **Ojo (03/11):** hay otra causa, con el heater a fondo: punto 13 |
 | 4 | `ext_ramp` con `break_if_below` en el ciclo 1 | media | no | **hecho** (quitado por decisión del usuario) |
 | 5 | `ext_temp`/`ext_time` ausentes de la metadata del CSV | baja | no | **hecho** |
 | 6 | Preview y ETA subestiman el enfriamiento | baja | no | **hecho** |
@@ -21,7 +21,9 @@ los defaults del repo.
 | 9 | `PCR_TEMP_START_WAIT_S` sigue hardcodeado | baja | no | **hecho** (`temp_start_wait_s`) |
 | 10 | Zona intermedia de `_fuzzy_gains` (2–5 °C) no hace lo que dice su comentario | baja | no | **hecho** (corregido, continua) |
 | 11 | `DEFAULT_SETTINGS` del repo desfasado del equipo | baja | sí (revisado) | **hecho** (defaults = equipo) |
-| 12 | *Holds* de 90/65 °C oscilan ±2 °C; sobreimpulso de rampas | **alta** | sí (21/10) | **replanteado:** disco nuevo en cada experimento → la planta varía por corrida (retraso del termopar 0.3–1.25 s); 3 discos medidos: la potencia de régimen es constante (≈0.20 a 90 °C) y el calor en vuelo varía (2.7–8 °C). **Implementado como opción** (`pcr_adaptive`, apagado por defecto; [pcr_control_adaptativo.md](pcr_control_adaptativo.md)). **Validado en el equipo (26/10, mismo disco en dos cámaras):** *hold* de high en ±0.5 el 57–73 % (clásico 19–27 %), extensión final 85 % (clásico 16–26 %), sin timeouts. Arreglos de la semilla de high/ext, el freno del *hold* y el aprendizaje ante saltos del termopar **hechos y verificados en tiempo virtual** (doc §9); la cola de ext (+1 °C) se acepta. `enabled 1` solo en el Pi. **Falta correr los arreglos en el equipo** |
+| 12 | *Holds* de 90/65 °C oscilan ±2 °C; sobreimpulso de rampas | **alta** | sí (21/10) | **replanteado:** disco nuevo en cada experimento → la planta varía por corrida (retraso del termopar 0.3–1.25 s); 3 discos medidos: la potencia de régimen es constante (≈0.20 a 90 °C) y el calor en vuelo varía (2.7–8 °C). **Implementado como opción** (`pcr_adaptive`, apagado por defecto; [pcr_control_adaptativo.md](pcr_control_adaptativo.md)). **Validado en el equipo (26/10, mismo disco en dos cámaras):** *hold* de high en ±0.5 el 57–73 % (clásico 19–27 %), extensión final 85 % (clásico 16–26 %), sin timeouts. Arreglos de la semilla de high/ext y el freno del *hold* **validados en el equipo (Newn3, 02/11, doc §10.1)**; falta ver el filtro de saltos, porque esa cámara no tuvo. La cola de ext (+1 °C) se acepta. `enabled 1` solo en el Pi. **Ajuste final con objetivo ±1 °C sin picos (03/11, siete valores y tres cambios de código, doc §11): falta correrlo en el equipo** |
+| 13 | **Atasco con el heater a fondo:** duty medido 1.0 y solo 0.2–0.3 °C/s en ambos sensores, entre paradas del motor (Newn3 c11 y c28–29; c29 no denaturó, 59 °C) | **alta** | no | **abierto**, no es de ganancias. Causa (usuario): disco en ángulo equivocado tras la parada, realineado a mano. La tasa además cambia en cada parada (±7–22 %), probable origen de los picos de high. Mitigado en parte (el freno se suelta tras una rampa vencida). **Atacar el ángulo, aplazado por el usuario (03/11):** ~1 episodio cada 35 ciclos es aceptable por ahora; opciones en [doc §10.3, §11](pcr_control_adaptativo.md) |
+| 14 | Newn3: duty ×2 y masa térmica ×2 durante la corrida; cambio brusco entre c8 y c9 (IR − termopar a 85 °C, enfriamiento) | media | no | **abierto:** el usuario realineó un poco la montura del heater tras el 26/10; no se sabe si alcanza para explicar el duty ×2 ni el cambio durante la corrida ([doc §10.2](pcr_control_adaptativo.md)) |
 
 ## 0. Qué revisar en cuanto llegue el `settings.json` del Pi
 
@@ -348,6 +350,11 @@ contacto pide más potencia, y el equilibrio cae más abajo.
 timeout (mediana 2.0 s), con los mismos `*_ext` de rampa. El problema pasó a ser el
 contrario: sobreimpulso de +2.4 °C ([pcr_ajuste_ganancias.md](pcr_ajuste_ganancias.md)).
 
+**Matiz (03/11/2026): la explicación mecánica del usuario sigue viva.** Newn3 tuvo rampas a
+ext atascadas con `heater_on_s` en **duty 1.0** ([pcr_control_adaptativo.md](pcr_control_adaptativo.md)
+§10.3), así que el techo de potencia explica algunos atascos, pero no estos. Los de Newn1 no
+se pueden separar: esa corrida no guardaba `heater_on_s`.
+
 ## 4. `ext_ramp` con `break_if_below` en el ciclo 1
 
 **Código.** `_reach_phase("ext_ramp", …, break_if_below=(idx == 0))`, en `_run_cycle`.
@@ -517,4 +524,4 @@ corrupto o para desarrollo. Las 18 claves que el equipo aún no tiene se le semb
 estos valores tras el update.
 
 __author__ = "Edisson A. Naula"
-__date__ = "$ 26/10/2026 $"
+__date__ = "$ 03/11/2026 $"

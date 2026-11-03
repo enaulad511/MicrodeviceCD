@@ -267,6 +267,11 @@ Con el control actual, una rampa a potencia plena seguida de un *hold* que solo 
 apagar el heater, el sobreimpulso depende del disco y ninguna ganancia fija lo corrige
 en los discos lentos.
 
+> **Corregido el 03/11/2026:** esa constancia solo valía para estos tres discos. Newn3 pidió
+> 0.37 a 85 °C ([pcr_control_adaptativo.md](pcr_control_adaptativo.md) §10.2). Las ganancias
+> actuales son las de `pcr_adaptive` (ahí, §10.4); los `KP_*`/`KI_*` clásicos no intervienen
+> con el adaptativo encendido.
+
 **Estabilidad dentro de una corrida** (base para aprender del ciclo anterior):
 
 | | disco 2 | disco 3 |

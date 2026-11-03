@@ -24,8 +24,8 @@
         "ff_frac_high": 0.8,
         "imax_high": 0.5,
         "KP_h_high": 0.1,
-        "win_h_high": 0.05,
-        "KI_h_high": 0.5,
+        "win_h_high": 0.02,
+        "KI_h_high": 0.2,
         "imax_h_high": 0.5,
         "tband_h_high": 0.02,
         "KP_h_low": 0.1,
@@ -39,7 +39,7 @@
         "imax_h_ext": 0.5,
         "tband_h_ext": 0.02,
         "kp": 0.0005,
-        "ki": 0.0002,
+        "ki": 0.0008,
         "kd": 0.001,
         "max": 35.0,
         "min": 14.0,
@@ -69,7 +69,7 @@
     "photoreceptor": {
         "use_diff": 1.0
     },
-    "windows_pcr": 2000.0,
+    "windows_pcr": 2500.0,
     "temp_source": "thermocouple",
     "pcr_fluorescence": {
         "pre_sleep_s": 0.5,
@@ -80,19 +80,24 @@
         "averages": 4.0
     },
     "pcr_adaptive": {
-        "enabled": 0.0,
+        "enabled": 1.0,
         "ff_slope": 0.0043,
         "ff_t0": 40.0,
         "ff_learn": 0.5,
-        "hold_kp": 0.1,
-        "hold_ki": 0.03,
-        "hold_imax": 3.0,
+        "hold_kp": 0.15,
+        "hold_ki": 0.015,
+        "hold_imax": 5.0,
         "hold_tband": 0.05,
         "hold_win": 0.05,
-        "coast_init": 4.0,
+        "coast_init": 8.0,
         "coast_learn": 0.5,
-        "coast_min": 0.5,
+        "coast_min": 3.0,
         "coast_max": 12.0,
-        "coast_window_s": 8.0
+        "coast_window_s": 8.0,
+        "coast_init_cycle": 8.0,
+        "coast_step_max": 2.0,
+        "jump_cps": 20.0,
+        "hold_pmax": 0.4,
+        "coast_margin": 0.5
     }
 }

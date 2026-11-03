@@ -2,7 +2,11 @@
 
 > **26/10/2026:** el guardado pasó a `.xlsx` ([almacenamiento_por_experimento.md](almacenamiento_por_experimento.md)): `-adaptive: …` es la fila `adaptive` de la hoja `metadata`; la config completa queda además en la hoja `settings`.
 >
-> **26/10/2026, validado en el equipo** en dos cámaras (§6): los *holds* mejoran contra el clásico en las dos. Se encontraron cuatro problemas y un ciclo anómalo (§7). Decisiones en el §8; arreglos verificados en tiempo virtual en el §9, **pendientes de correr en el equipo**.
+> **26/10/2026, validado en el equipo** en dos cámaras (§6): los *holds* mejoran contra el clásico en las dos. Se encontraron cuatro problemas y un ciclo anómalo (§7). Decisiones en el §8; arreglos verificados en tiempo virtual en el §9.
+>
+> **03/11/2026, corrida Newn3 (§10):** los arreglos del §9 funcionan en el equipo. Trajo una planta nueva (duty a 85 °C 0.37, no 0.14–0.17, y masa térmica que se duplica durante la corrida) y un **atasco con el heater a fondo** por el ángulo del disco (§10.3), que ninguna ganancia arregla.
+>
+> **03/11/2026, ajuste final (§11):** objetivo del usuario, tiempo en ±1 °C sin picos en high ni denat. Siete valores nuevos en `pcr_adaptive` y tres cambios de código, **pendientes de correr en el equipo**.
 
 Archivo: [ui/PcrFrame.py](../ui/PcrFrame.py) (`_ramp_adaptive`, `_hold_adaptive`,
 `_adaptive_cfg`). Config: `settings.json` → `pcr_adaptive`. **Apagado por defecto.**
@@ -22,6 +26,10 @@ El control clásico (rampa a potencia plena + PI con integral que satura en < 1 
 según el disco (+2.7 a +9.2 °C en ext) y deja los *holds* calientes en un ciclo límite de
 ±2 °C. Ninguna ganancia fija sirvió para todos los discos. El adaptativo **aprende el
 disco durante la corrida**.
+
+> **Corregido el 03/11/2026:** el duty de régimen **no** es constante entre discos. Newn3
+> pidió 0.37 a 85 °C contra 0.14–0.17 el 26/10 (§10.2). Como el duty también se aprende, el
+> diseño no cambia, pero el *feed-forward* inicial puede fallar por un factor de 2.
 
 ## 2. Cómo funciona
 
@@ -49,6 +57,8 @@ disco durante la corrida**.
    - **Paso:** cada rampa mueve el corte como mucho `coast_step_max`.
    - **Saltos:** una rampa cuya subida pasa de `jump_cps` (tasa sobre ≥ 0.45 s) no
      enseña, porque es un salto del termopar y no calor de la muestra (§7.2).
+   - **Objetivo en high:** `setpoint − coast_margin`, no el setpoint (§11). Las otras rampas
+     apuntan al setpoint.
 
 `break_if_below` se respeta igual que en el clásico, y la salvaguarda de tiempo
 ([pcr_timeout_fases.md](pcr_timeout_fases.md)) cubre la rampa completa, inercia incluida.
@@ -63,7 +73,11 @@ disco durante la corrida**.
   calor en vuelo y se pasaba (§7.4).
 - ***Feed-forward*:** el duty aprendido para ese *hold* en esta corrida o, mientras no
   hay, el modelo `ff_slope · (setpoint − ff_t0)` (0.21 a 90 °C, 0.04 a 50 °C, 0.11 a
-  65 °C).
+  65 °C). El primer *hold* de high parte del duty aprendido en la denaturación, corregido
+  con `ff_slope` si los setpoints difieren.
+- **Rampa vencida** (atasco, §10.3): el *hold* siguiente suelta el freno mientras falte más
+  que el calor en vuelo de esa rampa. Al acercarse vuelve y no se suelta otra vez: si el
+  disco se realinea, la tasa normal regresa de golpe y sin freno se pasaría.
 - **Aprende** el duty medido por `heater_on_s` en la segunda mitad del *hold*, con peso
   `ff_learn`, solo si duró ≥ 2 s y el error medio fue ≤ 0.75 °C. Un *hold* pasado de
   temperatura mide 0, y eso no es el duty de régimen.
@@ -89,9 +103,15 @@ Pi; el default del repo sigue en 0.
 | `coast_init_cycle` | 8 °C | ídem en high y ext antes de medir (26/10: convergió a 6.3–9.8) |
 | `coast_learn` | 0.5 | ganancia: coast += coast_learn·(pico − setpoint) |
 | `coast_step_max` | 2 °C | cambio máximo del corte por rampa (0 = sin tope) |
+| `coast_margin` | 0 °C | solo high: el corte aprende a dejar el pico rápido estos °C bajo el setpoint |
 | `jump_cps` | 20 °C/s | subida que se toma como salto del termopar: esa rampa no enseña (0 = no filtra) |
 | `coast_min`, `coast_max` | 0.5, 12 °C | límites del corte |
 | `coast_window_s` | 8 s | espera máxima de la inercia |
+
+**Para el Pi** (`resources/settings.json`, copia del equipo, §11): `hold_kp 0.15`,
+`hold_ki 0.015`, `hold_imax 5` (techo del I ≈ ±0.10), `hold_pmax 0.4`, `coast_init 8`,
+`coast_min 3`, `coast_margin 0.5`. Los defaults del repo no cambian hasta validarlos en el
+equipo.
 
 ## 4. Qué queda registrado
 
@@ -101,7 +121,7 @@ Pi; el default del repo sigue en 0.
   rampa con salto del termopar imprime
   `…, peak 92.3 °C, rise 31 °C/s (thermocouple jump) → coast kept`.
 - **Metadata** (fila `adaptive`): `off`, o la config y lo aprendido al final
-  (`on … pmax 0.3 coast init 4/8C learn 0.5 step 2C jump 20C/s | bias h_high 0.212 … |
+  (`on … pmax 0.4 coast init 8/8C learn 0.5 step 2C jump 20C/s margin 0.5C | bias h_high 0.212 … |
   coast ext 7.0 high 7.1`). `an_adaptive.py` solo lee la parte desde `| bias`.
 - **Columnas** `phase` y `heater_on_s`: con ellas se reconstruye cada corte y cada duty.
 
@@ -358,5 +378,319 @@ ciclos (picos en °C sobre el setpoint):
 `an_adaptive.py` reproduce las reglas nuevas cuando la corrida trae `coast_init_cycle` en
 su hoja `settings`.
 
+## 10. Corrida Newn3 (02/11/2026) y ajuste de ganancias
+
+**Corrida.** `files_test/Newn3_pcr_data_20261102_152624.xlsx` (inicio 14:16, 4174 s): 35
+ciclos, 85/50/62, high y low 15 s, **ext 22 s** (antes 6), denat 85 × 120 s, extensión
+final 120 s, 800 rpm, termopar al mando, `hold_ki 0.02`, código con los arreglos del §9. La
+hoja `settings` es idéntica al `resources/settings.json` que trajo el usuario. Sin consola.
+
+Scripts en `files_test/ajuste_21oct/` (gitignored):
+
+- `an_adaptive.py`: ahora las rampas vencidas no enseñan, igual que `_ramp_adaptive`. Con eso
+  reproduce **exacto** el `coast` de la metadata (denat 2.5, ext 2.9, high 2.0) y el `bias`
+  a ±0.001.
+- `fit_step.py`: ajusta la planta con los escalones reales de cada `ext_ramp`.
+- `test_adaptive_nov.py`: banco en tiempo virtual con esas plantas (modos `calib`, `scan`,
+  `stress`, `others`, `stall`).
+
+### 10.1 Los arreglos del §9 funcionan
+
+- [x] Picos de los ciclos 1–2 ≲ +2 °C: high +0.50 / −0.29, ext +0.49 / +0.71.
+- [x] `coast` de ext aprende desde el ciclo 1 (8 → 6.3 → 5.7 …).
+- [x] Freno del *hold*: en el ciclo 25 la subida rápida acabó en −3.3 °C y el pico total fue
+      +0.85 °C. El mismo caso en la cámara A (§7.4) se pasaba +4.5 °C.
+- [ ] `coast kept` ante un salto del termopar: **sin probar**. Esta cámara no tuvo saltos
+      (subida máxima de la EMA 8.8 °C/s).
+
+Medianas de los ciclos ≥ 2:
+
+| | A (26/10) | B (26/10) | Newn3 |
+|---|:-:|:-:|:-:|
+| *hold* de high en ±0.5 | 57 % | 73 % | **50 %** (58 % en c6–35) |
+| std del *hold* de high tras 3 s (°C) | 0.50 | 0.39 | 0.29 |
+| máximo − sp en high (°C) | +2.5 | +1.1 | **+0.7** |
+| *hold* de low en ±0.5 | 87 % | 97 % | 95 % |
+| *hold* de ext en ±0.5 | 13 % | 58 % | **72 %** (22 s) |
+| denaturación de 120 s en ±0.5 | 88 % | 81 % | 68 % |
+| extensión final en ±0.5 | 85 % | 86 % | **91 %** |
+| timeouts | 0 | 0 | **4** (§10.3) |
+| duración de un ciclo (s) | 81 | 81 | 118 |
+
+### 10.2 Planta nueva
+
+**Lo que cambió (usuario, 03/11/2026):** entre el 26/10 y el 02/11 se realineó un poco la
+montura del heater. No se sabe si eso alcanza para explicar lo de abajo.
+
+**Duty de régimen mucho mayor,** ya desde el ciclo 2:
+
+| duty | A | B | Newn3 |
+|---|:-:|:-:|:-:|
+| *hold* de 15 s a 85 °C | 0.16–0.18 | 0.13–0.15 | **0.36–0.38** |
+| denaturación a 85 °C (> 60 s) | 0.17 | 0.14 | 0.27 |
+| *hold* a 62 °C | ~0.07 | 0.06–0.09 | 0.15 |
+| *hold* a 50 °C | 0.04 | 0.02 | 0.05 |
+
+**La masa térmica aparente se duplica durante la corrida.** Entre los ciclos 2–5 y 17–35:
+calentamiento (IR) de 6 a 3 °C/s, cola pasiva de −0.56 a −0.25 °C/s, enfriamiento con motor
+de 14 a 32 s, y **el duty de *hold* no cambia**. Que las tres tasas caigan parecido (~2–2.3×)
+con el duty constante es lo que produce una masa mayor; un heater más débil pediría más duty.
+Esto último es una deducción: los datos no dicen qué masa creció. Por eso el ciclo pasa de
+82 a 122 s.
+
+**Cambio brusco entre los ciclos 8 y 9.** En un solo ciclo el enfriamiento sube 7 s, la rampa
+a high 3 s y el desfase IR − termopar a 85 °C pasa de −3.0 a +2.3 °C. Ese desfase oscila hasta
+c16 (−2.6 a +2.3) y desde c17 queda en ~+1.1; en c2–8 era ~−5. A 50 °C sigue estable
+(+1.4–1.6). Si el IR refleja la muestra, "85 °C" fue ~79–80 °C al principio y ~86–88 °C al
+final ([ir_vs_termopar.md](ir_vs_termopar.md) §6).
+
+**El termopar se vuelve más lento que el IR, de forma gradual:** responde en ~0.6 s en c5–6 y
+en ~1.2 s desde c10 (c7–9: 0.9 s), mientras el IR sigue en 0.6–0.9 s.
+
+Ajuste con los escalones reales (`fit_step.py`; rms 0.21–0.28 °C, 0.57 en c2–8). Los grupos de
+Newn3 son para promediar, no marcan cambios de planta:
+
+| | `a` (°C/s a fondo) | retraso (s) | `a` × retraso (°C) | `coast` usado, high / ext (°C) |
+|---|:-:|:-:|:-:|:-:|
+| B | 10.7 | 0.70 | 7.5 | 9.8 / 8.2 |
+| A | 6.1 | 1.50 | 9.2 | 9.4 / 7.0 |
+| Newn3 c2–8 | 6.7 | 0.65 | 4.4 | 4.5 / 5.0 |
+| Newn3 c9–16 | 3.8 | 1.55 | 5.9 | 3.4 / 4.7 |
+| Newn3 c17–35 | 3.2 | 1.20 | 3.8 | 2.6 / 2.9 |
+
+**El aprendizaje del corte siguió a la planta:** el `coast` baja junto con `a` × retraso, que
+se midió de forma independiente. Coinciden en orden y tendencia, no en el valor exacto.
+
+Los picos de +4.2 y +2.9 °C de los ciclos 23–24 son **reales**, no del termopar: el IR sube
++5.4 y +4.8 °C sobre su propio nivel. El tope de paso del `coast` los corrigió en dos ciclos.
+
+### 10.3 Atasco con el heater a fondo (no es de ganancias)
+
+Dos episodios. Empiezan **en `low_hold`, justo después de parar el motor**:
+
+| | desde | hasta | consecuencia |
+|---|:-:|:-:|---|
+| 1 | `low_hold` c11 | c12, ~4 s dentro de `high_ramp`, **sin orden al motor** | extensión c11 a 56 °C (22 s) |
+| 2 | `low_hold` c28 | giro de `cooling` de c29 | extensión c28 a 55 °C; **denaturación de c29 a 59 °C, no a 85** |
+
+- `heater_on_s` da **duty 1.0**, y termopar e IR coinciden en **0.2–0.3 °C/s** (normal 2–3 con
+  el mismo criterio). No es un artefacto del sensor ni el techo de frescura de
+  [pcr_pendientes.md](pcr_pendientes.md) §1, que ya no aplica: el heater está encendido y
+  medido.
+- Plano en 56 °C con duty 0.45 (normal 0.10) y en 59 °C con 0.63 (normal 0.13): el calor
+  efectivo cae a ~15–25 %.
+- Al arrancar el motor en c29, con el heater apagado, **la temperatura sube** +3.0 °C en el
+  termopar y +2.5 °C en el IR. Lo más simple es que hubiera una zona más caliente cerca, sin
+  mezclar; es una deducción.
+
+**Causa (usuario, 03/11/2026): el disco quedó en un ángulo equivocado tras la parada, y lo
+realineó a mano.** Eso resuelve lo que no cuadraba: c12 se recupera sin orden al motor porque
+se movió con la mano. La fluorescencia de c28 cae 14 % (0.0459 contra 0.053 a ambos lados) y
+la de c11 no. Esa corrida no tiene log de consola, así que no se sabe en qué ángulo quedó ni
+por qué: las líneas `Stopped--> pos: …°` y `go_zero wait timed out` lo dirían.
+
+**La tasa cambia con cada parada del motor, no solo en los atascos.** `ext_ramp` del ciclo c
+y `high_ramp` del c+1 comparten parada; `high_ramp` del c y `ext_ramp` del c no. Tasa del IR,
+sin la tendencia lenta:
+
+| corrida | misma parada | otra parada | dispersión de la tasa |
+|---|:-:|:-:|:-:|
+| A | **+0.49** | −0.28 | 22 % |
+| B | +0.13 | −0.01 | 7 % |
+| Newn3 | **+0.63** | −0.45 | 15 % |
+
+El duty de high de esa misma parada va al revés (−0.69, −0.54, −0.30): más tasa, menos duty.
+Deducción: los atascos serían el extremo de una variación de ángulo en cada parada. Sería
+también la fuente principal de los picos de high: el corte se aprende de la rampa anterior,
+que viene de otra parada. Al modelarlo así, el banco reproduce la estadística real de picos
+(§11).
+
+**Lo que sí hizo el control:** la salvaguarda cortó cada rampa a los 20 s, y ni el `coast` ni
+el `bias` aprendieron del atasco. c28 y c29 son dos ciclos fallidos seguidos: con
+`max_failed_cycles 3`, uno más abortaba la corrida. El cuarto timeout (`cooling` de c29, a
+0.2 °C del objetivo) es consecuencia: entró a 59 °C, y el plazo por ΔT quedó corto.
+
+### 10.4 Primer ajuste, en ±0.5 °C (03/11/2026; lo reemplaza el §11)
+
+Con `enabled 1` las ganancias clásicas (`KP_*`, `KI_*`) **no intervienen**: no se tocan. El
+ajuste está en `pcr_adaptive`. Lo de este apartado se mantiene (`hold_kp`, `hold_imax`), con el
+banco anterior, que aún no modelaba la variación por parada:
+
+| clave | antes | ahora | por qué |
+|---|:-:|:-:|---|
+| `hold_kp` | 0.1 | **0.15** | mejora el *hold* en todas las plantas medidas y en la rápida de estrés |
+| `hold_imax` | 3 | **5** | techo del I de ±0.08 a ±0.13 |
+| el resto | — | sin cambio | ningún efecto consistente, o un costo (abajo) |
+
+**Por qué el techo del I.** Con `hold_ki 0.02`, el techo quedó en ±0.08 de potencia, y en
+Newn3 el error del `bias` llegó a ±0.15. El integrador pasó ≥ 40 % del tiempo saturado en 10
+de los 34 *holds* de high (c2–5, c9–10, c12–13, c15–16; sin contar el atasco de c29):
+
+- ciclos 2–3: −1.3 °C, sin aprender el duty, porque el error medio pasa de 0.75 °C;
+- ciclo 12: +1.27 °C, fuera de ±0.5 todo el *hold*.
+
+**Banco.** Con los ajustes con los que corrió cada corrida, reproduce:
+
+| | rampa a high (s) | `coast` high / ext | duty a 85 °C | std *hold* | *hold* high en ±0.5 |
+|---|:-:|:-:|:-:|:-:|:-:|
+| Newn3 real | 11.0 | 2.0 / 2.9 | 0.37 | 0.29 | 0.50 |
+| Newn3 simulada | 11.5 | 1.9 / 2.7 | 0.35 | 0.26 | 0.72 |
+| B real | 4.3 | 8.7 / 7.7 | 0.14 | 0.39 | 0.73 |
+| B simulada | 4.3 | 7.1 / 7.0 | 0.14 | 0.34 | 0.88 |
+
+**Es optimista en los *holds*** (~0.15–0.2: no tiene ruido ni artefactos del termopar), así
+que valen las diferencias, no los absolutos. La planta A sale demasiado oscilatoria (std 0.97
+contra 0.50): es un caso de estrés, no una predicción. El duty de régimen de cada planta se
+fijó con lo medido, así que coincidir ahí no prueba nada; las rampas y el `coast` sí.
+
+*Hold* de high en ±0.5 (media de 4 semillas, ciclos ≥ 2):
+
+| planta | antes | **kp 0.15, imax 5** | kp 0.2, imax 5 | kp 0.3, ki 0.015, imax 8 |
+|---|:-:|:-:|:-:|:-:|
+| B | 0.88 | **0.92** | 0.93 | 0.90 |
+| A | 0.48 | **0.51** | 0.54 | 0.55 |
+| Newn3 | 0.69 | **0.77** | 0.81 | 0.85 |
+| estado final de Newn3 | 0.67 | **0.78** | 0.82 | 0.86 |
+| duty alto, ext 6 s | 0.76 | **0.85** | 0.88 | 0.90 |
+| B × 1.4 (`a` = 15; estrés) | 0.81 | **0.84** | 0.78 | **0.51** |
+
+Con el valor elegido, el peor *hold* de ext sube de 0.28 a 0.47 y la peor denaturación de
+0.34 a 0.62. En la planta A, los *holds* sin aprender bajan de 21 a 9.
+
+**Por qué no un `hold_kp` mayor.** Se ve mejor en las plantas lentas, pero se derrumba en la
+rápida (0.25: 0.68; 0.3: 0.51), y esa planta no es exagerada: el disco 1 del 21/10 calentaba a
+~14 °C/s. Solo 0.15 mejora **en todas**. Fuera del rango medido (`a` × retraso ≈ 17–20 °C,
+el doble del máximo medido) ningún juego sirve, incluido el anterior.
+
+**Lo que se probó y no se cambió** (efecto dentro del ruido, salvo lo indicado):
+
+- `hold_ki`: volver a 0.03 empeora la planta A (0.48 → 0.31), así que la bajada a 0.02 del
+  usuario fue correcta. Con 0.015 no mejora de forma consistente.
+- `ff_learn`, `coast_learn`, `coast_step_max`, `hold_pmax`, `hold_tband`, `hold_win`,
+  `ff_slope`: sin mejora consistente.
+- `coast_init_cycle` 5–6: mejora los primeros ciclos de Newn3 (0.46 → 0.69–0.74), pero sube
+  los primeros picos de la planta rápida de +2.8 a +4.4–5.7 °C, lo que la semilla de 8 evita.
+
+## 11. Ajuste final: tiempo en ±1 °C sin picos (03/11/2026)
+
+**Objetivo (usuario):** el mayor tiempo posible en las temperaturas pedidas. **±1 °C es
+tolerable; los picos altos en high y denaturación no.** Quedarse 1 °C abajo cuesta menos que
+pasarse.
+
+**Línea base real** (ciclos ≥ 2, sin los ciclos con atasco):
+
+| | A (26/10) | B (26/10) | Newn3 |
+|---|:-:|:-:|:-:|
+| *hold* de high / low / ext en ±1 | 85 / 100 / 38 % | 93 / 100 / 92 % | 87 / 100 / 92 % |
+| denaturación / extensión final en ±1 | 91 / 94 % | 94 / 97 % | **83** / 97 % |
+| entrada a ±1 en la denaturación | 1.2 s | 0.6 s | **20.6 s** |
+| pico de high: p90 / máximo | +5.7 / +7.7 | +1.9 / +12.3 | +1.75 / +4.2 |
+| ciclos con pico > +1 / > +2 °C | 85 / 59 % | 53 / 6 % | 26 / 10 % |
+| pico de la denaturación | +7.0 | +3.1 | +0.5 |
+
+**Valores** (`resources/settings.json`; el resto de `pcr_adaptive` no cambia):
+
+| clave | Newn3 | ahora | por qué |
+|---|:-:|:-:|---|
+| `coast_init` | 4 | **8** | el pico de la denaturación es el único que no se aprende (una rampa por corrida): peor caso de +4.8 a +1.3 °C |
+| `coast_min` | 0.5 | **3** | piso del corte: menos picos, sin perder tiempo en banda. Solo actúa en plantas lentas |
+| `hold_pmax` | 0.3 | **0.4** | compensa el corte más temprano: la entrada a la denaturación baja a la mitad, con un costo mínimo en picos |
+| `hold_kp` | 0.1 | **0.15** | §10.4; sigue siendo el tope seguro para discos rápidos |
+| `hold_ki` | 0.02 | **0.015** | sigue la bajada que hizo el usuario: menos oscilación (std en A de 0.68 a 0.57) y mejor extensión final |
+| `hold_imax` | 3 | **5** | techo del I ±0.10; 7–8 da peor resultado |
+| `coast_margin` | — | **0.5** | clave nueva. Solo high: apuntar al setpoint se pasa en cerca de la mitad de las paradas; 0.5 °C abajo sigue dentro de ±1 y el *hold* termina el acercamiento |
+
+**Banco** (`test_adaptive_nov.py`). Al aplicar la dispersión de la tasa por parada, reproduce
+la estadística real de picos, que no se ajustó directamente. Cada corrida con sus propios
+ajustes:
+
+| | *hold* high en ±1 | denat en ±1 | entrada a denat (s) | pico p90 | > +1 °C | > +2 °C |
+|---|:-:|:-:|:-:|:-:|:-:|:-:|
+| Newn3 real | 0.87 | 0.83 | 20.6 | +1.75 | 26 % | 10 % |
+| Newn3 simulada | 0.91 | 0.82 | 21.9 | +1.67 | 21 % | 9 % |
+| B real | 0.93 | 0.94 | 0.6 | +1.85 | 53 % | 6 % |
+| B simulada | 0.98 | 0.98 | 1.7 | +1.26 | 18 % | 3 % |
+| A real | 0.85 | 0.91 | 1.2 | +5.74 | 85 % | 59 % |
+| A simulada | 0.65 | 0.92 | 2.1 | +5.23 | 85 % | 58 % |
+
+Sigue siendo **algo optimista** (~0.04 en B y Newn3) y B se pasa menos que la real. A oscila de
+más en el *hold*. El pico de +7 °C de la denaturación de A es un salto del termopar, que el
+banco no pone en esa rampa.
+
+**Resultado** (media de 6 semillas, 35 ciclos, Newn3 → nuevo):
+
+| planta | high en ±1 | high c2–5 | ext en ±1 | denat en ±1 | entrada denat (s) | > +1 °C | > +2 °C | máximo | pico denat |
+|---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
+| Newn3 | 0.91 → **0.93** | 0.80 → 0.86 | 0.96 → 0.97 | 0.82 → **0.91** | 21 → **7.6** | 22 → **9 %** | 7 → **1 %** | +2.8 → +2.2 | 0 → +0.3 |
+| estado final de Newn3 | 0.91 → 0.93 | 0.67 → 0.76 | 0.97 → 0.98 | 0.84 → 0.90 | 19 → 11 | 19 → **3 %** | 3 → **0 %** | +2.2 → +1.2 | −0.1 → +0.2 |
+| B, ext 22 s | 0.98 → 0.98 | 0.98 → 0.98 | 0.99 → 0.99 | 0.99 → 0.99 | 1.7 → 0.5 | 17 → **7 %** | 2 → **0 %** | +2.1 → +1.7 | **+2.5 → +1.0** |
+| rápida (`a` = 15) | 0.96 → 0.96 | 0.92 → 0.92 | 0.91 → 0.94 | 0.97 → 0.99 | 2.1 → 0.8 | 27 → 26 % | 8 → 7 % | +3.2 → +3.1 | **+4.8 → +1.3** |
+| A, ext 22 s | 0.71 → 0.74 | 0.68 → 0.69 | 0.89 → 0.90 | 0.96 → 0.96 | 2.4 → 1.9 | 78 → 80 % | 29 → 26 % | +8.1 → +9.0 | +1.6 → +1.5 |
+| A, ext 6 s | 0.71 → 0.74 | 0.68 → 0.70 | 0.49 → 0.68 | 0.96 → 0.96 | 2.4 → 1.9 | 74 → 78 % | 36 → 28 % | +8.7 → +7.8 | +1.6 → +1.5 |
+
+**Efecto del margen por sí solo** (mismo juego, `coast_margin` 0 → 0.5). Casi no cuesta tiempo en
+banda, y lo gana sobre todo el disco rápido en régimen (B). Con 0.75 baja poco más:
+
+| planta | high en ±1 | ciclos > +1 °C | > +2 °C | máximo |
+|---|:-:|:-:|:-:|:-:|
+| Newn3 | 0.94 → 0.93 | 10 → 9 % | 3 → 1 % | +2.5 → +2.2 |
+| duty alto, ext 6 s | 0.95 → 0.95 | 9 → 6 % | 3 → 2 % | +2.2 → +2.0 |
+| B | 0.98 → 0.98 | 14 → 5 % | 1 → 0 % | +2.0 → +1.5 |
+| B, ext 22 s | 0.98 → 0.98 | 17 → 7 % | 2 → 0 % | +2.1 → +1.7 |
+| rápida | 0.96 → 0.96 | 27 → 26 % | 7 → 7 % | +3.3 → +3.1 |
+| estado final de Newn3 | 0.93 → 0.93 | 3 → 3 % | 0 → 0 % | +1.3 → +1.2 |
+
+- **Los picos de A son saltos del termopar**, y ninguna ganancia los corrige; ahí pesa más la
+  extensión (también la final, de 0.67 a 0.97).
+- **Fuera del rango medido** (`a` × retraso ≈ 17–20 °C) sigue mal con cualquier juego, y en
+  una de las dos plantas baja: high 0.33 → 0.28, denat 0.88 → 0.72.
+- **Se probó y no se cambió:** `coast_learn 0.3`. Sin `coast_min` parecía ayudar, pero con él
+  da lo mismo y converge más lento (high c2–5 en Newn3: 0.85 contra 0.87; en el estado final,
+  0.71 contra 0.76). Tampoco `hold_kp 0.2` (§10.4), `hold_imax 7–8`, `coast_step_max`, `ff_learn`,
+  `coast_init_cycle` (bajarlo sube los primeros picos) ni `ff_slope` (0.007 lleva el pico de
+  denat a +6.5 °C de media).
+
+**Cambios de código** (solo en la rama adaptativa):
+
+- `_adapt_bias_for`: el primer *hold* de high parte del `bias` de la denaturación. En B con
+  extensión de 22 s, el *hold* de high del ciclo 1 en ±1 pasa de 0.88 a 1.00. En Newn3 ya daba
+  1.00 con las ganancias nuevas.
+- `_hold_adaptive` + `_reach_phase`: suelta el freno tras una rampa vencida. La extensión
+  atascada termina más cerca (Newn3: −6.4 → −4.3 °C; estado final: −6.8 → −3.7 °C), no en el
+  setpoint: en un atasco no alcanza el calor, y el freno vuelve a unos 3 °C. Si el disco se
+  realinea durante la fase, el pico sube poco: en ext de +2.0 a +2.3 °C, y en un *hold* de high
+  atascado de +1.8 a +2.4 °C.
+- **Efecto a vigilar:** con el ángulo mal, el calor cae en una zona del disco que ningún sensor
+  ve, y ahora con ~30–40 % más tiempo encendido durante el atasco (c28–29: de ~59 a ~77 s).
+  Revisar el disco tras un atasco. Si preocupa, se quita sin tocar lo demás.
+- `_ramp_adaptive`: en high aprende contra `setpoint − coast_margin`. La clave también va en
+  `DEFAULT_SETTINGS` (0) y en la fila `adaptive` de la metadata; `an_adaptive.py` la reproduce.
+
+**Verificado sin equipo:**
+
+- Control clásico **idéntico a HEAD** en el banco (12 ciclos, dos plantas, todas las métricas).
+- `coast_margin 0` **idéntico al código anterior** en adaptativo (15 ciclos, dos plantas, dos
+  semillas).
+- `test_adaptive.py` y `test_adaptive_26oct.py` contra la copia de HEAD: 0 timeouts; el adaptativo
+  sigue muy por encima del clásico; diferencias pequeñas en ambos sentidos con una semilla
+  (*hold* del disco rápido 0.93 → 0.89, varias plantas mejoran).
+- Pyrefly: ningún error en las líneas nuevas.
+
+**Validar en la próxima corrida** (Newn3 de referencia, misma receta si se puede):
+
+- [ ] Denaturación: entrada a ±1 °C en ≲ 10 s (hoy 20.6 s) y pico ≤ +1.5 °C.
+- [ ] *Hold* de high en ±1 ≥ 90 % (hoy 87 %); ciclos con pico > +2 °C ≲ 5 % (hoy 10 %).
+- [ ] **Sin oscilación:** std del *hold* de high ≲ 0.4 °C. Si sube con periodo de ~5 s, volver
+      a `hold_kp 0.1`. Revisar sobre todo si el disco calienta a más de ~12 °C/s
+      (`hi_rate` de `fingerprint.py`).
+- [ ] Si hay atasco: consola `power cap released`, y **guardar el log** (`Stopped--> pos:`).
+
+**Aplazado (usuario, 03/11/2026): atacar el ángulo.** Por ahora funciona bien: un episodio cada
+~35 ciclos es aceptable (Newn3 tuvo dos, c11 y c28–29). Si vuelve a importar: es la causa de los
+atascos y probablemente de los picos, y las ganancias solo los mitigan. Las opciones serían
+detectar el atasco (tasa muy baja a potencia plena) y repetir `go_zero`, registrar la posición de
+cada parada en la metadata (hoy solo sale por consola) y revisar el homing de
+[firmware/Stepper](../firmware/Stepper/README.md).
+
 __author__ = "Edisson A. Naula"
-__date__ = "$ 26/10/2026 $"
+__date__ = "$ 03/11/2026 $"

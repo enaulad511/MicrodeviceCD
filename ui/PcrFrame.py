@@ -267,6 +267,11 @@ PCR_ADAPT_DEFAULTS = {
     # temprano, el P del hold (×2 del fuzzy lejos del setpoint) calentaba a fondo sin
     # descontar el calor en vuelo y se pasaba hasta +4.5 °C (26/10).
     "hold_pmax": 0.3,
+    # Solo la rampa a high: el corte aprende a dejar el pico rápido estos °C por debajo
+    # del setpoint (0 = en el setpoint). ±1 °C se tolera y los picos altos no (usuario,
+    # 03/11/2026), y la tasa cambia en cada parada del motor, así que apuntar al setpoint
+    # se pasa en cerca de la mitad de las rampas. El hold termina el acercamiento.
+    "coast_margin": 0.0,
 }
 # Potencia plena mínima para que un pico POR ENCIMA del setpoint enseñe: con un corte
 # inmediato (la rampa arrancó ya pasada del corte) no se midió el calor en vuelo.
@@ -639,6 +644,8 @@ class PCRFrame(ttk.Frame):
         self.adapt_cfg = _adaptive_cfg({})
         self._adapt_bias: dict = {}  # hold (h_high...) → duty de régimen aprendido
         self._adapt_coast: dict = {}  # rampa (high, ext, denat) → calor en vuelo (°C)
+        self._adapt_denat_sp: "float | None" = None  # setpoint del h_denat aprendido
+        self._adapt_ramp_expired = False  # la última rampa venció: el hold siguiente suelta el freno
         self._rx_dts: deque = deque(maxlen=PCR_CADENCE_WIN)
         self._last_good_rx: "float | None" = None
         self.fresh_age_s = 0.0
@@ -2193,6 +2200,7 @@ class PCRFrame(ttk.Frame):
         t0, deadline, limit = self._phase_deadline(est)
         if self.adapt_cfg["enabled"]:
             reached = self._ramp_adaptive(setpoint, pid_phase, ts, break_if_below, deadline)
+            self._adapt_ramp_expired = not reached
         else:
             self.pin_heating.write(True)  # pyrefly: ignore
             reached = self._reach_temperature_pi(
@@ -2302,12 +2310,26 @@ class PCRFrame(ttk.Frame):
             time.sleep(window / 10)
 
     def _adapt_bias_for(self, key, setpoint):
-        """Duty de régimen de un hold: el aprendido en esta corrida o el modelo inicial."""
+        """Duty de régimen de un hold: el aprendido en esta corrida o el modelo inicial.
+
+        El primer hold de high parte del duty ya medido en la denaturación, corregido con
+        la pendiente del modelo si los setpoints difieren. El duty de régimen cambia
+        mucho entre discos (0.14–0.37 a 85 °C), y Newn3 arrancó high con 0.19 del modelo
+        habiendo medido ya 0.28.
+        """
         cfg = self.adapt_cfg
         bias = self._adapt_bias.get(key)
+        if bias is None and key == "h_high" and "h_denat" in self._adapt_bias and self._adapt_denat_sp is not None:
+            bias = self._adapt_bias["h_denat"] + cfg["ff_slope"] * (setpoint - self._adapt_denat_sp)
         if bias is None:
             bias = cfg["ff_slope"] * (setpoint - cfg["ff_t0"])
         return max(0.0, min(1.0, bias))
+
+    def _adapt_coast_for(self, pid_phase):
+        """Calor en vuelo de una rampa: el aprendido o la semilla (denat tiene la suya)."""
+        cfg = self.adapt_cfg
+        seed = cfg["coast_init"] if pid_phase == "denat" else cfg["coast_init_cycle"]
+        return self._adapt_coast.get(pid_phase, min(cfg["coast_max"], max(cfg["coast_min"], seed)))
 
     def _ramp_adaptive(self, setpoint, pid_phase, ts, break_if_below, deadline):
         """Rampa del control adaptativo. True si terminó (pico o stop), False si venció.
@@ -2328,7 +2350,8 @@ class PCRFrame(ttk.Frame):
         completo un corte demasiado temprano también "acertaba", y el aprendizaje
         quedaba clavado en coast_max (verificado en simulación). El paso se limita a
         coast_step_max, y una rampa con una subida imposible para el heater (jump_cps:
-        salto del termopar) no enseña.
+        salto del termopar) no enseña. En high el objetivo del pico es setpoint −
+        coast_margin, no el setpoint.
         """
         cfg = self.adapt_cfg
         pin = self.pin_heating
@@ -2338,8 +2361,7 @@ class PCRFrame(ttk.Frame):
         if break_if_below and self.temp < setpoint:
             return True  # como el clásico: venimos calientes del hold de denat
         params = self._load_phase_pid(pid_phase, ts)
-        seed = cfg["coast_init"] if pid_phase == "denat" else cfg["coast_init_cycle"]
-        coast = self._adapt_coast.get(pid_phase, min(cfg["coast_max"], max(cfg["coast_min"], seed)))
+        coast = self._adapt_coast_for(pid_phase)
         t_full = time.time()
         seen: deque = deque()  # (temp_ts, temp) de las lecturas recientes, para la tasa
         max_rate = 0.0  # subida más rápida vista en la rampa (°C/s), para detectar saltos
@@ -2390,7 +2412,8 @@ class PCRFrame(ttk.Frame):
                 break
             self._pwm_window(bias, cfg["hold_win"])
         pin.write(False)
-        if (full_s >= PCR_ADAPT_MIN_FULL_S or y_max < setpoint) and not stop.is_set():
+        target = setpoint - (cfg["coast_margin"] if pid_phase == "high" else 0.0)
+        if (full_s >= PCR_ADAPT_MIN_FULL_S or y_max < target) and not stop.is_set():
             head = f"Adaptive {pid_phase} ramp: cut at {y_cut:.1f} °C (coast {coast:.1f}), peak {y_max:.1f} °C"
             if cfg["jump_cps"] > 0 and max_rate > cfg["jump_cps"]:
                 # El termopar saltó (subida que el heater no puede dar): el pico no es
@@ -2398,7 +2421,7 @@ class PCRFrame(ttk.Frame):
                 self._adapt_coast[pid_phase] = coast
                 print(f"{head}, rise {max_rate:.0f} °C/s (thermocouple jump) → coast kept")
                 return True
-            step = cfg["coast_learn"] * (y_max - setpoint)
+            step = cfg["coast_learn"] * (y_max - target)
             if cfg["coast_step_max"] > 0:
                 step = max(-cfg["coast_step_max"], min(cfg["coast_step_max"], step))
             self._adapt_coast[pid_phase] = min(cfg["coast_max"], max(cfg["coast_min"], coast + step))
@@ -2412,6 +2435,11 @@ class PCRFrame(ttk.Frame):
         aprendido es el que mide el _HeaterMeter en la segunda mitad del hold, y solo
         si la temperatura estuvo cerca del setpoint: un hold pasado de temperatura mide
         0, y eso no es el duty de régimen.
+
+        Si la rampa venció (atasco: disco mal alineado tras go_zero, Newn3), el freno
+        hold_pmax dejaba la fase lejos del setpoint. Se suelta mientras falte más que el
+        calor en vuelo de esa rampa y ya no vuelve a soltarse: si el disco se realinea, la
+        tasa normal regresa de golpe y sin freno se pasaría.
         """
         cfg = self.adapt_cfg
         pin = self.pin_heating
@@ -2419,6 +2447,10 @@ class PCRFrame(ttk.Frame):
         if pin is None or stop is None:
             return
         bias = self._adapt_bias_for(key, setpoint)
+        released, self._adapt_ramp_expired = self._adapt_ramp_expired, False
+        release_above = self._adapt_coast_for(key[2:])
+        if released:
+            print(f"Adaptive {key}: ramp timed out → power cap released until {release_above:.1f} °C below setpoint")
         window = cfg["hold_win"]
         integ = 0.0
         t0 = time.time()
@@ -2440,7 +2472,8 @@ class PCRFrame(ttk.Frame):
             integ = max(-cfg["hold_imax"], min(cfg["hold_imax"], integ + error * window))
             p_term = 0.0 if abs(error) < cfg["hold_tband"] else kp_dyn * error
             power = bias + ki_dyn * integ + p_term
-            if cfg["hold_pmax"] > 0:  # freno: sin él, un corte temprano se pasaba
+            released = released and error > release_above
+            if cfg["hold_pmax"] > 0 and not released:  # freno: sin él, un corte temprano se pasaba
                 power = min(power, bias + cfg["hold_pmax"])
             self._pwm_window(power, window)
         pin.write(False)
@@ -2452,6 +2485,8 @@ class PCRFrame(ttk.Frame):
         if span >= PCR_ADAPT_LEARN_MIN_S and abs(mean_err) <= PCR_ADAPT_LEARN_MAX_ERR_C:
             duty = (pin.on_s(t_end) - mid[1]) / span
             self._adapt_bias[key] = (1 - cfg["ff_learn"]) * bias + cfg["ff_learn"] * duty
+            if key == "h_denat":
+                self._adapt_denat_sp = setpoint
             print(f"Adaptive {key}: duty {duty:.3f} (mean err {mean_err:+.2f} °C) → bias {self._adapt_bias[key]:.3f}")
         else:
             print(f"Adaptive {key}: duty not learned (mean err {mean_err:+.2f} °C over {span:.1f} s)")
@@ -2468,7 +2503,7 @@ class PCRFrame(ttk.Frame):
             f" hold kp {cfg['hold_kp']:g} ki {cfg['hold_ki']:g} imax {cfg['hold_imax']:g}"
             f" pmax {cfg['hold_pmax']:g}"
             f" coast init {cfg['coast_init']:g}/{cfg['coast_init_cycle']:g}C learn {cfg['coast_learn']:g}"
-            f" step {cfg['coast_step_max']:g}C jump {cfg['jump_cps']:g}C/s"
+            f" step {cfg['coast_step_max']:g}C jump {cfg['jump_cps']:g}C/s margin {cfg['coast_margin']:g}C"
             f" | bias {bias} | coast {coast}"
         )
 
@@ -2812,6 +2847,7 @@ class PCRFrame(ttk.Frame):
         self.cool_margin_c = _cfg_num(pidGains, "cool_stop_margin_c", PCR_COOL_STOP_MARGIN_C)
         self.adapt_cfg = _adaptive_cfg(settings.get("pcr_adaptive", {}))
         self._adapt_bias, self._adapt_coast = {}, {}  # disco nuevo → se aprende de cero
+        self._adapt_denat_sp, self._adapt_ramp_expired = None, False
         # 0 no tiene sentido (abortaría si la primera lectura no llegó ya) → default.
         start_wait_s = (
             _cfg_num(pidGains, "temp_start_wait_s", PCR_TEMP_START_WAIT_S) or PCR_TEMP_START_WAIT_S

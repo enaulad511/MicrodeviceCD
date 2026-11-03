@@ -116,5 +116,26 @@ setpoints de la metadata.
   la señal más fiable de las dos. Detalle y efecto sobre el control:
   [pcr_control_adaptativo.md](pcr_control_adaptativo.md) §7.2.
 
+## 6. Newn3 (02/11/2026): el desfase cambia dentro de la corrida
+
+Misma receta 85/50/62, con el termopar al mando (`Newn3_pcr_data_20261102_152624.xlsx`).
+
+| ciclos | IR − TC a 85 °C (mediana) | rango | IR − TC a 50 °C |
+|:-:|:-:|:-:|:-:|
+| 2–8 | **−5.0** | −5.5 a −2.7 | +1.5 |
+| 9–16 | +0.6 | **−2.6 a +2.3** | +1.6 |
+| 17–35 | **+1.1** | −0.5 a +2.4 | +1.4 |
+
+- **Hasta ahora el desfase se trataba como fijo por cámara (§5). Aquí se mueve ~6 °C en la
+  misma corrida**, con un cambio brusco entre los ciclos 8 y 9 (de −3.0 a +2.3). Una
+  corrección de una sola vez al arrancar no serviría: si el PID pasa al IR, la calibración
+  del §4 tendría que seguir ese cambio, o no aplica a corridas como esta.
+- **Con el termopar al mando, cuál de los dos se movió no se sabe.** Si el IR refleja la
+  muestra, "85 °C" fue ~79–80 °C en los primeros ciclos y ~86–88 °C al final. Es relevante
+  para el experimento, aunque el control se vea bien.
+- **A 50 °C no se mueve.** El problema es a temperatura alta, como en el §3.
+
+Contexto de la corrida: [pcr_control_adaptativo.md](pcr_control_adaptativo.md) §10.2.
+
 __author__ = "Edisson A. Naula"
-__date__ = "$ 26/10/2026 $"
+__date__ = "$ 03/11/2026 $"

@@ -138,6 +138,7 @@ DEFAULT_SETTINGS = {
         "coast_step_max": 2.0,
         "jump_cps": 20.0,
         "hold_pmax": 0.3,
+        "coast_margin": 0.0,
     },
 }
 
