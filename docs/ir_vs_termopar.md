@@ -79,8 +79,9 @@ reemplazo debe reproducirlo leyendo el IR. Orden:
    (`TC ≈ (IR − b) / a`, §3) y medir cuánto varía entre discos. La tolerancia que admite
    el experimento dirá si los ±2 °C a 90 °C entre discos son aceptables o si hace falta
    corregir por disco.
-3. **Registrar `t_amb`** (temperatura del propio MLX) como columna extra del CSV: ayudaría
-   a explicar la deriva dentro de la corrida. Hoy no se guarda.
+3. **Registrar `t_amb`** (temperatura del propio MLX) como columna extra: ayudaría a explicar
+   la deriva dentro de la corrida. **Hecho el 04/11/2026** (columna 6,
+   [pcr_csv_ciclo_fase.md](pcr_csv_ciclo_fase.md) §7).
 4. **Corrección en el código** (opción en `settings.json`, aplicada a `ir_object` antes
    del PID) y corridas de prueba con `temp_source = ir_object`, dejando el termopar de
    secundario para comparar.
@@ -137,5 +138,79 @@ Misma receta 85/50/62, con el termopar al mando (`Newn3_pcr_data_20261102_152624
 
 Contexto de la corrida: [pcr_control_adaptativo.md](pcr_control_adaptativo.md) §10.2.
 
+## 7. Newn4 (04/11/2026): el IR no siempre lee menos, y también salta
+
+Receta 85/40/62, termopar al mando, corridas R1 y R2
+([pcr_control_adaptativo.md](pcr_control_adaptativo.md) §12). Dos cámaras distintas (usuario).
+
+| | R1 | R2 |
+|---|:-:|:-:|
+| IR − TC a 40 °C | +0.49 | +2.62 |
+| IR − TC a 62 °C | −2.68 | **+3.74** |
+| IR − TC a 85 °C (primeros 5 → últimos 5 ciclos) | −3.42 (−3.21 → −3.81) | **+5.74** (+3.42 → +5.71) |
+| ajuste IR = a·TC + b | 0.910·TC + 3.72 | **1.061·TC + 0.38** |
+| IR − TC en la rampa, con TC ≈ 66 °C | −2.8 | **+5.9** (+3.8 a +9.5) |
+| saltos > 3 °C entre muestras, TC / IR | 1 / 1 | **50 / 12** |
+
+- **La regla del §3 no es general.** "El IR comprime la escala y lee menos a temperatura alta" falla
+  en R2: la pendiente pasa de 1 y lee más que el termopar a todas las temperaturas.
+- **Dispersión a 85 °C: 9 °C** entre dos cámaras, el mismo día. Con el termopar en 85 °C, el IR leyó
+  ~81.6 °C en R1 y ~90.7 °C en R2. Sigue sin saberse cuál refleja la muestra, y una corrección fija al
+  migrar el PID al IR no serviría.
+- **El IR también salta.** En los eventos de calor salta 7–9 °C de mediana, contra 10–15 °C del
+  termopar, así que "el IR no salta" (§5) era por comparar tasas, no eventos.
+
+## 8. ¿Ruido inducido en los cables? (04/11/2026)
+
+**Duda del usuario:** los cables del IR pueden recoger ruido, así que su medición no es tan válida. Por
+eso **su nivel no se usa como evidencia** de la temperatura de la muestra
+([pcr_control_adaptativo.md](pcr_control_adaptativo.md) §12.6).
+
+**Lo que se buscó** en los crudos de A, B, Newn3, R1 y R2 (`files_test/ajuste_21oct/an_ir_ruido*.py`).
+B queda fuera de las dos últimas filas, porque su tasa normal ya pasa el umbral:
+
+| prueba | qué dejaría el ruido | IR | termopar |
+|---|---|:-:|:-:|
+| ruido en *holds* sin eventos, std (°C) | más con heater encendido | 0.07–0.09, con y sin heater | 0.10–0.15 |
+| ruido con el motor girando, std (°C) | mucho más | 0.10–0.13 | 0.14–0.17 |
+| picos aislados > 1 °C, por 1000 muestras | muchos | 0.02–0.03 (R2 0.15) | 0.08–1.1 |
+| salto en 0.25 s al encender el heater (°C) | instantáneo | +0.02 a +0.07 | +0.03 a +0.11 |
+| salto al apagar el heater (°C) | instantáneo | −0.01 a +0.03 | −0.04 a +0.03 |
+| salto al arrancar el motor (°C) | instantáneo | −0.06 a +0.06 | −0.04 a +0.07 |
+| subidas / bajadas rápidas sin motor | simétricas | A 32 / 0, R2 29 / 2 | A 35 / 14, R2 42 / 1 |
+| saltos solo de este sensor | muchos | A 3 de 32, R2 3 de 29 | A 5 de 35, R2 16 de 42 |
+
+**No aparece la firma de ruido inducido en el IR.** No lo descarta, y hay dos cosas a favor de la duda:
+
+- **Nadie valida la lectura.** `read16` lee 2 bytes y **no comprueba el PEC**
+  ([mlx90614.py:45](../firmware/DiscPCB/mlx90614.py#L45)), así que un bit cambiado solo se detecta si
+  es el 15. Además, el bus ya mostró EMI del motor ([mlx90614_fiabilidad_lectura.md](mlx90614_fiabilidad_lectura.md)).
+- **El nivel no es estable,** aunque no por lo que deja el ruido. El desfase IR − TC cambia en
+  escalones **con cada parada del motor** y se mantiene hasta la siguiente: misma parada contra otra,
+  R1 +0.91 / +0.10 y Newn3 +0.89 / +0.26 (R2 +0.48 / +0.27, B +0.49 / +0.36, A +0.07 / +0.51). En R1,
+  c25 y c29 quedan en −6.6 y −6.3 °C contra ~−3.3 normal, y no se va al apagar el heater (−6.1 en el
+  primer segundo de `cooling`).
+
+Dos razones por las que ese escalón no parece inducción, sin poder descartarla: el MLX convierte
+dentro del encapsulado y por los cables van palabras digitales, y un error de bits no da un desfase
+constante durante minutos. Quedan el ángulo del disco, lo que ve el sensor, un gradiente térmico sobre
+el encapsulado o, si el cable se mueve con el disco, su posición. **Es deducción.**
+
+**Si hay inducción, el termopar es más sospechoso:** lleva una señal de µV por el cable, y en la tabla
+tiene más picos y más saltos propios.
+
+**Pruebas que lo resolverían:**
+
+1. **PEC en la lectura, con un contador de fallos** (firmware: leer 3 bytes y verificar): mide
+   directamente si llegan palabras corruptas.
+2. **Mirar `t_amb`:** se guarda desde el 04/11/2026 ([pcr_csv_ciclo_fase.md](pcr_csv_ciclo_fase.md)
+   §7). Es la temperatura del encapsulado, así que solo da indicios: si cambia de golpe con el desfase,
+   apunta a un efecto térmico sobre el sensor; si el desfase salta y `t_amb` no se mueve, no. No mide
+   el gradiente directamente.
+3. **Disco frío, Quick Control con "All (3 temps)":** alternar heater y motor. Un cambio instantáneo es
+   eléctrico; uno lento, térmico.
+
+**Para la migración del PID (§4):** conviene cerrar esto antes.
+
 __author__ = "Edisson A. Naula"
-__date__ = "$ 03/11/2026 $"
+__date__ = "$ 04/11/2026 $"

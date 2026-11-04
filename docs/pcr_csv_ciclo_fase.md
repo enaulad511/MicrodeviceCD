@@ -23,9 +23,10 @@ Dos columnas **al final** de cada fila:
 | 3 | `cycle` | **nuevo** — ciclo en curso (ver §2) |
 | 4 | `phase` | **nuevo** — código de la fase en curso (ver §3) |
 | 5 | `heater_on_s` | segundos de heater encendido acumulados (desde el 21/10/2026, ver §6) |
+| 6 | `t_amb` | IR ambiente crudo; vacía si la lectura falló (desde el 04/11/2026, ver §7) |
 
-La fila 0 (metadata) declara `cols: <pri>|<sec>|t_s|cycle|phase|heater_on_s` (antes del
-21/10/2026, sin `heater_on_s`).
+La fila 0 (metadata) declara `cols: <pri>|<sec>|t_s|cycle|phase|heater_on_s|t_amb` (antes del
+04/11/2026, sin `t_amb`; antes del 21/10/2026, tampoco `heater_on_s`).
 
 Ir **al final** es lo que hace el cambio retrocompatible: el loader del análisis
 (`_read_temp_csv` en [ui/analysis/pcr.py](../ui/analysis/pcr.py)) lee las columnas 0–2
@@ -156,14 +157,39 @@ Verificado en simulación (pin falso, PWM 30 % + blast + corte, lector en ráfag
 0.96 s contados contra 0.95 s ideales, sin retrocesos. Pendiente de validar en el
 equipo con la primera corrida que lo traiga.
 
+## 7. `t_amb`: la temperatura propia del MLX (04/11/2026)
+
+El disco ya manda los tres canales por UDP, pero la app solo guardaba dos. La columna 6 graba el
+IR ambiente de cada muestra. Sirve para el análisis y **no entra en el control**.
+
+**Qué es:** la temperatura del encapsulado del MLX90614, no la del aire del equipo ni la de la
+muestra. Sirve como indicio de dos preguntas abiertas: si el equipo se calienta durante la corrida
+([pcr_control_adaptativo.md](pcr_control_adaptativo.md) §12.3) y si el sensor sufre cambios de
+temperatura que expliquen su desfase ([ir_vs_termopar.md](ir_vs_termopar.md) §8).
+
+**Diferencias con las columnas 0 y 1,** a propósito:
+
+- **Crudo, sin EMA:** es para analizar, así que el suavizado se elige después.
+- **Vacía si la lectura falló,** sin sostener el último valor. La columna 1 sostiene porque alimenta
+  la EMA; aquí un valor repetido escondería justo un fallo del sensor.
+- **No pasa por `_valid`,** así que no toca el watchdog de "ambas caídas".
+- **Con `temp_source = ir_ambient`** repite el canal primario, sin suavizar. Es inofensivo.
+
+Va al final, así que los lectores por posición siguen igual: el cargador del análisis lee las
+columnas 0–2, y las corridas de seis columnas cargan igual.
+
+Verificado sin equipo con el código real: lecturas válidas, `None`, `NS` y lista vacía; `.xlsx`,
+respaldo CSV y cargador del análisis. El control clásico y el adaptativo dan idéntico a `HEAD` en el
+banco. **Falta verlo en una corrida del equipo:** que `t_amb` traiga valores plausibles.
+
 ## Archivos
 
 - [ui/PcrFrame.py](../ui/PcrFrame.py) — `PCR_PHASE_LABELS`, `_enter_phase`,
   `cycle_current`/`phase_code`, `data_cycle`/`data_phase`, `_HeaterMeter`/`data_heater_on`,
-  columnas 3–5 de `save_data_temps_file`, `cols:` de la metadata.
+  `data_t_amb`, columnas 3–6 de `save_data_temps_file`, `cols:` de la metadata.
 - Docs relacionados: [pcr_eje_tiempo.md](pcr_eje_tiempo.md) §6 (columna `t_s` y
   metadata), [pcr_analisis.md](pcr_analisis.md) (loader),
   [pcr_temperature_control.md](pcr_temperature_control.md) (fases omitidas).
 
 __author__ = "Edisson A. Naula"
-__date__ = "$ 13/10/2026 $"
+__date__ = "$ 04/11/2026 $"

@@ -46,7 +46,7 @@ SINGLE_RE = re.compile(
     re.IGNORECASE,
 )
 # Columnas de la hoja temperature cuando la metadata vieja no trae "cols:".
-TEMP_COLS = ["primary", "secondary", "t_s", "cycle", "phase", "heater_on_s"]
+TEMP_COLS = ["primary", "secondary", "t_s", "cycle", "phase", "heater_on_s", "t_amb"]
 COLS_RE = re.compile(r"cols: (.*?)(?=-[a-z_]+:|$)")
 
 

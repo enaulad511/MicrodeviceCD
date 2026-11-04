@@ -187,6 +187,9 @@ producción (sin REPL conectado) no imprime nada mientras nada cambie.
 - **Confirmar el flag de error en hardware**: forzar una condición inválida (tapar
   el campo de visión / sensor recién energizado) y ver `MLX90614: lectura fallida`
   seguido del aviso en la UI, en vez de una temperatura absurda.
+- **PEC en la lectura (04/11/2026):** `read16` lee 2 bytes y no comprueba el PEC, así que
+  una palabra corrupta pasa como dato si no toca el bit 15. Falta leer 3 bytes, verificar
+  y contar los fallos ([ir_vs_termopar.md](ir_vs_termopar.md) §8).
 
 __author__ = "Edisson A. Naula"
-__date__ = "$ 29/07/2026 $"
+__date__ = "$ 04/11/2026 $"

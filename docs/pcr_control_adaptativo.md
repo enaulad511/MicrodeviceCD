@@ -6,7 +6,9 @@
 >
 > **03/11/2026, corrida Newn3 (§10):** los arreglos del §9 funcionan en el equipo. Trajo una planta nueva (duty a 85 °C 0.37, no 0.14–0.17, y masa térmica que se duplica durante la corrida) y un **atasco con el heater a fondo** por el ángulo del disco (§10.3), que ninguna ganancia arregla.
 >
-> **03/11/2026, ajuste final (§11):** objetivo del usuario, tiempo en ±1 °C sin picos en high ni denat. Siete valores nuevos en `pcr_adaptive` y tres cambios de código, **pendientes de correr en el equipo**.
+> **03/11/2026, ajuste final (§11):** objetivo del usuario, tiempo en ±1 °C sin picos en high ni denat. Siete valores nuevos en `pcr_adaptive` y tres cambios de código.
+>
+> **04/11/2026, corridas Newn4 (§12):** el ajuste final **cumple en una cámara sin eventos** y falla en la otra, con **eventos de calor** discretos que el control no puede corregir. El modelo de la planta cambia: lo que varía entre corridas es el acople del heater, no la masa, y durante la corrida se calienta el ambiente del equipo.
 
 Archivo: [ui/PcrFrame.py](../ui/PcrFrame.py) (`_ramp_adaptive`, `_hold_adaptive`,
 `_adaptive_cfg`). Config: `settings.json` → `pcr_adaptive`. **Apagado por defecto.**
@@ -255,6 +257,10 @@ es +2.4 °C (p90 +5.8), y el del IR, +0.8 °C (p90 +1.8): **la mayor parte del p
 artefacto local del termopar**. Es una deducción: falta una referencia de la muestra
 ([ir_vs_termopar.md](ir_vs_termopar.md) §5).
 
+> **Matiz (04/11/2026):** son los *eventos de calor* del §12.2. Medido evento por evento, el
+> IR también salta (9 °C de mediana en A, contra 15 °C del termopar), así que "artefacto del
+> termopar" se queda corto.
+
 El daño está en el **aprendizaje**:
 
 - el `coast` de high oscila entre 7 y 12 °C, y 4 ciclos tocan `coast_max`;
@@ -437,6 +443,10 @@ de 14 a 32 s, y **el duty de *hold* no cambia**. Que las tres tasas caigan parec
 con el duty constante es lo que produce una masa mayor; un heater más débil pediría más duty.
 Esto último es una deducción: los datos no dicen qué masa creció. Por eso el ciclo pasa de
 82 a 122 s.
+
+> **Matiz (04/11/2026):** Newn4 no repite esto. La tasa no cae durante la corrida y el ciclo
+> se alarga por otra causa (§12.3). "La masa se duplica" queda como algo propio de Newn3, sin
+> explicar, no como rasgo del equipo.
 
 **Cambio brusco entre los ciclos 8 y 9.** En un solo ciclo el enfriamiento sube 7 s, la rampa
 a high 3 s y el desfase IR − termopar a 85 °C pasa de −3.0 a +2.3 °C. Ese desfase oscila hasta
@@ -676,14 +686,15 @@ banda, y lo gana sobre todo el disco rápido en régimen (B). Con 0.75 baja poco
   (*hold* del disco rápido 0.93 → 0.89, varias plantas mejoran).
 - Pyrefly: ningún error en las líneas nuevas.
 
-**Validar en la próxima corrida** (Newn3 de referencia, misma receta si se puede):
+**Validar en la próxima corrida** (Newn3 de referencia; resultado en el §12.1):
 
-- [ ] Denaturación: entrada a ±1 °C en ≲ 10 s (hoy 20.6 s) y pico ≤ +1.5 °C.
-- [ ] *Hold* de high en ±1 ≥ 90 % (hoy 87 %); ciclos con pico > +2 °C ≲ 5 % (hoy 10 %).
-- [ ] **Sin oscilación:** std del *hold* de high ≲ 0.4 °C. Si sube con periodo de ~5 s, volver
-      a `hold_kp 0.1`. Revisar sobre todo si el disco calienta a más de ~12 °C/s
-      (`hi_rate` de `fingerprint.py`).
-- [ ] Si hay atasco: consola `power cap released`, y **guardar el log** (`Stopped--> pos:`).
+- [x] Denaturación: entrada a ±1 °C en ≲ 10 s (Newn3 20.6 s) y pico ≤ +1.5 °C.
+- [~] *Hold* de high en ±1 ≥ 90 % (Newn3 87 %); ciclos con pico > +2 °C ≲ 5 % (Newn3 10 %). Sí en
+      R1 (90 %; 9 % de ciclos, todos antes de c9). No en R2, por los eventos de calor.
+- [~] **Sin oscilación:** std del *hold* de high ≲ 0.4 °C. R1 0.21. R2 1.36, sin periodo fijo: son
+      los eventos, no el `hold_kp`, y el banco da 0.32 con la misma planta sin eventos.
+- [ ] Si hay atasco: consola `power cap released`, y **guardar el log**. Sin atascos en Newn4: sin
+      probar. `Stopped--> pos:` marca siempre `0.00°`, así que ese log **no** da el ángulo.
 
 **Aplazado (usuario, 03/11/2026): atacar el ángulo.** Por ahora funciona bien: un episodio cada
 ~35 ciclos es aceptable (Newn3 tuvo dos, c11 y c28–29). Si vuelve a importar: es la causa de los
@@ -692,5 +703,231 @@ detectar el atasco (tasa muy baja a potencia plena) y repetir `go_zero`, registr
 cada parada en la metadata (hoy solo sale por consola) y revisar el homing de
 [firmware/Stepper](../firmware/Stepper/README.md).
 
+## 12. Corridas Newn4 (04/11/2026): validación y modelo actualizado
+
+**Corridas.** `files_test/Newn4_pcr_data_20261104_130627.xlsx` (**R1**, inicio 11:39) y
+`…_150942.xlsx` (**R2**, 13:46), con consola en `files_test/logpvr.txt` y `logvpr2.txt`.
+Receta: 35 ciclos, 85/**40**/62 °C, high y low 15 s, ext 22 s, denat 85 × 120 s, extensión final
+120 s, 800 rpm, termopar al mando, valores del §11. Entre las dos solo cambia
+`cool_stop_margin_c` (5.5 en R1, 2 en R2). **Fueron dos cámaras distintas** (usuario, 04/11/2026), así
+que lo que difiere entre R1 y R2 es de la cámara, salvo que se separe de otro modo.
+Los ciclos son los del .xlsx: la consola cuenta uno menos ("cycle 12" es c13).
+
+**El nivel del IR no se usa como evidencia** de la temperatura de la muestra (§12.6): el usuario duda
+de esa medición. Lo que sigue se apoya en termopar y `heater_on_s`, salvo donde se indica.
+
+Scripts en `files_test/ajuste_21oct/` (gitignored): `an_eventos.py`, `an_planta_n4*.py`,
+`an_ir_ruido*.py`, `test_eventos_energia.py`, `newn4_high_overlay.png`, `newn4_r2_eventos.png`.
+
+### 12.1 El ajuste del §11 cumple donde no hay eventos
+
+Medias por ciclo de los ciclos ≥ 2, mismas definiciones del §11:
+
+| | objetivo | Newn3 | R1 | R2 |
+|---|:-:|:-:|:-:|:-:|
+| entrada a ±1 en la denaturación | ≲ 10 s | 20.6 s | **8.6 s** | 9.8 s |
+| pico de la denaturación | ≤ +1.5 °C | +0.5 | **+0.07** | −0.37 |
+| denaturación en ±1 | — | 83 % | 84 % | **48 %** |
+| *hold* de high en ±1 | ≥ 90 % | 87 % | **90 %** | **46 %** |
+| ciclos con pico > +2 °C | ≲ 5 % | 10 % | 9 % | **71 %** |
+| std del *hold* de high (°C) | ≲ 0.4 | 0.29 | **0.21** | 1.36 |
+| *hold* de ext en ±1 | — | 92 % | 96 % | 85 % |
+| extensión final en ±1 | — | 97 % | 99 % | 97 % |
+| timeouts | — | 4 | 0 | 0 |
+
+- **R1:** los tres ciclos con pico > +2 °C son c4, c5 y c8. De c9 a c35 el pico máximo es +0.99 °C.
+  El `coast` de high queda en `coast_min` (3 °C) desde c6: el pico rápido se queda ~1 °C bajo el
+  objetivo y el *hold* termina el acercamiento sin pasarse.
+- **`coast kept`:** ya probado en el equipo, en R2 (c13, c14, c32 y c33, con 21–25 °C/s).
+
+### 12.2 Eventos de calor (lo nuevo)
+
+En R2 **no hay rampas rápidas**, como sugería la tasa máxima: hay saltos discretos. El termopar
+sube despacio, queda atrasado, y de pronto salta 10–20 °C en ~1 s. También ocurre en pleno *hold*,
+con el motor parado. Detector: el crudo sube ≥ 4 °C en ≤ 0.6 s a más de max(2·`a`, 8) °C/s, lo que
+el heater no puede dar.
+
+| | A | B | Newn3 | R1 | R2 |
+|---|:-:|:-:|:-:|:-:|:-:|
+| eventos (sin los de arranque) | 37 | 2 | 6 | **0** | **40** |
+| ciclos con evento | 29 | 1 | 4 | 0 | 24 |
+| en `high_ramp` / `high_hold` | 28 / 4 | 1 / 0 | 4 / 0 | 0 / 0 | 22 / 17 |
+| salto del termopar, mediana (°C) | 15 | 20 | 12 | — | 10 |
+| salto del IR, mediana (°C) | 9 | 16 | 9 | — | 7.4 |
+
+Lo que los datos muestran en R2:
+
+- **Casi siempre coinciden en el tiempo con el IR:** 26 de sus 29 saltos caen a ±1.5 s de uno del
+  termopar (A: 29 de 32), y unos 16 de los ~40 del termopar no tienen par en el IR. Aquí solo cuenta el
+  *cuándo*, no el nivel. Van por buses distintos (SPI e I2C).
+- **Umbral de temperatura:** ninguno por debajo de ~65 °C en el termopar. A potencia plena, la tasa
+  sube de 0.09 /s (65–68 °C) a 0.24 /s (74–77 °C) y 0.28 /s (77–80 °C). Son pocos eventos por tramo
+  (3–6).
+- **Depende de la potencia.** En el *hold*, excluyendo 5 s tras cada evento: **0 eventos en 211 s con
+  duty ≤ 0.45, y 9 en 98 s con duty > 0.45**. Hay un confundidor: el duty alto ocurre cuando el
+  termopar está bajo.
+- **Salta hacia un nivel, no una cantidad:** el salto se correlaciona −0.71 con la temperatura de
+  partida; el pico queda en ~87 °C en la rampa y ~90 °C en el *hold*.
+- **Sin memoria aparente:** 10 de 34 ciclos sin evento en R2, y un proceso de tasa constante daría
+  ~1/3. Aumentan hacia c11–17, cuando también crece el desfase IR − termopar.
+
+- **No parece ruido eléctrico:** casi todos son subidas (R2: 42 subidas y 1 bajada rápidas), con una
+  caída de segundos. 22 de 39 en R2 y 28 de 32 en A llegan con el heater encendido sin interrupción
+  los 2 s previos, sin flancos que induzcan.
+- **Dependen de la cámara:** R1 0 y R2 40, el mismo día. También A 37 y B 2, mismo disco. Esto no
+  descarta el cableado si al cambiar de cámara se mueve el cable del termopar.
+
+**Prueba de energía, sin el IR: el salto no parece calor neto en la muestra.** Ciclos con evento
+contra sin evento, sin la tendencia lenta (`an_ir_ruido2.py`, `test_eventos_energia.py`):
+
+| | R2 real | A real | banco: todo lectura | banco: mitad real | banco: todo real |
+|---|:-:|:-:|:-:|:-:|:-:|
+| heater en rampa + *hold* (s) | **+0.41 ± 0.23** | +0.38 ± 0.33 | −0.30 a +0.14 | −0.85 a −1.80 | −1.84 a −2.13 |
+
+Si el salto sumara calor a la muestra, el heater tendría que entregar menos, y entrega lo mismo o algo
+más. El tiempo de motor hasta 60 °C tampoco cambia (−0.10 s, std 0.8), aunque esa medida no separa los
+casos en el banco. El estadístico es ruidoso en el banco: son dos tandas de 6 semillas.
+
+**Quedan dos candidatas, sin confirmar:** un artefacto de contacto del termopar en esa cámara, o calor
+local que le llega al sensor sin cambiar el total (una burbuja que mueve líquido, por ejemplo). Mirar
+la cámara durante una corrida sigue siendo la prueba: si es lo segundo, habría que ver la burbuja en
+las cámaras con eventos y no en las otras.
+
+**Consecuencia para el control:** el salto entra por la lectura y ninguna ganancia lo corrige. El
+termopar se pasa, el control corta, la muestra se enfría, el P empuja con duty > 0.45 y puede venir
+otro: en c13 hay tres en 15 s. **Si es lectura, los picos no son de la muestra y el daño va al revés:**
+en el banco, la muestra queda 1.5 °C bajo el setpoint de media en el *hold* (42 % en ±1). Además
+contamina el aprendizaje: de las 22 rampas con evento, solo 4 quedaron filtradas por `jump_cps`; las
+demás mueven el `coast`, que oscila entre 3.7 y 9.5 °C.
+
+### 12.3 Lo que varía entre corridas y durante una corrida
+
+**Entre corridas varía el acople del heater, no la masa.** La tasa en frío cae a un tercio, y las
+pérdidas casi no cambian:
+
+| | denat_rate (°C/s) | `a` ajustada (°C/s) | duty denat > 60 s | enfriamiento a 70 °C (°C/s) | pasivo a 62 °C (°C/s) |
+|---|:-:|:-:|:-:|:-:|:-:|
+| A (26/10) | 9.7 | 6.1 | 0.17 | −1.2 | −0.45 |
+| B (26/10) | 9.0 | 10.7 | 0.14 | −1.1 | −0.45 |
+| Newn3 (02/11) | 6.0 | 3.2–6.7 | 0.28 | −1.0 a −2.1 | −0.25 a −0.8 |
+| R1 (04/11) | 4.6 | 4.2–5.0 | 0.31 | −1.3 a −1.6 | −0.4 a −0.6 |
+| R2 (04/11) | 3.0 | 3.7–4.0 | 0.38 | −1.3 a −1.5 | −0.3 |
+
+Si creciera la masa, bajarían la tasa y las pérdidas, y el duty se quedaría igual. Aquí baja la
+tasa, sube el duty y `denat_rate × duty` se mantiene en 1.1–1.7 °C/s. Es deducción, con dos
+matices: se realineó la montura tras el 26/10, y el 21/10 ya había dispersión (14.2 / 8.4 / 8.7).
+Los tres días con varias corridas van a menos dentro del día, pero cada corrida fue otro disco o
+cámara, así que no prueba una deriva. **`denat_rate` es el control más simple de este acople.**
+
+**Durante la corrida se calienta el ambiente, no crece la masa.** En Newn4, `a` no cae (R1 4.2 → 5.0,
+R2 3.9 → 4.0), y la `k` del enfriamiento casi no cambia (0.046 → 0.04). Lo que cambia, de c2–8 a c21–35:
+
+| | R1 | R2 |
+|---|:-:|:-:|
+| tasa a 70 / 52 °C con motor | −1.62 → −1.34 / −0.79 → −0.62 | −1.50 → −1.33 / −0.68 → −0.58 |
+| duty de ext / low | 0.17 → 0.14 / 0.02 → 0 | 0.18 → 0.15 / 0.01 → 0 |
+| motor girando (s) | 35 → 43 | 46 → 57 |
+| de cruzar el margen hasta `low` + 0.5 (s) | 17 → 43 | 5 → 12 |
+
+Todo esto cuadra con un ambiente efectivo que sube ~5 °C (de ~34 a ~38 °C en el banco): es deducción,
+porque nada lo mide directo. **A 40 °C casi no queda gradiente**, y por eso el enfriamiento pesa tanto
+en esta receta. La columna `t_amb` (desde el 04/11/2026,
+[pcr_csv_ciclo_fase.md](pcr_csv_ciclo_fase.md) §7) dará un indicio en la próxima corrida: es la
+temperatura del encapsulado del MLX, no la del aire.
+
+**Margen de parada.** Como R1 y R2 son cámaras distintas, sus 84 s contra 69 s de enfriamiento no lo
+separan; se separa en el banco, con la misma planta:
+
+| enfriamiento (s), ciclos 2–5 / ≥ 18 | margen 5.5 | margen 2 |
+|---|:-:|:-:|
+| planta de R1 | 57 / 83 | 49 / 63 |
+| planta de R2, sin eventos | 62 / 90 | 54 / 67 |
+
+Sin cambio en el *hold* de low, high ni ext. Son 8–23 s menos por ciclo, a favor de 2.
+
+**La tasa por parada se sostiene a medias sin el IR.** Misma parada contra otra, con ventanas que evitan
+los eventos:
+
+| correlación, misma / otra parada | A | B | Newn3 | R1 | R2 |
+|---|:-:|:-:|:-:|:-:|:-:|
+| duty de high(c) con ext(c−1) / ext(c) | +0.14 / −0.25 | −0.46 / +0.42 | +0.40 / +0.07 | **+0.44 / −0.08** | +0.46 / +0.14 |
+| tasa del termopar | — | — | — | **+0.62 / 0.00** | +0.65 / +0.54 |
+
+R1 y Newn3 la apoyan, R2 solo en el duty, y B va al revés. Las correlaciones del §10.3 son del IR. La
+dispersión de la tasa del termopar es del 11 % en R1 y del 16 % en R2.
+
+**El retraso del termopar llega a 2.3 s** (`fit_step.py`, ajustado con la `low` real):
+
+| | `a` (°C/s) | retraso (s) | `a` × retraso (°C) | `coast` de ext usado (°C) |
+|---|:-:|:-:|:-:|:-:|
+| R1 c2–8 / c9–20 / c21–35 | 4.2 / 4.4 / 5.0 | 1.20 / 1.06 / 0.76 | 5.0 / 4.6 / 3.8 | 4.4 / 4.2 / 3.7 |
+| R2 c2–8 / c9–20 / c21–35 | 3.9 / 3.7 / 4.0 | 2.30 / 2.03 / 1.56 | 9.1 / 7.5 / 6.2 | 6.5 / 5.2 / 5.0 |
+
+En R1, el `coast` de ext coincide con `a` × retraso y sigue su tendencia. En R2 queda en 70–80 % de
+ese producto, y su retraso se mide con el peor ajuste (rms 0.29–0.35 °C).
+
+### 12.4 Bloqueo del aprendizaje en la denaturación (R2)
+
+`Adaptive h_denat: duty not learned (mean err +0.93 °C over 60.0 s)`. El duty real es 0.375 y el
+modelo da 0.194. En equilibrio: 0.194 + I 0.086 (saturado) + P 0.104 = 0.384. El *hold* se estabiliza
+~1 °C abajo, con std 0.10 °C. Ese error supera los 0.75 °C del umbral, y **no aprende justo cuando el
+modelo está más equivocado**. El primer *hold* de high tampoco hereda nada.
+
+El umbral protege de un *hold* pasado, que mide duty 0. Uno por debajo mide un duty válido.
+**Propuesta, sin implementar:** admitir error positivo hasta ~2 °C y dejar 0.75 °C para el negativo.
+Bajar el umbral a 0.3 °C, como planteaba el §8.5, agravaría este bloqueo.
+
+### 12.5 Banco actualizado
+
+`test_adaptive_nov.py`, plantas `N4a` (R1) y `N4b` (R2), con cuatro agregados: receta y margen por
+planta, ambiente que sube (`ta_f`), eventos (`ev_*`, tasa
+0.5·(u − 0.4)·(T − 62)/20 por segundo, todo en la lectura) y `real_stats`, que aplica las **mismas
+métricas** a la corrida real. **No usa el IR.** Modos `calib4` y `decomp`. Las plantas viejas dan
+exactamente lo mismo que antes (C, A y B22, 14 ciclos). Media de 6 semillas:
+
+| | high ±1 | high c2–5 | ext ±1 | denat ±1 | pico p90 | pico máx | > +1 | > +2 | std | rampa high (s) | enfriamiento (s) | duty high / ext |
+|---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
+| R1 real | 0.90 | 0.67 | 0.96 | 0.84 | +1.65 | +2.48 | 18 % | 9 % | 0.21 | 7.7 | 84 | 0.30 / 0.15 |
+| R1 simulada | 0.96 | 0.83 | 0.98 | 0.82 | +0.79 | +1.46 | 4 % | 0 % | 0.15 | 7.8 | 83 | 0.31 / 0.16 |
+| R2 real | 0.46 | 0.89 | 0.85 | 0.48 | +6.89 | +9.29 | 91 % | 71 % | 1.36 | 9.2 | 69 | 0.32 / 0.16 |
+| R2 simulada | 0.45 | 0.53 | 0.90 | 0.30 | +7.09 | +13.31 | 86 % | 63 % | 1.41 | 8.4 | 67 | 0.34 / 0.18 |
+
+También reproduce que `h_denat` no aprende en R2 (3 de 3 semillas) y sí en R1, sin ajustar nada para
+eso salvo el duty de la denaturación.
+
+**Dónde falla:**
+
+- Sigue optimista sin eventos: en R1 no da los picos tempranos, y el ±1 de c2–5 sale 0.16 mejor.
+- En R2 pone los primeros ciclos peor que los reales (0.53 contra 0.89), y se pasa en el pico máximo
+  (+13 contra +9) y en el `coast` de high final (9.3 contra 5.3).
+- Subestima los picos de ext de R2 (> +1 °C en 44 % contra 91 %): no tiene la cola lenta.
+- `denat_mult` (1.14) es un ajuste sin explicación: R2 pidió 0.375 en la denaturación y ~0.32 en los
+  *holds*. La entrada a la denaturación de R2 no vale como métrica, porque se queda justo en −1 °C.
+- La forma del evento (nivel, ev_tau 3 s) se eligió para reproducir la estadística, **no es una medida
+  del fenómeno**. Lo calibrado son R1 y R2: no es una predicción independiente.
+
+**Descomposición (simulada):** con cuánto se queda cada planta con y sin eventos.
+
+| planta | high ±1 | > +2 °C | std | `coast` de high final |
+|---|:-:|:-:|:-:|:-:|
+| R1, sin eventos | 0.96 | 0 % | 0.15 | 3.1 |
+| R1, con los eventos de R2 | 0.63 | 59 % | 0.86 | 6.1 |
+| R2, sin eventos | 0.87 | 7 % | 0.32 | 3.4 |
+| R2, con eventos | 0.45 | 63 % | 1.41 | 9.3 |
+
+Los eventos explican la mayor parte de la caída de R2: 0.42 de ±1, contra 0.09 del retraso.
+
+### 12.6 Validez del IR
+
+El usuario duda de la medición por ruido inducido en los cables. Las pruebas están en
+[ir_vs_termopar.md](ir_vs_termopar.md) §8: no aparece la firma de ruido, pero su nivel cambia hasta
+~3 °C de una parada a otra y hasta 9 °C entre cámaras. **Dejó de usarse:** "la muestra estaba a X °C
+según el IR", la zona caliente deducida del desfase IR − termopar y la fracción `ev_real` 0.5 del
+banco. **Sigue en pie sin él:** los eventos y su umbral, el acople, el ambiente, el retraso del
+termopar y el bloqueo de `h_denat`.
+
+**Por validar:** la causa de los eventos (ver la cámara), PEC en la lectura del MLX, y `t_amb` y
+`denat_rate` en las próximas corridas.
+
 __author__ = "Edisson A. Naula"
-__date__ = "$ 03/11/2026 $"
+__date__ = "$ 04/11/2026 $"

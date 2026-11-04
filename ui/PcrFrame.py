@@ -698,7 +698,7 @@ class PCRFrame(ttk.Frame):
         # settings.json leído al arrancar y encabezado de la hoja temperature.
         self.meta_pairs: list = []
         self.run_settings: dict = {}
-        self.temp_cols = ["primary", "secondary", "t_s", "cycle", "phase", "heater_on_s"]
+        self.temp_cols = ["primary", "secondary", "t_s", "cycle", "phase", "heater_on_s", "t_amb"]
         # Resultado del guardado automático de fin de corrida, para mostrarlo en la UI.
         self._save_note = ""
         # Cierre de la corrida (docs/pcr_fin_corrida.md): cómo terminó (fila "end" de
@@ -761,6 +761,8 @@ class PCRFrame(ttk.Frame):
         self.data_phase: list = []
         # Segundos de heater encendido acumulados al recibir cada muestra (lockstep).
         self.data_heater_on: list = []
+        # IR ambiente crudo al recibir cada muestra, None si falló (lockstep).
+        self.data_t_amb: list = []
         self.data_photodetector = []
         self.data_photodetector_series = []
 
@@ -1470,6 +1472,14 @@ class PCRFrame(ttk.Frame):
             # el acumulado no cambia.
             heater_on = self.data_heater_on[-1] if self.data_heater_on else 0.0
         self.data_heater_on.append(heater_on)
+        # IR ambiente, solo para el análisis (docs/pcr_csv_ciclo_fase.md §7): crudo, sin
+        # EMA, y None si la lectura falló. No pasa por _valid para no tocar el watchdog
+        # de "ambas caídas", y no sostiene el último valor para no inventar datos.
+        try:
+            t_amb = None if temps_list[0] is None else float(temps_list[0])
+        except (IndexError, TypeError, ValueError):
+            t_amb = None
+        self.data_t_amb.append(t_amb)
 
     def _note_rx(self, rx_ts):
         """Actualiza el umbral de frescura con los huecos reales entre lecturas válidas.
@@ -1673,6 +1683,7 @@ class PCRFrame(ttk.Frame):
         self.data_cycle = []
         self.data_phase = []
         self.data_heater_on = []
+        self.data_t_amb = []
         self.data_photodetector = []
         self.data_photodetector_series = []
         # Reset del estado de captura/watchdog del par para la nueva corrida.
@@ -1884,8 +1895,8 @@ class PCRFrame(ttk.Frame):
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         save_dir = experiment_dir("pcr")
         meta = self._run_meta()
-        # Seis columnas alineadas por muestra: [primario, secundario, t_s, cycle,
-        # phase, heater_on_s]. Se anexan juntas en update_displayed_temperature;
+        # Siete columnas alineadas por muestra: [primario, secundario, t_s, cycle,
+        # phase, heater_on_s, t_amb]. Se anexan juntas en update_displayed_temperature;
         # zip_longest cubre un desfase de a lo más una muestra si el paro cayó entre
         # los append. El loader del análisis lee las cols 0–2 por posición, así que
         # agregar columnas al final es seguro.
@@ -1897,14 +1908,16 @@ class PCRFrame(ttk.Frame):
                 c,
                 ph,
                 round(h, 4) if h is not None else None,
+                amb,
             ]
-            for p, s, t, c, ph, h in zip_longest(
+            for p, s, t, c, ph, h, amb in zip_longest(
                 self.data_temperature,
                 self.data_temperature_secondary,
                 self.data_time,
                 self.data_cycle,
                 self.data_phase,
                 self.data_heater_on,
+                self.data_t_amb,
             )
         ]
         # timeouts: fases abandonadas por la salvaguarda en el ciclo de esa lectura
@@ -2888,7 +2901,7 @@ class PCRFrame(ttk.Frame):
         # Identidad de columnas de la hoja temperature: col0=primario, col1=secundario.
         primary_label = temp_source_label(self.temp_source)
         secondary_label = temp_source_label_by_index(self._secondary_idx())
-        self.temp_cols = [primary_label, secondary_label, "t_s", "cycle", "phase", "heater_on_s"]
+        self.temp_cols = [primary_label, secondary_label, "t_s", "cycle", "phase", "heater_on_s", "t_amb"]
         fc = self.fluor_cfg
         # OJO: "ts" es el periodo del lazo PI, NO la cadencia de muestreo (esa la
         # manda el firmware del disco y ahora se mide: ver _cadence_meta).
