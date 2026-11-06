@@ -82,6 +82,12 @@ un `*_ramp` que termina sin llegar al setpoint y da paso a su `*_hold`. El detal
 fase, duración/límite) va en la metadata y en la columna `timeouts` del CSV de
 fotodetector ([pcr_timeout_fases.md](pcr_timeout_fases.md) §5).
 
+**Desde el 06/11/2026, en el control adaptativo** el `*_hold` empieza cuando arranca su reloj,
+a ±`hold_arm_c` (1 °C) del setpoint, y no al entrar: el acercamiento queda dentro del
+`*_ramp` (o de `cooling`). Lo declara `_hold_phase` al arrancar el reloj
+([pcr_control_adaptativo.md](pcr_control_adaptativo.md) §13). `final_ext` sigue cubriendo
+acercamiento y *hold*. En el clásico no cambia nada.
+
 El **código** es la llave de los datos: no se renombra. La **etiqueta** es solo pantalla
 y se puede retocar libremente.
 

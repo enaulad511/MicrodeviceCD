@@ -139,6 +139,7 @@ DEFAULT_SETTINGS = {
         "jump_cps": 20.0,
         "hold_pmax": 0.3,
         "coast_margin": 0.0,
+        "hold_arm_c": 1.0,
     },
 }
 

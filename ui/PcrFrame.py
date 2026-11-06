@@ -272,6 +272,12 @@ PCR_ADAPT_DEFAULTS = {
     # 03/11/2026), y la tasa cambia en cada parada del motor, así que apuntar al setpoint
     # se pasa en cerca de la mitad de las rampas. El hold termina el acercamiento.
     "coast_margin": 0.0,
+    # El reloj del hold arranca al llegar a ±hold_arm_c °C del setpoint, no al entrar al
+    # hold (0 = desde la entrada, como antes). La rampa entrega antes de llegar y ese
+    # acercamiento se contaba como hold (04/11/2026: 27 de 35 holds de high entraron a
+    # más de 1 °C). ±1 °C es la tolerancia del objetivo; con ±0.5 la espera tiene colas
+    # largas (hasta 45 s en una denaturación de Newn4).
+    "hold_arm_c": 1.0,
 }
 # Potencia plena mínima para que un pico POR ENCIMA del setpoint enseñe: con un corte
 # inmediato (la rampa arrancó ya pasada del corte) no se midió el calor en vuelo.
@@ -2441,7 +2447,7 @@ class PCRFrame(ttk.Frame):
             print(f"{head} → coast {self._adapt_coast[pid_phase]:.1f} °C")
         return True
 
-    def _hold_adaptive(self, key, setpoint, duration, ts):
+    def _hold_adaptive(self, key, setpoint, duration, ts, code=None):
         """Hold del control adaptativo: feed-forward + PI suave, y aprende el duty.
 
         Dentro de la banda se mantiene feed-forward + I (el clásico fuerza 0). El duty
@@ -2453,6 +2459,13 @@ class PCRFrame(ttk.Frame):
         hold_pmax dejaba la fase lejos del setpoint. Se suelta mientras falte más que el
         calor en vuelo de esa rampa y ya no vuelve a soltarse: si el disco se realinea, la
         tasa normal regresa de golpe y sin freno se pasaría.
+
+        Reloj: `duration` cuenta desde la primera lectura fresca a ±hold_arm_c del
+        setpoint. Antes de eso el control es el mismo (el hold termina el acercamiento),
+        pero la fase sigue siendo la anterior (rampa o cooling) y `code` se declara al
+        arrancar el reloj. Arranca de inmediato si la rampa venció (no alargar un atasco)
+        y, como red, al vencer un plazo propio de acercamiento (_phase_deadline sobre el
+        error de entrada); ese plazo solo arranca el reloj, no es un timeout de fase.
         """
         cfg = self.adapt_cfg
         pin = self.pin_heating
@@ -2465,19 +2478,38 @@ class PCRFrame(ttk.Frame):
         if released:
             print(f"Adaptive {key}: ramp timed out → power cap released until {release_above:.1f} °C below setpoint")
         window = cfg["hold_win"]
+        arm_c = cfg["hold_arm_c"]
         integ = 0.0
-        t0 = time.time()
+        t_entry = time.time()
+        _, arm_deadline, _ = self._phase_deadline(abs(setpoint - self.temp) * self.timeout_cfg["s_per_c"])
+
+        def start_clock(now):
+            if code:
+                self._enter_phase(code)
+            return now
+
+        t0 = start_clock(t_entry) if arm_c <= 0 or released else None
         mid: "tuple | None" = None  # (instante, heater_on_s) al pasar la mitad
         err_sum, err_n = 0.0, 0
-        while time.time() - t0 <= duration and not stop.is_set():
+        while not stop.is_set():
             now = time.time()
-            if mid is None and now >= t0 + duration / 2:
-                mid = (now, pin.on_s(now))
+            if t0 is None and arm_deadline is not None and now > arm_deadline:
+                print(f"Adaptive {key}: not within ±{arm_c:g} °C after {now - t_entry:.1f} s → hold clock started anyway")
+                t0 = start_clock(now)
+            if t0 is not None:
+                if now - t0 > duration:
+                    break
+                if mid is None and now >= t0 + duration / 2:
+                    mid = (now, pin.on_s(now))
             if now - self.temp_ts > max(ts, self.fresh_age_s):
                 pin.write(False)  # temperatura vieja → apagar por seguridad
                 time.sleep(window / 2)
                 continue
             error = setpoint - self.temp
+            if t0 is None and abs(error) <= arm_c:
+                if now - t_entry >= 0.1:
+                    print(f"Adaptive {key}: within ±{arm_c:g} °C after {now - t_entry:.1f} s → hold clock started")
+                t0 = start_clock(now)
             if mid is not None:
                 err_sum += error
                 err_n += 1
@@ -2514,16 +2546,22 @@ class PCRFrame(ttk.Frame):
         return (
             f"on ff {cfg['ff_slope']:g}/{cfg['ff_t0']:g}C learn {cfg['ff_learn']:g}"
             f" hold kp {cfg['hold_kp']:g} ki {cfg['hold_ki']:g} imax {cfg['hold_imax']:g}"
-            f" pmax {cfg['hold_pmax']:g}"
+            f" pmax {cfg['hold_pmax']:g} arm {cfg['hold_arm_c']:g}C"
             f" coast init {cfg['coast_init']:g}/{cfg['coast_init_cycle']:g}C learn {cfg['coast_learn']:g}"
             f" step {cfg['coast_step_max']:g}C jump {cfg['jump_cps']:g}C/s margin {cfg['coast_margin']:g}C"
             f" | bias {bias} | coast {coast}"
         )
 
-    def _hold_phase(self, phase, setpoint, duration, ts):
+    def _hold_phase(self, phase, setpoint, duration, ts, code=None):
+        """Hold de `duration` s. `code` (p. ej. "high_hold") es la fase que se declara
+        cuando arranca el reloj: al entrar en el clásico, al llegar al setpoint en el
+        adaptativo (hold_arm_c). Los callers no la declaran antes: el acercamiento
+        quedaría etiquetado como hold. None = no cambia la fase (extensión final)."""
         if self.adapt_cfg["enabled"]:
-            self._hold_adaptive(phase, setpoint, duration, ts)
+            self._hold_adaptive(phase, setpoint, duration, ts, code)
             return
+        if code:
+            self._enter_phase(code)
         params = self._load_phase_pid(phase, ts)
         self.hold_temperature(
             setpoint,
@@ -2646,10 +2684,9 @@ class PCRFrame(ttk.Frame):
                 "high_ramp", high_temp, "high", ts, break_if_below=(idx == 0 and not denat_skipped)
             )
 
-            # Hold High
-            self._enter_phase("high_hold")
+            # Hold High (la fase high_hold la declara _hold_phase al arrancar el reloj)
             print(f"Holding temperature for {time_high} seconds")
-            self._hold_phase("h_high", high_temp, time_high, ts)
+            self._hold_phase("h_high", high_temp, time_high, ts, "high_hold")
         else:
             print("Skipping High phase: time <= 0")
 
@@ -2704,9 +2741,8 @@ class PCRFrame(ttk.Frame):
 
         # Hold Low
         if not _skip(time_low):
-            self._enter_phase("low_hold")
             print(f"Holding LOW temperature for {time_low} seconds")
-            self._hold_phase("h_low", low_temp, time_low, ts)
+            self._hold_phase("h_low", low_temp, time_low, ts, "low_hold")
         else:
             print("Skipping Low phase: time <= 0")
 
@@ -2719,9 +2755,8 @@ class PCRFrame(ttk.Frame):
             self._reach_phase("ext_ramp", ext_temp, "ext", ts, break_if_below=False)
 
             # Hold Ext
-            self._enter_phase("ext_hold")
             print(f"Holding extension temperature for {ext_time} seconds")
-            self._hold_phase("h_ext", ext_temp, ext_time, ts)
+            self._hold_phase("h_ext", ext_temp, ext_time, ts, "ext_hold")
             print(f"Hold ext complete, end of cycle {idx}")
         else:
             print("Skipping Extension phase: time <= 0")
@@ -3027,8 +3062,7 @@ class PCRFrame(ttk.Frame):
             self._reach_phase("denat_ramp", denat_temp, "denat", ts, break_if_below=False)
 
             # ----- Denaturation Hold
-            self._enter_phase("denat_hold")
-            self._hold_phase("h_denat", denat_temp, denat_time, ts)
+            self._hold_phase("h_denat", denat_temp, denat_time, ts, "denat_hold")
             print(f"Denaturation complete, temperature: {self.temp} °C")
         else:
             print("Skipping Denaturation phase: time <= 0")

@@ -9,6 +9,8 @@
 > **03/11/2026, ajuste final (§11):** objetivo del usuario, tiempo en ±1 °C sin picos en high ni denat. Siete valores nuevos en `pcr_adaptive` y tres cambios de código.
 >
 > **04/11/2026, corridas Newn4 (§12):** el ajuste final **cumple en una cámara sin eventos** y falla en la otra, con **eventos de calor** discretos que el control no puede corregir. El modelo de la planta cambia: lo que varía entre corridas es el acople del heater, no la masa, y durante la corrida se calienta el ambiente del equipo.
+>
+> **06/11/2026, reloj del *hold* (§13):** el tiempo del *hold* contaba desde que la rampa entregaba, antes de llegar al setpoint. Ahora arranca a ±`hold_arm_c` (1 °C) del setpoint. Falta validarlo en el equipo.
 
 Archivo: [ui/PcrFrame.py](../ui/PcrFrame.py) (`_ramp_adaptive`, `_hold_adaptive`,
 `_adaptive_cfg`). Config: `settings.json` → `pcr_adaptive`. **Apagado por defecto.**
@@ -83,6 +85,10 @@ disco durante la corrida**.
 - **Aprende** el duty medido por `heater_on_s` en la segunda mitad del *hold*, con peso
   `ff_learn`, solo si duró ≥ 2 s y el error medio fue ≤ 0.75 °C. Un *hold* pasado de
   temperatura mide 0, y eso no es el duty de régimen.
+- **Reloj** (§13): el tiempo del *hold* cuenta desde la primera lectura fresca a
+  ±`hold_arm_c` del setpoint. Antes de eso el control es el mismo, pero la fase sigue siendo
+  la anterior (`*_ramp` o `cooling`). Arranca de inmediato tras una rampa vencida y, como red,
+  al vencer su propio plazo de acercamiento.
 
 Todo lo aprendido se reinicia en cada corrida: el disco cambia.
 
@@ -101,6 +107,7 @@ Pi; el default del repo sigue en 0.
 | `hold_kp`, `hold_ki`, `hold_imax` | 0.1, 0.03, 3 | PI suave sobre el *feed-forward* (techo del I ≈ ±0.12) |
 | `hold_tband`, `hold_win` | 0.05, 0.05 | banda (sin P) y ventana de PWM (s) |
 | `hold_pmax` | 0.3 | tope de la potencia del *hold* sobre el *feed-forward* (0 = sin tope) |
+| `hold_arm_c` | 1 °C | el reloj del *hold* arranca a ±este valor del setpoint (0 = desde la entrada, como antes; §13) |
 | `coast_init` | 4 °C | calor en vuelo supuesto en la rampa de denat (una por corrida) |
 | `coast_init_cycle` | 8 °C | ídem en high y ext antes de medir (26/10: convergió a 6.3–9.8) |
 | `coast_learn` | 0.5 | ganancia: coast += coast_learn·(pico − setpoint) |
@@ -121,7 +128,9 @@ equipo.
   `Adaptive ext ramp: cut at 56.9 °C (coast 7.1), peak 64.9 °C → coast 7.0 °C` y
   `Adaptive h_high: duty 0.202 (mean err −0.03 °C) → bias 0.203` (o `not learned`). Una
   rampa con salto del termopar imprime
-  `…, peak 92.3 °C, rise 31 °C/s (thermocouple jump) → coast kept`.
+  `…, peak 92.3 °C, rise 31 °C/s (thermocouple jump) → coast kept`. Si el *hold* tardó en
+  llegar: `Adaptive h_high: within ±1 °C after 1.3 s → hold clock started` (o
+  `not within ±1 °C after 20.0 s → hold clock started anyway`, §13).
 - **Metadata** (fila `adaptive`): `off`, o la config y lo aprendido al final
   (`on … pmax 0.4 coast init 8/8C learn 0.5 step 2C jump 20C/s margin 0.5C | bias h_high 0.212 … |
   coast ext 7.0 high 7.1`). `an_adaptive.py` solo lee la parte desde `| bias`.
@@ -929,5 +938,86 @@ termopar y el bloqueo de `h_denat`.
 **Por validar:** la causa de los eventos (ver la cámara), PEC en la lectura del MLX, y `t_amb` y
 `denat_rate` en las próximas corridas.
 
+## 13. El reloj del *hold* arranca en el setpoint (06/11/2026)
+
+**Lo que vio el usuario:** el tiempo de los *holds* empezaba a contar antes de llegar a la
+temperatura.
+
+**Causa.** Es parte del diseño del §2: la rampa adaptativa entrega al terminar la subida rápida,
+y "el resto del acercamiento lo hace el *hold*". En high, además, apunta a `setpoint −
+coast_margin` (§11). El *hold* tomaba su `t0` al entrar, así que ese acercamiento se contaba
+como tiempo de *hold*. El clásico no tiene el problema: su rampa termina a 0.5 °C.
+
+**Medido** (columna `phase`, temperatura que ve el control; *holds* que entraron a más de 1 °C
+del setpoint, y segundos hasta llegar a ±1 °C):
+
+| corrida | high (15 s) | ext (22 s) | denat (120 s) | low | extensión final |
+|---|---|---|---|---|---|
+| Newn4 R2 (15:09) | 27 de 35, mediana 1.5 s, máx 5.2 s | 8 de 35, máx 7.4 s | −4.3 °C, 9.8 s | 0 | −1.4 °C, 2.1 s |
+| Newn4 R1 (13:06) | 27 de 35, mediana 0.7 s, máx 3.0 s | 8 de 35, máx 4.6 s | −6.1 °C, 8.6 s | 0 | −1.9 °C, 1.5 s |
+| Newn3 | 18 de 35, máx 4.0 s (sin atascos) | 5 de 35 | −3.0 °C, 20.6 s | 0 | −1.1 °C, 2.1 s |
+| Newn2 (19:23) | 10 de 35, máx 2.7 s | 9 de 35 | +2.8 °C, 0.6 s | 0 | −1.2 °C, 0.9 s |
+
+El *hold* de low entra siempre dentro de ±1 °C: el enfriamiento ya espera a `low + 0.5`.
+
+**Cambio** ([PcrFrame.py:2450](../ui/PcrFrame.py#L2450), `_hold_adaptive`):
+
+- El reloj arranca en la primera lectura fresca con |setpoint − T| ≤ `hold_arm_c`. Hasta
+  entonces el control es **el mismo** (mismo *feed-forward*, PI, freno e integral desde la
+  entrada): solo se mueve el inicio del conteo, y con él la mitad que usa el aprendizaje del
+  duty.
+- La fase `*_hold` se declara cuando arranca el reloj, así que en los datos y en pantalla el
+  acercamiento queda como `*_ramp` (o `cooling`). Por eso `_hold_phase` recibe el código
+  ([PcrFrame.py:2555](../ui/PcrFrame.py#L2555)) y los callers ya no llaman a `_enter_phase` antes.
+  En el clásico se declara al entrar, como antes. La extensión final no cambia de fase:
+  `final_ext` cubre el acercamiento y el *hold*.
+- **Rampa vencida** (atasco): arranca de inmediato, como antes. Esperar alargaría el atasco, y
+  ese ciclo ya quedó registrado como fallido.
+- **Red:** si no llega, arranca al vencer un plazo propio, `_phase_deadline` sobre el error de
+  entrada (en la práctica el piso de 20 s). Imprime `hold clock started anyway`. **No es un
+  timeout de fase:** no cuenta como ciclo fallido. Registrarlo como timeout habría podido
+  abortar una corrida lenta por tres acercamientos lentos seguidos (`max_failed_cycles`).
+- `hold_arm_c 0` = reloj desde la entrada, idéntico al código anterior.
+
+**Por qué ±1 °C y no ±0.5:** ±1 es la tolerancia del objetivo (§11). Con ±0.5, el *hold* puede
+quedarse largo rato entre 0.5 y 1 °C, y la espera tiene colas largas: 45 s en la denaturación
+de Newn4 R1 (contra 8.6 s con ±1), y hasta 14 s en *holds* de high y de low.
+
+**Banco** (código real en tiempo virtual, plantas N4a, N4b, C, B22 y Clate, 3 semillas, ajuste del
+Pi; arnés en la scratchpad, igual a `run()` de `test_adaptive_nov.py` pero pasando el código al
+*hold*):
+
+| planta | *holds* de high > 1 °C, antes → ahora | high en ±1 (temperatura vista) | denat en ±1 | duración de la corrida |
+|---|:-:|:-:|:-:|:-:|
+| N4a | 10.3 → 0.3 | 0.97 → 1.00 | 0.80 → 0.89 | +41 s |
+| N4b (eventos) | 32 → 0 | 0.47 → 0.56 | 0.12 → 0.15 | +128 s |
+| C | 17.3 → 0.3 | 0.93 → 0.99 | 0.90 → 0.97 | +63 s |
+| B22 | 10 → 0 | 0.98 → 1.00 | 0.99 → 1.00 | +16 s |
+| Clate | 18.7 → 0.3 | 0.93 → 0.99 | 0.90 → 1.00 | +65 s |
+
+- `hold_arm_c 0` da datos **idénticos** al código anterior en las cinco plantas.
+- Los picos casi no cambian (p90 de high ±0.07 °C). En N4b el máximo pasó de +5.4 a +6.6 °C:
+  los eventos de esa planta son aleatorios y las trayectorias divergen (p90 2.39 → 2.44).
+- Con atascos (C, ciclos 11 y 28): mismos 4 timeouts. Los *holds* de high y ext que entran lejos
+  son los de las rampas vencidas, como se buscaba.
+- En N4b, una de cada tres semillas llegó a la red una vez.
+- Cuesta 0.5–1.9 s por ciclo, 3.7 s en N4b. La ETA lo absorbe desde el primer ciclo (usa la
+  duración medida), pero la preview no lo incluye.
+
+**Ojo con las métricas.** Desde este cambio, `*_hold` en los datos es el *hold* contado, y el
+acercamiento queda en `*_ramp`. Las fracciones en ±1 por fase, la duración de las rampas
+(`hi_rs`, `ex_rs`) y la entrada a la denaturación (`t_de`) de las corridas nuevas no se comparan
+directamente con las de antes. Para comparar, en las viejas hay que cortar cada *hold* en su
+primera muestra a ±1 °C. `run()` de `test_adaptive_nov.py` y `test_adaptive_26oct.py` siguen
+declarando la fase antes de llamar a `_hold_phase`. Con el código nuevo, eso etiqueta el
+acercamiento como *hold*, así que para medir este cambio hay que pasarle el código.
+
+**Por validar en el equipo:**
+
+- [ ] La consola imprime `within ±1 °C after … s → hold clock started` en la mayoría de los *holds*
+      de high, y casi nunca `started anyway`.
+- [ ] En los datos, `high_hold` y `denat_hold` empiezan a ±1 °C y duran lo programado.
+- [ ] Sin timeouts nuevos, y el ciclo dura ~1–4 s más.
+
 __author__ = "Edisson A. Naula"
-__date__ = "$ 04/11/2026 $"
+__date__ = "$ 06/11/2026 $"
