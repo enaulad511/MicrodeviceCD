@@ -94,6 +94,14 @@ está ahí; 🗑 Clean es la pizarra en blanco si la quieren.
 - **Load:** agrupa por **(run, cycle)** y dibuja una línea por par (etiqueta
   `…-r{run}c{cycle}`). La columna `run` es **opcional**: si falta (CSV viejo de 4 columnas)
   se asume `run=0` — retrocompatible.
+- **Pestaña Peaks (CV)** (10/11/2026): Load File crea **un experimento por corrida**
+  (`<archivo>-r{run}`) con sus ciclos (`c0…`), así la tendencia mean ± std es por corrida
+  ([peaks.py `load_file`](../ui/analysis/peaks.py)). Con una sola corrida (o sin columna
+  `run`) conserva el nombre del archivo. Antes agrupaba solo por `cycle` y fundía todas las
+  corridas en N curvas (un archivo de 8 corridas × 3 ciclos salía como 1 experimento con
+  3 ciclos de 8 barridos concatenados). El sembrado desde las `loaded_lines` del plotter
+  (`_snapshot_from_plotter`) aplica el mismo criterio al parsear `…-r{run}c{cycle}`; antes
+  solo entendía el formato viejo `…-c{cycle}` y cada traza salía como experimento suelto.
 
 ## 6. A verificar en hardware
 

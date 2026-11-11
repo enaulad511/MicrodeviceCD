@@ -167,6 +167,15 @@ empuja el mínimo del `LabelFrame`); con columnas de 150+70 (`minwidth` 80/50) y
 «Experiments» la figura gana ~130 px. La ganancia es en píxeles, así que vale igual en
 Linux, donde el título largo habría empujado el mínimo todavía más.
 
+**`<Configure>` de 1 px al abrir (10/11/2026).** Al abrir la ventana de análisis, el canvas
+recibe un `<Configure>` transitorio de **584×1 px** (antes de que el `PanedWindow` dentro del
+área con scroll propague el alto pedido), y luego el real (800×540). Matplotlib reescalaba la
+figura a 1 px y `constrained_layout` imprimía `UserWarning: constrained_layout not applied
+because axes sizes collapsed to zero` en cada apertura, aunque el gráfico quedaba bien.
+`_create_plot_canvas` reemplaza el bind `<Configure>` de matplotlib por uno que ignora
+eventos con ancho o alto ≤ 1 px ([pcr.py `_create_plot_canvas`](../ui/analysis/pcr.py)). No es
+el colapso por leyenda grande de [EventEmstatFrame.py](../ui/EventEmstatFrame.py) (`ncol`).
+
 ## 4.2 Ventana de muestras (solo vista, global)
 
 Campos **"Show samples: [start]–[end]"** + botón **"⤢ Full"** en la barra `toolbar2`

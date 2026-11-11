@@ -3,6 +3,7 @@ import os
 import re
 import time
 from tkinter.filedialog import askopenfilename, asksaveasfilename
+from typing import TYPE_CHECKING
 
 import numpy as np
 import ttkbootstrap as ttk
@@ -18,6 +19,31 @@ from templates.xlsx_io import (
     xlsx_path,
 )
 from ui.analysis.common import CycleCurve, Experiment, _apply_filter, plt
+from ui.analysis.pcr import PLOT_FIG_W_IN, PLOT_IN_PER_WEIGHT
+
+if TYPE_CHECKING:
+    from matplotlib.axes import Axes
+
+
+# ---------------------------------------------------------------------------
+# Vistas del área de gráficas (mismo esquema que la pestaña PCR)
+# ---------------------------------------------------------------------------
+# Cada vista es la lista de ejes que se construyen, por clave. Los que no están en la
+# vista **no se crean** (`self.ax_* = None`) y todo el código de dibujo lo tolera.
+PLOT_VIEWS = {
+    "Overlay": ("overlay",),
+    "Trends": ("min", "max"),
+    "All (3)": ("overlay", "min", "max"),
+}
+PLOT_VIEW_NAMES = tuple(PLOT_VIEWS)
+PLOT_VIEW_DEFAULT = "Overlay"
+
+# Peso relativo de cada eje: el overlay (el interactivo: hover, Pick X) se lleva 1.5 veces
+# lo de las tendencias. El alto de la figura es `PLOT_IN_PER_WEIGHT · Σ pesos`, con la
+# MISMA constante que PCR (se importa de ahí): un gráfico mide lo mismo solo o acompañado,
+# y en las dos pestañas; la vista solo cambia cuánto scroll hay que recorrer. **No atar
+# esto a `winfo_height()`** — en la Raspberry salían diminutos. Ver docs/pcr_analisis.md §4.4.
+PLOT_ROW_WEIGHT = {"overlay": 3, "min": 2, "max": 2}
 
 
 # ---------------------------------------------------------------------------
@@ -25,15 +51,29 @@ from ui.analysis.common import CycleCurve, Experiment, _apply_filter, plt
 # ---------------------------------------------------------------------------
 
 
+# Etiquetas de EventPlotter.load_data: 'file-r{run}c{cycle}' (actual, con Keep runs)
+# o 'file-c{cycle}' (legado, sin columna run).
+_LBL_RUN_RE = re.compile(r"^(.+)-r(\d+)c(\d+)$")
 _LBL_RE = re.compile(r"^(.+)-c(\d+)$")
 
 
 def _parse_imported_label(label):
-    """Convierte 'file-c3' → ('file', 3); si no matchea, ('label', 0)."""
-    m = _LBL_RE.match(str(label))
+    """Convierte 'file-r2c3' → ('file', 2, 3) y 'file-c3' → ('file', None, 3);
+    si no matchea, ('label', None, None)."""
+    s = str(label)
+    m = _LBL_RUN_RE.match(s)
     if m:
-        return m.group(1), int(m.group(2))
-    return str(label), 0
+        return m.group(1), int(m.group(2)), int(m.group(3))
+    m = _LBL_RE.match(s)
+    if m:
+        return m.group(1), None, int(m.group(2))
+    return s, None, None
+
+
+def _run_experiment_name(base, run, n_runs):
+    """Un Experiment por corrida: 'file-r{run}' si el archivo trae varias corridas;
+    con una sola (o sin columna run) conserva el nombre del archivo."""
+    return f"{base}-r{run}" if n_runs > 1 else base
 
 
 def _global_extrema(xs, ys):
@@ -97,6 +137,14 @@ class PeakAnalysisFrame(ttk.Frame):
         # estado para picking de X desde la gráfica overlay
         self._pick_cid: int | None = None
         self._pick_kind: str | None = None  # 'max' | 'min' | None
+        # Resultado dibujable del último Compute (markers, guías At X, tendencias). Se
+        # guarda para que cambiar de vista redibuje sin recalcular; None = nada computado
+        # o invalidado porque cambiaron los datos (_refresh_overlay).
+        self._computed: dict | None = None
+        # Ejes de la vista actual; los que la vista no pide quedan en None.
+        self.ax_overlay: "Axes | None" = None
+        self.ax_min: "Axes | None" = None
+        self.ax_max: "Axes | None" = None
 
         self._build_ui()
         # Solo CV alimenta la tabla de picos desde las líneas cargadas del plotter;
@@ -146,6 +194,20 @@ class PeakAnalysisFrame(ttk.Frame):
         ttk.Button(
             toolbar_b, text="📊 Compute", bootstyle="success", command=self.compute_extrema
         ).pack(side=ttk.LEFT, padx=3)
+
+        # Qué ejes se dibujan (como en PCR). Cada gráfico mide siempre lo mismo, así que
+        # esto no cambia el tamaño sino cuánto scroll hay que recorrer. Cambiar de vista
+        # no recalcula: redibuja el último Compute.
+        ttk.Label(toolbar_b, text="View:").pack(side=ttk.LEFT, padx=(12, 4))
+        self.view_var = ttk.StringVar(value=PLOT_VIEW_DEFAULT)
+        ttk.Combobox(
+            toolbar_b,
+            textvariable=self.view_var,
+            values=PLOT_VIEW_NAMES,
+            state="readonly",
+            width=10,
+        ).pack(side=ttk.LEFT)
+        self.view_var.trace_add("write", lambda *_a: self._redraw())
 
         # --- Toolbar fila 2: selectores de picos + filtro ---
         toolbar2 = ttk.Frame(self)
@@ -220,6 +282,13 @@ class PeakAnalysisFrame(ttk.Frame):
         self.lbl_cross = ttk.Label(toolbar3, text="", anchor="e")
         self.lbl_cross.pack(side=ttk.RIGHT, padx=6)
 
+        # Barra de navegación de matplotlib (zoom/pan/home/save) en fila propia, FUERA del
+        # área con scroll (como en PCR, docs/pcr_analisis.md §4.3): colgada bajo el canvas
+        # quedaba al pie de la figura, que en "All (3)" mide ~1260 px. Sirve a cualquier
+        # eje. El contenedor es persistente; _reset_plot_canvas recrea el toolbar dentro.
+        self._mpl_toolbar_host = ttk.Frame(self)
+        self._mpl_toolbar_host.pack(side=ttk.TOP, fill=ttk.X, padx=6, pady=(0, 4))
+
         # Status bar anclado al fondo antes de que el área de scroll ocupe el centro
         self.lbl_status = ttk.Label(self, text="Ready.", anchor="w")
         self.lbl_status.pack(side=ttk.BOTTOM, fill=ttk.X, padx=6, pady=(0, 4))
@@ -232,7 +301,7 @@ class PeakAnalysisFrame(ttk.Frame):
         _vsb_main.pack(side=ttk.RIGHT, fill=ttk.Y)
 
         self._main_sc = ttk.Canvas(_wrap, bd=0, highlightthickness=0, yscrollcommand=_vsb_main.set)
-        self._main_sc.pack(side=ttk.LEFT, fill=ttk.BOTH, expand=True)
+        self._main_sc.pack(side=ttk.LEFT, fill=ttk.BOTH, expand=True, padx=(5, 20))
         _vsb_main.configure(command=self._main_sc.yview)
 
         # Frame interior donde vive todo el contenido
@@ -282,7 +351,7 @@ class PeakAnalysisFrame(ttk.Frame):
         self.tree_curves.bind("<Double-1>", self._begin_rename)
         self._rename_entry: "ttk.Entry | None" = None  # Entry overlay activo (None = ninguno)
 
-        # Right: figura con 3 ejes
+        # Right: figura con los ejes de la vista (overlay / tendencias min, max)
         right = ttk.Frame(main)
         main.add(right, weight=4)
         right.bind("<MouseWheel>", _on_wheel)
@@ -316,27 +385,65 @@ class PeakAnalysisFrame(ttk.Frame):
     # ---------------------------------------------------------------------
     # Canvas de la figura (se recrea limpio en cada redibujo)
     # ---------------------------------------------------------------------
+    # Título / etiquetas por eje, indexados por la misma clave que PLOT_VIEWS.
+    AX_SPECS = {
+        "overlay": ("Curves overlay", "", ""),
+        "min": ("Min Peaks Trend", "Experiment", ""),
+        "max": ("Max Peaks Trend", "Experiment", ""),
+    }
+
+    def _current_view(self):
+        """Claves de los ejes que pide la vista actual (cae al default si es inválida)."""
+        return PLOT_VIEWS.get(self.view_var.get(), PLOT_VIEWS[PLOT_VIEW_DEFAULT])
+
     def _create_plot_canvas(self):
-        self.fig = Figure(figsize=(8, 6), dpi=100, layout="constrained")
-        gs = self.fig.add_gridspec(2, 2)
-        self.ax_overlay = self.fig.add_subplot(gs[0, :])
-        self.ax_min = self.fig.add_subplot(gs[1, 0])
-        self.ax_max = self.fig.add_subplot(gs[1, 1])
-        self.ax_overlay.set_title("Curves overlay")
-        self.ax_min.set_title("Min trend (mean ± std)")
-        self.ax_max.set_title("Max trend (mean ± std)")
-        self.ax_min.set_xlabel("Experiment index")
-        self.ax_max.set_xlabel("Experiment index")
+        # Ejes apilados en una columna, alto proporcional a los de la vista (ver
+        # PLOT_ROW_WEIGHT). El ancho es solo el pedido inicial: Tk estira el canvas al
+        # ancho del panel y matplotlib reescala.
+        keys = self._current_view()
+        weights = [PLOT_ROW_WEIGHT[k] for k in keys]
+        self.fig = Figure(
+            figsize=(PLOT_FIG_W_IN, PLOT_IN_PER_WEIGHT * sum(weights)),
+            dpi=100,
+            layout="constrained",
+        )
+        gs = self.fig.add_gridspec(len(keys), 1, height_ratios=weights)
+        # Todos arrancan en None: los ejes fuera de la vista no existen y el dibujo los
+        # saltea en vez de pintar sobre un eje fantasma.
+        self.ax_overlay = self.ax_min = self.ax_max = None
+        for row, key in enumerate(keys):
+            ax = self.fig.add_subplot(gs[row])
+            title, xlabel, ylabel = self.AX_SPECS[key]
+            ax.set_title(title)
+            ax.set_xlabel(xlabel)
+            ax.set_ylabel(ylabel)
+            setattr(self, f"ax_{key}", ax)
         self.canvas = FigureCanvasTkAgg(self.fig, self._plot_host)
-        self.canvas.get_tk_widget().pack(fill=ttk.BOTH, expand=True)
-        self.toolbar_mpl = NavigationToolbar2Tk(self.canvas, self._plot_host, pack_toolbar=False)
+        tkw = self.canvas.get_tk_widget()
+        # Mismo guard que PCR (docs/pcr_analisis.md §4.4): al abrir, Tk manda un
+        # <Configure> transitorio de 1 px de alto y constrained_layout avisa "axes sizes
+        # collapsed to zero". Se ignora; el siguiente trae el tamaño real.
+        tkw.bind(
+            "<Configure>",
+            lambda e: self.canvas.resize(e) if e.width > 1 and e.height > 1 else None,
+        )
+        tkw.pack(fill=ttk.BOTH, expand=True)
+        # El toolbar cuelga del contenedor fijo, no del área con scroll.
+        self.toolbar_mpl = NavigationToolbar2Tk(
+            self.canvas, self._mpl_toolbar_host, pack_toolbar=False
+        )
         self.toolbar_mpl.pack(fill=ttk.X)
         self.canvas.mpl_connect("motion_notify_event", self._on_hover)
+        # Re-arma el Pick X@max/min si seguía pendiente (el canvas se recrea en cada
+        # redibujo, invalidando el cid anterior). Sin overlay en la vista queda en
+        # espera y se re-arma al volver a una vista que lo traiga.
+        if self._pick_kind is not None and self.ax_overlay is not None:
+            self._pick_cid = self.canvas.mpl_connect("button_press_event", self._on_pick)
 
     def _reset_plot_canvas(self):
         # Destruye canvas+toolbar y los recrea desde cero (mismo patrón que
         # EISAnalysisFrame): evita estado residual de constrained_layout en el canvas
-        # Tk vivo. Un pick mode activo queda invalidado: su cid apuntaba al canvas viejo.
+        # Tk vivo. El cid del pick apuntaba al canvas viejo; _create_plot_canvas lo re-arma.
         self._pick_cid = None
         try:
             self.toolbar_mpl.destroy()
@@ -352,8 +459,10 @@ class PeakAnalysisFrame(ttk.Frame):
     # Estado y refresco
     # ---------------------------------------------------------------------
     def _snapshot_from_plotter(self, plotter):
-        """Snapshot de loaded_lines del EventPlotter, agrupando por filename."""
-        groups = {}  # filename → list[(cycle_num, xs, ys, raw_label)]
+        """Snapshot de loaded_lines del EventPlotter: un Experiment por (archivo, corrida),
+        con sus ciclos (mismo criterio que load_file)."""
+        # filename → run → list[(cycle_num, xs, ys, raw_label)]
+        groups: dict[str, dict[int | None, list]] = {}
         for line in getattr(plotter, "loaded_lines", []):
             try:
                 xs = np.asarray(line.get_xdata(), dtype=float)
@@ -362,14 +471,18 @@ class PeakAnalysisFrame(ttk.Frame):
                 continue
             if xs.size == 0:
                 continue
-            base, cyc = _parse_imported_label(line.get_label())
-            groups.setdefault(base, []).append((cyc, xs, ys, line.get_label()))
-        for base, items in groups.items():
-            exp = Experiment(name=base)
-            items.sort(key=lambda t: t[0])
-            for cyc, xs, ys, raw in items:
-                exp.cycles.append(CycleCurve(name=f"c{cyc}" if cyc else raw, xs=xs, ys=ys))
-            self.experiments.append(exp)
+            raw = line.get_label()
+            base, run, cyc = _parse_imported_label(raw)
+            groups.setdefault(base, {}).setdefault(run, []).append((cyc, xs, ys, raw))
+        for base, runs in groups.items():
+            for run in sorted(runs, key=lambda r: -1 if r is None else r):
+                exp = Experiment(name=_run_experiment_name(base, run, len(runs)))
+                items = runs[run]
+                items.sort(key=lambda t: -1 if t[0] is None else t[0])
+                for cyc, xs, ys, raw in items:
+                    name = f"c{cyc}" if cyc is not None else raw
+                    exp.cycles.append(CycleCurve(name=name, xs=xs, ys=ys))
+                self.experiments.append(exp)
 
     def _refresh_tree(self):
         """Reconstruye el árbol izquierdo y el mapa de iids."""
@@ -456,25 +569,45 @@ class PeakAnalysisFrame(ttk.Frame):
                 pass
 
     def _refresh_overlay(self):
-        """Redibuja overlay: muestra filtrado si filtro activo, sino raw.
+        """Los datos cambiaron (carga, borrado, visibilidad, import): descarta lo dibujado
+        del último Compute y redibuja. Markers y tendencias quedan en blanco hasta el
+        siguiente Compute, que es lo correcto porque dependen de datos/filtro que pudieron
+        cambiar (la tabla de resultados no se toca, como siempre)."""
+        self._computed = None
+        self._redraw()
 
-        Recrea el canvas (no ax.clear()): las tendencias (ax_min/ax_max) quedan en
-        blanco hasta el siguiente Compute, que es lo correcto porque dependen del
-        filtro/datos que pudieron cambiar. compute_extrema redibuja todo tras esto."""
-        kind = self.filter_var.get()
-        fw = max(1, self.filter_window_var.get() or 1)
+    def _redraw(self):
+        """Recrea el canvas (no ax.clear()) y dibuja los ejes de la vista actual: overlay
+        + lo guardado del último Compute. No recalcula nada: cambiar de vista solo cambia
+        qué se ve."""
         self._reset_plot_canvas()
-        # self.ax_overlay.set_title(
-        #     "Curves overlay" + (f" (filtered: {kind})" if kind != "none" else "")
-        # )
-        self.ax_overlay.set_title("Curves overlay" if kind != "none" else "")
+        comp = self._computed
+        self._draw_overlay(comp)
+        if comp is not None:
+            self._draw_computed(comp)
+        self.canvas.draw_idle()
+
+    def _draw_overlay(self, comp):
+        """Curvas visibles, filtradas si hay filtro. Con un Compute guardado usa SU filtro,
+        no el de la UI: los markers se calcularon sobre esas curvas y un cambio de vista
+        no debe separarlos de la línea."""
+        ax = self.ax_overlay
+        if ax is None:
+            return
+        if comp is not None:
+            kind, fw = comp["filter"], comp["filter_window"]
+        else:
+            kind = self.filter_var.get()
+            fw = max(1, self.filter_window_var.get() or 1)
+        # ax.set_title("Curves overlay" + (f" (filtered: {kind})" if kind != "none" else ""))
+        ax.set_title("Curves overlay" if kind != "none" else "")
         any_visible = False
         for exp in self.experiments:
             for c in exp.cycles:
                 if not c.visible:
                     continue
                 ys_disp = _apply_filter(c.ys, kind, fw) if kind != "none" else c.ys
-                self.ax_overlay.plot(
+                ax.plot(
                     c.xs,
                     ys_disp,
                     linewidth=1.2,
@@ -484,9 +617,40 @@ class PeakAnalysisFrame(ttk.Frame):
                 )
                 any_visible = True
         if any_visible:
-            leg = self.ax_overlay.legend(loc="best", fontsize=7, ncol=2)
+            leg = ax.legend(loc="best", fontsize=7, ncol=2)
             leg.set_visible(self._legend_visible)
-        self.canvas.draw_idle()
+
+    def _draw_computed(self, comp):
+        """Markers de picos + guías At X sobre el overlay y tendencias mean ± std, desde
+        lo guardado por compute_extrema. Cada parte se saltea si su eje no está en la vista."""
+        ax = self.ax_overlay
+        if ax is not None:
+            # Líneas verticales guía del modo "At X" (None fuera de ese modo).
+            for x_target, color in (
+                (comp["x_max_target"], "tab:red"),
+                (comp["x_min_target"], "tab:blue"),
+            ):
+                if x_target is not None:
+                    ax.axvline(x_target, color=color, linestyle="--", linewidth=1, alpha=0.6)
+            if comp["max_xy"]:
+                xs, ys = zip(*comp["max_xy"])
+                ax.scatter(xs, ys, marker="^", s=40, color="tab:red", zorder=5)
+            if comp["min_xy"]:
+                xs, ys = zip(*comp["min_xy"])
+                ax.scatter(xs, ys, marker="v", s=40, color="tab:blue", zorder=5)
+        idx = comp["trend_idx"]
+        if not idx:
+            return
+        for ax, means, stds, color in (
+            (self.ax_max, comp["mean_max"], comp["std_max"], "tab:red"),
+            (self.ax_min, comp["mean_min"], comp["std_min"], "tab:blue"),
+        ):
+            if ax is None:
+                continue
+            ax.errorbar(
+                idx, means, yerr=stds, marker="o", linestyle="-", color=color, capsize=4
+            )
+            ax.set_xticks(idx)  # ticks como índices enteros
 
     def _set_status(self, msg):
         self.lbl_status.configure(text=msg)
@@ -501,22 +665,30 @@ class PeakAnalysisFrame(ttk.Frame):
         except ValueError:
             return None
 
-    def _toggle_pick_mode(self, kind):
-        """Activa la captura de un siguiente clic en la gráfica overlay para
-        rellenar X@max o X@min. Un segundo click sobre el mismo botón cancela."""
-        # cancelar si ya estaba activo
+    def _disarm_pick(self):
         cid = self._pick_cid
         if cid is not None:
             try:
                 self.canvas.mpl_disconnect(cid)
             except Exception:
                 pass
-            prev = self._pick_kind
-            self._pick_cid = None
-            self._pick_kind = None
-            if prev == kind:
-                self._set_status("Pick mode cancelled.")
-                return
+        self._pick_cid = None
+        self._pick_kind = None
+
+    def _toggle_pick_mode(self, kind):
+        """Activa la captura de un siguiente clic en la gráfica overlay para
+        rellenar X@max o X@min. Un segundo click sobre el mismo botón cancela."""
+        # cancelar si ya estaba activo (también si quedó en espera por la vista)
+        prev = self._pick_kind
+        self._disarm_pick()
+        if prev == kind:
+            self._set_status("Pick mode cancelled.")
+            return
+        # El clic se toma sobre el overlay: sin ese eje en la vista no hay dónde. Se
+        # avisa en vez de dejar al usuario clickeando sin efecto (como "Add segment" en PCR).
+        if self.ax_overlay is None:
+            self._set_status("Switch View to 'Overlay' (or 'All') to pick X.")
+            return
         self._pick_kind = kind
         self._pick_cid = self.canvas.mpl_connect("button_press_event", self._on_pick)
         # cambia a modo at_x para que el usuario vea el efecto al recomputar
@@ -530,22 +702,15 @@ class PeakAnalysisFrame(ttk.Frame):
                 return
         except Exception:
             pass
-        if event.inaxes is not self.ax_overlay or event.xdata is None:
+        if self.ax_overlay is None or event.inaxes is not self.ax_overlay or event.xdata is None:
             return
         x = float(event.xdata)
         if self._pick_kind == "max":
             self.x_at_max_var.set(f"{x:.6g}")
         elif self._pick_kind == "min":
             self.x_at_min_var.set(f"{x:.6g}")
-        cid = self._pick_cid
-        if cid is not None:
-            try:
-                self.canvas.mpl_disconnect(cid)
-            except Exception:
-                pass
         kind = self._pick_kind
-        self._pick_cid = None
-        self._pick_kind = None
+        self._disarm_pick()
         self._set_status(f"X@{kind} = {x:.6g}. Press Compute to apply.")
 
     def _clear_at_x(self):
@@ -559,11 +724,12 @@ class PeakAnalysisFrame(ttk.Frame):
         por las escalas dispares de X (V) e Y (A~1e-5); usa las líneas ya dibujadas,
         así respeta visibilidad y el filtro activo. Las líneas guía (axvline) y los
         markers de picos quedan fuera: solo curvas con label propio (no '_…')."""
-        if event.inaxes is not self.ax_overlay or event.x is None:
+        ax = self.ax_overlay
+        if ax is None or event.inaxes is not ax or event.x is None:
             self.lbl_cross.configure(text="")
             return
         best: tuple | None = None  # (dist_px, label, x, y)
-        for line in self.ax_overlay.get_lines():
+        for line in ax.get_lines():
             label = str(line.get_label())
             if not label or label.startswith("_") or not line.get_visible():
                 continue
@@ -572,7 +738,7 @@ class PeakAnalysisFrame(ttk.Frame):
             if xd.size == 0:
                 continue
             try:
-                pts = self.ax_overlay.transData.transform(np.column_stack([xd, yd]))
+                pts = ax.transData.transform(np.column_stack([xd, yd]))
             except Exception:
                 continue
             d = np.hypot(pts[:, 0] - event.x, pts[:, 1] - event.y)
@@ -588,19 +754,22 @@ class PeakAnalysisFrame(ttk.Frame):
     # Acciones
     # ---------------------------------------------------------------------
     def load_file(self):
-        """Carga la hoja `data` de un libro (un experimento) — crea un Experiment con
-        N ciclos."""
+        """Carga la hoja `data` de un libro: un Experiment por corrida (columna `run`,
+        Keep runs), cada uno con sus ciclos. Sin columna `run` → un solo Experiment."""
         path = askopenfilename(
-            title="Select data file (one experiment)",
+            title="Select data file",
             initialdir=experiment_dir("cv"),
             filetypes=XLSX_FILETYPES,
         )
         if not path:
             return
-        cycles_x: dict[int, list[float]] = {}
-        cycles_y: dict[int, list[float]] = {}
+        # run → cycle → (xs, ys); el orden de filas del archivo se conserva.
+        runs: dict[int, dict[int, tuple[list[float], list[float]]]] = {}
         try:
             rows = read_sheet_text(path, "data") or []
+            header = [h.strip() for h in (rows[0] if rows else [])]
+            # 'run' se busca por nombre (columna trailing opcional); sin ella → run 0.
+            run_col = header.index("run") if "run" in header else None
             for row in rows[1:]:
                 if len(row) < 4:
                     continue
@@ -608,24 +777,36 @@ class PeakAnalysisFrame(ttk.Frame):
                     x = float(row[1])
                     y = float(row[2])
                     cycle = int(float(row[3]))
+                    run = (
+                        int(float(row[run_col]))
+                        if run_col is not None and run_col < len(row) and row[run_col]
+                        else 0
+                    )
                 except (ValueError, TypeError):
                     continue
-                cycles_x.setdefault(cycle, []).append(x)
-                cycles_y.setdefault(cycle, []).append(y)
+                xs, ys = runs.setdefault(run, {}).setdefault(cycle, ([], []))
+                xs.append(x)
+                ys.append(y)
         except Exception as e:
             self._set_status(f"Error loading data: {e}")
             return
-        if not cycles_x:
+        if not runs:
             self._set_status("No data parsed from file.")
             return
-        exp_name = os.path.splitext(os.path.basename(path))[0]
-        exp = Experiment(name=exp_name)
-        for cyc in sorted(cycles_x.keys()):
-            exp.cycles.append(CycleCurve(name=f"c{cyc}", xs=cycles_x[cyc], ys=cycles_y[cyc]))
-        self.experiments.append(exp)
+        base = os.path.splitext(os.path.basename(path))[0]
+        n_cycles = 0
+        for run in sorted(runs):
+            exp = Experiment(name=_run_experiment_name(base, run, len(runs)))
+            for cyc in sorted(runs[run]):
+                xs, ys = runs[run][cyc]
+                exp.cycles.append(CycleCurve(name=f"c{cyc}", xs=xs, ys=ys))
+            n_cycles += len(exp.cycles)
+            self.experiments.append(exp)
         self._refresh_tree()
         self._refresh_overlay()
-        self._set_status(f"Loaded experiment '{exp_name}' with {len(exp.cycles)} cycle(s).")
+        self._set_status(
+            f"Loaded '{base}': {len(runs)} experiment(s) (runs), {n_cycles} cycle(s)."
+        )
 
     def _selected_refs(self):
         return [self._tree_ref[i] for i in self.tree_curves.selection() if i in self._tree_ref]
@@ -680,21 +861,8 @@ class PeakAnalysisFrame(ttk.Frame):
         x_max_target = self._parse_float(self.x_at_max_var.get()) if mode == "at_x" else None
         x_min_target = self._parse_float(self.x_at_min_var.get()) if mode == "at_x" else None
 
-        # Reset overlay (re-aplica filtro visual también)
-        self._refresh_overlay()
         self.tree_res.delete(*self.tree_res.get_children())
         self._res_ref = {}  # iid de fila renombrable → ref del modelo
-
-        # Líneas verticales guía en overlay para modo "At X"
-        if mode == "at_x":
-            if x_max_target is not None:
-                self.ax_overlay.axvline(
-                    x_max_target, color="tab:red", linestyle="--", linewidth=1, alpha=0.6
-                )
-            if x_min_target is not None:
-                self.ax_overlay.axvline(
-                    x_min_target, color="tab:blue", linestyle="--", linewidth=1, alpha=0.6
-                )
 
         # Picos para markers globales en overlay
         all_max_xy = []
@@ -805,47 +973,22 @@ class PeakAnalysisFrame(ttk.Frame):
                     trend_std_min.append(0.0)
                     trend_names.append(exp.name)
 
-        # Marcadores de picos sobre overlay
-        if all_max_xy:
-            xs, ys = zip(*all_max_xy)
-            self.ax_overlay.scatter(xs, ys, marker="^", s=40, color="tab:red", zorder=5)
-        if all_min_xy:
-            xs, ys = zip(*all_min_xy)
-            self.ax_overlay.scatter(xs, ys, marker="v", s=40, color="tab:blue", zorder=5)
-
-        # Trends con errorbar
-        self.ax_min.clear()
-        self.ax_max.clear()
-        # self.ax_min.set_title(f"Min Peaks Trend ({mode}) \n— mean ± std")
-        # self.ax_max.set_title(f"Max Peaks Trend ({mode}) \n— mean ± std")
-        self.ax_min.set_title("Min Peaks Trend")
-        self.ax_max.set_title("Max Peaks Trend")
-        self.ax_min.set_xlabel("Experiment")
-        self.ax_max.set_xlabel("Experiment")
-        if trend_idx:
-            self.ax_max.errorbar(
-                trend_idx,
-                trend_mean_max,
-                yerr=trend_std_max,
-                marker="o",
-                linestyle="-",
-                color="tab:red",
-                capsize=4,
-            )
-            self.ax_min.errorbar(
-                trend_idx,
-                trend_mean_min,
-                yerr=trend_std_min,
-                marker="o",
-                linestyle="-",
-                color="tab:blue",
-                capsize=4,
-            )
-            # ticks como índices enteros
-            self.ax_max.set_xticks(trend_idx)
-            self.ax_min.set_xticks(trend_idx)
-
-        self.canvas.draw_idle()
+        # La tabla ya quedó llena (no depende de la vista). Se guarda lo dibujable y se
+        # redibuja; _draw_computed pinta markers, guías y tendencias en los ejes que haya.
+        self._computed = {
+            "filter": fkind,
+            "filter_window": fwin,
+            "x_max_target": x_max_target,
+            "x_min_target": x_min_target,
+            "max_xy": all_max_xy,
+            "min_xy": all_min_xy,
+            "trend_idx": trend_idx,
+            "mean_max": trend_mean_max,
+            "std_max": trend_std_max,
+            "mean_min": trend_mean_min,
+            "std_min": trend_std_min,
+        }
+        self._redraw()
         self._set_status(
             f"Computed {mode} on {exp_idx} experiment(s) — filter={fkind}"
             + (f" (w={fwin})" if fkind != "none" else "")
@@ -929,7 +1072,10 @@ class PeakAnalysisFrame(ttk.Frame):
 
     def toggle_legend(self):
         self._legend_visible = not self._legend_visible
+        # Solo los ejes que la vista actual construyó (el resto es None).
         for ax in (self.ax_overlay, self.ax_min, self.ax_max):
+            if ax is None:
+                continue
             leg = ax.get_legend()
             if leg is not None:
                 leg.set_visible(self._legend_visible)
@@ -944,6 +1090,7 @@ class PeakAnalysisFrame(ttk.Frame):
         self.experiments.clear()
         self._tree_ref.clear()
         self._res_ref.clear()
+        self._computed = None
         self.tree_curves.delete(*self.tree_curves.get_children())
         self.tree_res.delete(*self.tree_res.get_children())
         # Recrea el canvas limpio (los títulos/labels por defecto los pone

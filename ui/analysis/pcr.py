@@ -441,7 +441,17 @@ class PcrAnalysisFrame(ttk.Frame):
             ax.grid(True)
             setattr(self, f"ax_{key}", ax)
         self.canvas = FigureCanvasTkAgg(self.fig, self._plot_host)
-        self.canvas.get_tk_widget().pack(fill=ttk.BOTH, expand=True)
+        tkw = self.canvas.get_tk_widget()
+        # Al abrir la ventana Tk manda un <Configure> transitorio de 1 px de alto (584×1,
+        # antes de que el PanedWindow dentro del área con scroll propague el alto pedido);
+        # matplotlib reescala la figura a eso y constrained_layout avisa "axes sizes
+        # collapsed to zero". Se ignora: el siguiente <Configure> trae el tamaño real.
+        # Reemplaza el bind de matplotlib (`<Configure>` → resize) con el mismo handler.
+        tkw.bind(
+            "<Configure>",
+            lambda e: self.canvas.resize(e) if e.width > 1 and e.height > 1 else None,
+        )
+        tkw.pack(fill=ttk.BOTH, expand=True)
         # El toolbar cuelga del contenedor fijo, no del área con scroll.
         self.toolbar_mpl = NavigationToolbar2Tk(
             self.canvas, self._mpl_toolbar_host, pack_toolbar=False
