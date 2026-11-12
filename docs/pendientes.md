@@ -100,6 +100,9 @@ Los dos primeros pasos se repiten cada vez que haya código local sin subir.
 
 - [ ] ➖ HW — Ciclo real: timing del muestreo, CSV crudo y ETA. Se puede cerrar con la
       misma corrida PCR de validación ([cambios_fluorescencia.md](cambios_fluorescencia.md)).
+- [ ] ➖ HW — **Rediseño del TIA** (OPA320, Rf = 100 kΩ + trimmer 1 MΩ, buffer de Vref; diseñado el
+      11/11): montar en A2-A3 (`photoreceptor.ch_p/ch_n` = 2/3), ajustar a ≈ 0.7 V con LED y
+      pasar el plan de validación; luego `ads_fsr` 2.048 ([tia_fotodiodo.md](tia_fotodiodo.md) §8).
 
 ## Análisis
 

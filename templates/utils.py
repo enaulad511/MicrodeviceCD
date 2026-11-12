@@ -3,6 +3,7 @@ import copy
 import json
 import os
 import subprocess
+from typing import Literal, cast
 
 __author__ = "Edisson A. Naula"
 __date__ = "$ 08/10/2025  at 11:20 a.m. $"
@@ -100,7 +101,11 @@ DEFAULT_SETTINGS = {
         "fresh_age_cap_s": 1.0,
     },
     "ads_fsr": 0.256,
-    "photoreceptor": {"use_diff": 1.0},
+    # Lectura del fotorreceptor en el ADS1115: use_diff = 1 lee el par diferencial
+    # ch_p - ch_n; 0 lee ch_p single-ended. El mux solo forma 0-1, 0-3, 1-3 y 2-3
+    # (photoreceptor_channels). 0-1 = TIA actual; el rediseñado va en 2-3
+    # (docs/tia_fotodiodo.md §7).
+    "photoreceptor": {"use_diff": 1.0, "ch_p": 0.0, "ch_n": 1.0},
     # Lectura de fluorescencia de PCR. Ventanas (s): espera tras el hold de
     # extensión, línea base (luz OFF), excitación (luz ON) y decaimiento (luz OFF);
     # muestreo: periodo dentro de cada ventana y lecturas del ADS por muestra.
@@ -288,6 +293,49 @@ def read_settings_from_file(file_path: str = "resources/settings.json") -> dict:
         print(f"Error: File '{file_path}' is not a valid JSON.")
         return {}
     return settings
+
+
+# Canales del ADS1115 y pares diferenciales (AINp - AINn) que forma su multiplexor.
+AdsChannel = Literal[0, 1, 2, 3]
+ADS_DIFF_PAIRS = ((0, 1), (0, 3), (1, 3), (2, 3))
+_photoreceptor_warned: set = set()
+
+
+def photoreceptor_channels(settings: dict) -> "tuple[bool, AdsChannel, AdsChannel]":
+    """(use_diff, ch_p, ch_n) del fotorreceptor desde ``settings["photoreceptor"]``.
+
+    Los tres lectores (PCR, Photoreceptor, Quick Control) pasan por aquí: nunca
+    canales fijos en el código. El ConfigFrame guarda todo como float, así que se
+    trunca a entero. Un canal fuera de 0..3 cae a su default (0 / 1); un par
+    diferencial que el ADS1115 no puede formar cae a 0-1 con un aviso (una sola vez
+    por par) en vez de romper la lectura. Ver docs/tia_fotodiodo.md §7.
+    """
+    cfg = settings.get("photoreceptor", {}) if isinstance(settings, dict) else {}
+    if not isinstance(cfg, dict):
+        cfg = {}
+
+    def _ch(key: str, default: AdsChannel) -> AdsChannel:
+        try:
+            v = int(float(cfg.get(key, default)))
+        except (TypeError, ValueError):
+            return default
+        return cast(AdsChannel, v) if 0 <= v <= 3 else default
+
+    raw = cfg.get("use_diff", False)
+    try:
+        use_diff = bool(float(raw))
+    except (TypeError, ValueError):
+        use_diff = bool(raw)
+    ch_p, ch_n = _ch("ch_p", 0), _ch("ch_n", 1)
+    if use_diff and (ch_p, ch_n) not in ADS_DIFF_PAIRS:
+        if (ch_p, ch_n) not in _photoreceptor_warned:
+            _photoreceptor_warned.add((ch_p, ch_n))
+            print(
+                f"photoreceptor: par diferencial {ch_p}-{ch_n} no existe en el ADS1115 "
+                f"(válidos: {ADS_DIFF_PAIRS}); se lee 0-1"
+            )
+        ch_p, ch_n = 0, 1
+    return use_diff, ch_p, ch_n
 
 
 def write_settings_to_file(new_settings: dict, file_path="resources/settings.json") -> bool:

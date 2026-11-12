@@ -80,6 +80,7 @@ desapareció (ahora es `total_s` del dict).
 - Acumulación: serie completa + escalar derivado.
 - Escalar: delta luz − baseline.
 - Duraciones: `settings.json` → `pcr_fluorescence` (§3), una lectura por corrida; `use_diff` sigue en `photoreceptor`.
+- Canales del ADS (11/11/2026): `photoreceptor.ch_p`/`ch_n` (par diferencial, o canal single-ended si `use_diff` = 0), leídos en cada muestra vía `photoreceptor_channels`; default 0-1 (TIA actual), el rediseñado va en 2-3 ([tia_fotodiodo.md](tia_fotodiodo.md) §7).
 - Cadencia: `averages` (4) + pacing por tiempo transcurrido (`sample_dt_s`, 0.1 s), ambos en `pcr_fluorescence`.
 - CSV crudo: nuevo archivo formato largo.
 - Lectura final: se acumula igual que las de ciclo (índice = siguiente entero).

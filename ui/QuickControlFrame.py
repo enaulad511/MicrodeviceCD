@@ -40,6 +40,7 @@ from templates.constants import (
     serial_port_encoder,
 )
 from templates.utils import (
+    photoreceptor_channels,
     read_settings_from_file,
     read_temp_source,
     temp_source_index,
@@ -674,10 +675,11 @@ class QuickControlFrame(ttk.Frame):
                 row = self._read_all_temps() if self.temp_all_mode else [self._thermocouple_reader()]
             else:
                 settings = read_settings_from_file()
-                if settings.get("photoreceptor", {}).get("use_diff", False):
-                    v = self.ads.read_voltage_diff(0, 1, averages=8)
+                use_diff, ch_p, ch_n = photoreceptor_channels(settings)
+                if use_diff:
+                    v = self.ads.read_voltage_diff(ch_p, ch_n, averages=8)
                 else:
-                    v = self.ads.read_voltage(0, averages=8)
+                    v = self.ads.read_voltage(ch_p, averages=8)
                 row = [v]
         except Exception as e:
             print(f"Error reading signal: {e}")

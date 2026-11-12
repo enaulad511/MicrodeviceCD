@@ -11,7 +11,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from ttkbootstrap.scrolled import ScrolledFrame
 
 from templates.constants import font_entry
-from templates.utils import read_settings_from_file
+from templates.utils import photoreceptor_channels, read_settings_from_file
 from templates.xlsx_io import XLSX_FILETYPES, write_workbook, xlsx_path
 from ui.KeyboardFrame import NumericKeyboard
 
@@ -172,10 +172,11 @@ class PhotoreceptorFrame(ttk.Frame):
         if not self.running:
             return
         settings = read_settings_from_file()
-        if settings["photoreceptor"]["use_diff"]:
-            intensidad = self.ads.read_voltage_diff(0, 1, averages=8)
+        use_diff, ch_p, ch_n = photoreceptor_channels(settings)
+        if use_diff:
+            intensidad = self.ads.read_voltage_diff(ch_p, ch_n, averages=8)
         else:
-            intensidad = self.ads.read_voltage(0, averages=8)
+            intensidad = self.ads.read_voltage(ch_p, averages=8)
         timestamp = time.time()
 
         self.data.append(intensidad)

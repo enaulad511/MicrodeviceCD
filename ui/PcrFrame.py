@@ -25,6 +25,7 @@ from templates.constants import (
 )
 from templates.utils import (
     experiment_dir,
+    photoreceptor_channels,
     read_settings_from_file,
     read_temp_source,
     temp_source_index,
@@ -2594,15 +2595,17 @@ class PCRFrame(ttk.Frame):
         sample_dt = self.fluor_cfg["sample_dt_s"]
         averages = self.fluor_cfg["averages"]
         settings = read_settings_from_file()
-        use_diff = settings.get("photoreceptor", {}).get("use_diff", False)
+        # Canales del ADS (par diferencial o single-ended) desde settings; el TIA
+        # rediseñado va en A2-A3 (docs/tia_fotodiodo.md §7).
+        use_diff, ch_p, ch_n = photoreceptor_channels(settings)
 
         # (t_rel, light_on, voltage) por muestra
         samples = []
 
         def read_one():
             if use_diff:
-                return ads.read_voltage_diff(0, 1, averages=averages)
-            return ads.read_voltage(0, averages=averages)
+                return ads.read_voltage_diff(ch_p, ch_n, averages=averages)
+            return ads.read_voltage(ch_p, averages=averages)
 
         def sample_window(duration, light_on, t0):
             # Muestrea durante `duration` segundos a ~sample_dt, paceando por
