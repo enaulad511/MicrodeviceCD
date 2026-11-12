@@ -68,13 +68,15 @@ clave: la ruta en vivo (`_handle_emstat_msg` → `q_points`), `_update_plot` y
 ## 4. Reset acotado y `_reconcile_merge`
 
 - **`_reset_live_plot()` (nuevo):** limpia **solo** los datos en vivo (`lines_by_m`,
-  `x_by_m`, `y_by_m`, `key_meta`, `total_data`, `merged_by_seq`, `q_points`) y **conserva las
+  `x_by_m`, `y_by_m`, `key_meta`, `total_data`, `raw_log`, `q_points`) y **conserva las
   líneas cargadas de CSV** (`loaded_lines`) — son referencias que el usuario trajo a propósito.
   El botón 🗑 Clean sigue siendo el wipe total.
 - **`_reconcile_merge` acotado:** ahora limpia/reconstruye **solo las claves de la corrida
   actual** (`>= offset`); las corridas anteriores quedan intactas en el gráfico. Y reemplaza
   **solo la porción de esta corrida** en `total_data` (`self.total_data[self._run_td_start:] =
-  ordered`) en vez de todo el dataset, así Save conserva las corridas previas.
+  ordered`) en vez de todo el dataset, así Save conserva las corridas previas. (12/11/2026:
+  solo lo hace si el transporte primario perdió algún `seq`; ver
+  [emstat_udp_recovery.md §6](emstat_udp_recovery.md).)
 
 ### Transición OFF → ON (aditiva)
 

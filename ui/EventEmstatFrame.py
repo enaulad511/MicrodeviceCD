@@ -111,7 +111,6 @@ class EventPlotter(ttk.Frame):
         self.q_points = queue.Queue(maxsize=20000)  # grande, pero finita
         self.q_tcp_lines = queue.Queue(maxsize=20000)  # grande, pero finita
         self.q_udp_lines = queue.Queue(maxsize=20000)  # tap UDP paralelo
-        self.storage_dict = {}  # registro parcial de informacion
         self.total_data = []  # registro total de informacion
         self.loaded_lines = []  # Line2D agregadas desde archivos cargados
         self.filename_meta = {}  # metadatos (motor, etc.) para el nombre del archivo y la hoja runs
@@ -139,10 +138,19 @@ class EventPlotter(ttk.Frame):
         # se vuelca al cerrar para ver CÓMO terminó el stream (p.ej. si tras el último
         # '*' llegó la blank/terminal o la corrida murió por watchdog).
         self._raw_tail = deque(maxlen=20)
-        # Merge (Fase 2): seq -> evento data (primer transporte que lo trae gana).
-        # Al cerrar se reconstruye la unión ordenada por seq (rellena lo que el
-        # transporte primario perdió con lo que trajo el otro).
-        self.merged_by_seq = {}
+        # Merge (Fase 2): línea CRUDA del EmStat por transporte, {seq: raw}, de TODOS los
+        # emstat_data (datos y marcadores M/C/-/*). Al cerrar, si el primario perdió
+        # algún seq, se re-parsea la unión con UN solo parser (ver _reconcile_merge).
+        # No se guardan eventos ya decodificados: cada transporte tiene su parser con
+        # estado (cycle, índice CA) y mezclar eventos de ambos etiquetaba mal los
+        # puntos recuperados (docs/emstat_udp_recovery.md §6).
+        self.raw_by_seq = {"tcp": {}, "udp": {}}
+        # Hoja `raw` del xlsx: [run, seq, tcp, udp, raw] por mensaje, todas las corridas.
+        self.raw_log = []
+        self._reconciled = False  # _reconcile_merge una sola vez por corrida
+        # parser_kwargs congelados en start(): el procesador y el re-parseo del merge
+        # deben usar exactamente los mismos.
+        self._run_parser_kwargs = {}
         # Watchdog de inactividad total (s) para cerrar si nadie manda terminal.
         # Bajo el idle de 16s del Pico, con margen sobre huecos legítimos entre paquetes.
         self.watchdog_timeout = 10.0
@@ -323,7 +331,9 @@ class EventPlotter(ttk.Frame):
         # Reset cobertura/estado del tap para esta corrida
         self.seq_seen = {"tcp": set(), "udp": set()}
         self._raw_tail.clear()
-        self.merged_by_seq = {}
+        self.raw_by_seq = {"tcp": {}, "udp": {}}
+        self._reconciled = False
+        self._run_parser_kwargs = dict(self.parser_kwargs)
         self._last_rx = None
         self._run_start_ts = time.time()  # para el watchdog de "nunca arranco"
         self._run_started = False
@@ -414,8 +424,6 @@ class EventPlotter(ttk.Frame):
                 print("ABORT enviado al Pico")
             except Exception as e:
                 print(f"No se pudo enviar ABORT: {e}")
-        self.total_data.append(self.storage_dict.copy())
-        self.storage_dict.clear()
         self.stop_event.set()
         try:
             if self.sock:
@@ -485,10 +493,10 @@ class EventPlotter(ttk.Frame):
 
     def clear_plot(self):
         """Limpia datos y resetea el gráfico (wipe total: incluye líneas cargadas)."""
-        self.storage_dict.clear()
         self.total_data.clear()
         self.runs_meta.clear()
-        self.merged_by_seq.clear()
+        self.raw_log.clear()
+        self.raw_by_seq = {"tcp": {}, "udp": {}}
         self.x_by_m.clear()
         self.y_by_m.clear()
         self.lines_by_m.clear()
@@ -524,15 +532,16 @@ class EventPlotter(ttk.Frame):
         self.cycle_label_values.clear()
         self.total_data.clear()
         self.runs_meta.clear()
-        self.merged_by_seq.clear()
+        self.raw_log.clear()
         with self.q_points.mutex:
             self.q_points.queue.clear()
         self.plot_run_offset = 0
         self.run_index = 0
 
     def save_data(self):
-        """Guarda UN libro .xlsx: hoja `data` (un evento por fila) y hoja `runs` (una
-        fila por corrida con método, canal, inicio, motor y parámetros del payload)."""
+        """Guarda UN libro .xlsx: hoja `data` (un evento por fila), hoja `runs` (una
+        fila por corrida con método, canal, inicio, motor y parámetros del payload) y
+        hoja `raw` (líneas crudas del EmStat por seq, si el firmware manda seq)."""
         if self.running:
             self._set_status("Stop aquisition before saving data.")
             return
@@ -557,10 +566,12 @@ class EventPlotter(ttk.Frame):
         filename = xlsx_path(filename)
         # Columnas extra TRAILING (Load solo lee las 5 primeras, así que no rompen
         # la recarga): campos EIS presentes en los eventos que no sean ya x/y, mas la
-        # fase SWV ("pretreatment"/"sweep") para distinguir el pre-tratamiento conservado.
+        # fase SWV ("pretreatment"/"sweep") para distinguir el pre-tratamiento conservado,
+        # mas `recovered` (1 = punto que NO se vio en vivo, rellenado por el merge
+        # TCP+UDP; filtrar recovered==0 da exactamente la gráfica en vivo).
         extra_keys = [
             k
-            for k in ("freq_Hz", "E_V", "t_s", "Z_mod", "phase")
+            for k in ("freq_Hz", "E_V", "t_s", "Z_mod", "phase", "recovered")
             if k not in (self.x_key, self.y_key) and any(k in ev for ev in self.total_data)
         ]
         data: list[list] = [["sample", self.x_key, self.y_key, "cycle", "run", *extra_keys]]
@@ -575,8 +586,13 @@ class EventPlotter(ttk.Frame):
             ]
             for index, event in enumerate(self.total_data)
         )
+        sheets = {"data": data, "runs": self._runs_sheet()}
+        if self.raw_log:
+            # Líneas crudas del EmStat (unión TCP+UDP por seq): verdad de origen para
+            # re-derivar o auditar el merge offline. tcp/udp = 1 si ese transporte la trajo.
+            sheets["raw"] = [["run", "seq", "tcp", "udp", "raw"], *self.raw_log]
         try:
-            write_workbook(filename, {"data": data, "runs": self._runs_sheet()})
+            write_workbook(filename, sheets)
             self._set_status(f"Data saved to file: {os.path.basename(filename)}")
         except Exception as e:
             self._set_status(f"Error saving data: {e}")
@@ -816,8 +832,8 @@ class EventPlotter(ttk.Frame):
         La corrida termina por: primer terminal de cualquier transporte (Fase 1),
         Stop, o watchdog de inactividad total."""
         parsers = {
-            "tcp": EmstatStreamParser(experiment=self.method, **self.parser_kwargs),
-            "udp": EmstatStreamParser(experiment=self.method, **self.parser_kwargs),
+            "tcp": EmstatStreamParser(experiment=self.method, **self._run_parser_kwargs),
+            "udp": EmstatStreamParser(experiment=self.method, **self._run_parser_kwargs),
         }
         while not self.stop_event.is_set():
             got = False
@@ -960,9 +976,12 @@ class EventPlotter(ttk.Frame):
 
         if mtype == "emstat_data":
             self._run_started = True
+            raw = msg.get("raw", "")
             if seq is not None:
                 self.seq_seen[source].add(seq)
-            raw = msg.get("raw", "")
+                # Fase 2: la línea cruda (datos Y marcadores) por transporte; el merge
+                # re-parsea desde aquí, no desde los eventos ya decodificados.
+                self.raw_by_seq[source].setdefault(seq, raw)
             event = parser.feed_raw(raw)
             if not event:
                 return
@@ -991,14 +1010,11 @@ class EventPlotter(ttk.Frame):
                             cb()
                         except Exception as e:
                             print(f"on_first_data hook error: {e}")
-                # Fase 2: guarda el evento por seq (ambos transportes; el primero que
-                # llega gana). Al cerrar se reconstruye la unión ordenada -> rellena lo
-                # que el primario perdió con lo que trajo el otro.
-                if seq is not None:
-                    event["seq"] = seq
-                    event["source"] = source
-                    self.merged_by_seq.setdefault(seq, event)
                 if selected:  # el transporte elegido alimenta la gráfica en vivo
+                    if seq is not None:
+                        event["seq"] = seq
+                        event["source"] = source
+                    event["recovered"] = 0  # visto en vivo (1 = rellenado por el merge)
                     event["run"] = self.run_index
                     # El pre-tratamiento SWV (phase="pretreatment") se CONSERVA en
                     # total_data (se guarda) pero NO se grafica: solo aporta ruido (clusters a
@@ -1120,18 +1136,63 @@ class EventPlotter(ttk.Frame):
         print("=" * 56)
 
     def _reconcile_merge(self):
-        """Fase 2 (al cerrar): fusiona TCP+UDP por 'seq'. El transporte primario ya
-        graficó en vivo; aquí se reconstruye la UNIÓN ordenada por seq -> rellena los
-        seq que el primario perdió con los que trajo el otro transporte, reordena, redibuja
-        el dataset completo y lo deja en total_data para Save. Corre en el hilo UI."""
-        if not self.merged_by_seq:
+        """Fase 2 (al cerrar): fusiona TCP+UDP por 'seq' a nivel de línea CRUDA. Corre en
+        el hilo UI, una vez por corrida.
+
+        - Siempre registra la unión cruda en raw_log (hoja `raw` del xlsx).
+        - Si el transporte primario no perdió ningún seq, NO toca nada: lo guardado es
+          exactamente lo que se graficó en vivo.
+        - Si perdió alguno (dato o marcador M/C/-/*), re-parsea la unión ordenada por seq
+          con UN parser nuevo (primario gana si ambos traen el seq), así cycle/direction/
+          t_s de CA salen de un único estado consistente. Los puntos que solo trajo el
+          otro transporte quedan con recovered=1. Redibuja y reemplaza total_data.
+
+        Antes se guardaban eventos ya decodificados por el parser de cada transporte y se
+        mezclaban: un punto rellenado desde UDP heredaba el ciclo del parser UDP (que
+        podía haber perdido un marcador 'C') -> puntos con el ciclo anterior en medio del
+        ciclo y trazo cruzando la gráfica; en CA, t_s duplicados."""
+        if self._reconciled:
             return
-        primary = self.seq_seen.get(self._plot_source, set())
-        ordered_seq = sorted(self.merged_by_seq)
-        filled = sum(1 for s in ordered_seq if s not in primary)
-        ordered = [self.merged_by_seq[s] for s in ordered_seq]
-        for ev in ordered:
+        self._reconciled = True
+        prim = self._plot_source
+        other = "udp" if prim == "tcp" else "tcp"
+        raw_p = self.raw_by_seq.get(prim, {})
+        raw_o = self.raw_by_seq.get(other, {})
+        if not raw_p and not raw_o:
+            return  # firmware sin seq / sin datos: queda lo graficado en vivo
+        union = sorted(raw_p.keys() | raw_o.keys())
+        tcp_seen = self.raw_by_seq.get("tcp", {})
+        udp_seen = self.raw_by_seq.get("udp", {})
+        mismatched = 0
+        for s in union:
+            raw = raw_p.get(s)
+            if raw is None:
+                raw = raw_o[s]
+            elif s in raw_o and raw_o[s] != raw:
+                mismatched += 1  # misma seq, distinto contenido: se queda el primario
+            self.raw_log.append([self.run_index, s, int(s in tcp_seen), int(s in udp_seen), raw])
+        if mismatched:
+            print(f"MERGE: {mismatched} línea(s) con mismo seq y raw distinto (se usó {prim})")
+
+        missing = [s for s in union if s not in raw_p]
+        if not missing:
+            print(f"MERGE: {prim.upper()} sin huecos; se conservan los datos en vivo")
+            self._set_status(f"{self.lbl_status.cget('text')} Merge: no gaps")
+            return
+
+        parser = EmstatStreamParser(experiment=self.method, **self._run_parser_kwargs)
+        ordered = []
+        for s in union:
+            from_other = s not in raw_p
+            ev: dict | None = parser.feed_raw(raw_o[s] if from_other else raw_p[s])
+            if not ev or ev.get("type") != "data":
+                continue
+            ev["seq"] = s
+            ev["source"] = other if from_other else prim
+            ev["recovered"] = int(from_other)
             ev["run"] = self.run_index
+            ordered.append(ev)
+        filled = sum(ev["recovered"] for ev in ordered)
 
         # Reemplaza SOLO la porción de esta corrida en total_data (para Save) — con
         # retención ON conserva las corridas anteriores ya almacenadas.
@@ -1168,7 +1229,10 @@ class EventPlotter(ttk.Frame):
         self.ax.autoscale_view()
         self._update_legends()
         self.canvas.draw_idle()
-        print(f"MERGE: dataset={len(ordered)} puntos; recuperados del otro transporte: {filled}")
+        print(
+            f"MERGE: dataset={len(ordered)} puntos; {len(missing)} mensaje(s) faltantes en "
+            f"{prim.upper()} rellenados del otro transporte ({filled} puntos de datos)"
+        )
         # Anexa el resumen al estado terminal en vez de reemplazarlo, p.ej.
         # "End of experiment (via TCP). Merge: 250 pts (+3 recovered)".
         self._set_status(

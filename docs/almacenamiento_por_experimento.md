@@ -67,7 +67,7 @@ los valores nuevos son los exactos.
 | Guardado | Archivo | Hojas | Antes |
 | --- | --- | --- | --- |
 | Corrida PCR ([PcrFrame.py](../ui/PcrFrame.py) `save_data_temps_file`, automático al terminar y botón Save Data) | `files/PCR/<slug>_pcr_data_<ts>.xlsx` | `metadata`, `settings`, `temperature`, `photodetector`, `photodetector_raw` | 3 CSV `_temperature_data_`, `_photodetector_data_`, `_photodetector_raw_` |
-| EmStat CV/SQWV/EIS/CA ([EventEmstatFrame.py](../ui/EventEmstatFrame.py) `save_data`) | `<method>_data_<ts><sufijo>.xlsx` | `data`, `runs` | 1 CSV |
+| EmStat CV/SQWV/EIS/CA ([EventEmstatFrame.py](../ui/EventEmstatFrame.py) `save_data`) | `<method>_data_<ts><sufijo>.xlsx` | `data`, `runs`, `raw` | 1 CSV |
 | Export análisis PCR | `pcr_analysis_<ts>.xlsx` | `bundle` (re-importable), `rates` | `<base>.csv` + `_rates.csv` |
 | Export SQWV peaks | `sqwv_peaks_<ts>.xlsx` | `peaks`, `curves` (re-importable) | `<base>.csv` + `_curves.csv` |
 | Export Peaks (CV) | `analysis_<ts>.xlsx` | `results`, `curves` (re-importable) | `<base>.csv` + `_curves.csv` |
@@ -122,8 +122,13 @@ dejaba de esperar a los 3 s ([pcr_fin_corrida.md](pcr_fin_corrida.md)).
 ### 3.2 EmStat
 
 - **`data`**: las mismas columnas de antes (`sample, <x>, <y>, cycle, run, [freq_Hz, E_V,
-  t_s, Z_mod, phase]`); Load/análisis leen por posición (EmStat Load, CV) o por nombre
-  (SQWV, EIS) como antes.
+  t_s, Z_mod, phase, recovered]`); Load/análisis leen por posición (EmStat Load, CV) o por
+  nombre (SQWV, EIS) como antes. `recovered` (12/11/2026): 1 = punto que no se vio en vivo
+  y rellenó el merge TCP+UDP; `recovered == 0` es exactamente la gráfica en vivo.
+- **`raw`** (12/11/2026, solo con firmware que manda `seq`): `run, seq, tcp, udp, raw`, una
+  fila por línea cruda del EmStat (datos y marcadores), unión de ambos transportes. Es la
+  verdad de origen para re-derivar o auditar el merge offline
+  ([emstat_udp_recovery.md §6](emstat_udp_recovery.md)). Se limpia junto con `total_data`.
 - **`runs`**: una fila por corrida en `total_data`: `run, method, start`, `filename_meta`
   (motor) y **cada clave del payload** (incluye `ch`). Se captura en `start()` (`runs_meta`)
   porque `payload_exp` se sobrescribe en la siguiente corrida y con **Keep runs** un

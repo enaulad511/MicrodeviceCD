@@ -1,8 +1,9 @@
 # EmStat — Recuperación de datos perdidos en TCP vía UDP
 
 Diseño para recuperar paquetes del EmStat que se pierden en el camino TCP usando el
-**broadcast UDP paralelo** (puerto 5005, el mismo de la temperatura). Estado: **Paso 0
-(firmware `seq`) implementado y verificado en hardware**; host pendiente (Pasos 1–5).
+**broadcast UDP paralelo** (puerto 5005, el mismo de la temperatura). Estado: firmware
+`seq` verificado en hardware; host Fases 0–2 implementadas. El merge de la Fase 2 se
+rediseñó el 12/11/2026 porque dañaba los datos (§6).
 
 Lectura previa: [emstat_abort_y_canal.md](emstat_abort_y_canal.md) (cadena de 3 nodos,
 fire-and-close, dead-man switch) y [eis_impedancia.md](eis_impedancia.md).
@@ -73,7 +74,7 @@ UDP** justo cuando se necesita para recuperar el final. Nuevo modelo: el cierre 
 |---|---|---|
 | **0 — Diagnóstico** | Tap paralelo: ambos transportes leen y parsean siempre; cada uno mantiene un `set()` de `seq` de paquetes `data`. Al cerrar, **resumen en consola**: conteos TCP/UDP, `udp−tcp` (evidencia de la hipótesis), `tcp−udp` (si UDP también pierde). Gráfica por el transporte seleccionado. | `seq` |
 | **1 — Terminales** | El primer terminal de cualquier transporte cierra limpio (`send_abort=False`; el experimento ya terminó en el Pico). Arregla el cuelgue por `emstat_end` perdido. | — |
-| **2 — Merge de datos** | TCP primario live como hoy; UDP se bufferea por `seq`. Al cerrar: `faltantes = seq_udp − seq_tcp` → insertar ordenado por `seq`, **redibujar la gráfica completa** y mezclar en `total_data` para que Save guarde el dataset completo. | `seq` |
+| **2 — Merge de datos** | TCP primario live como hoy; ambos transportes guardan la **línea cruda** por `seq`. Al cerrar, si el primario perdió algún `seq`: re-parsear la unión con **un** parser, redibujar y reemplazar la corrida en `total_data`; si no perdió nada, no se toca. Rediseñado el 12/11/2026, ver §6. | `seq` |
 
 ## 5. Limpieza del parser y mejoras relacionadas
 
@@ -98,7 +99,53 @@ UDP** justo cuando se necesita para recuperar el final. Nuevo modelo: el cierre 
   `'*'` (fin de meas_loop) **seguido** de una línea en blanco; las blanks entre sub-loops se
   ignoran. Cambio en `run_experiment_read_loop` (`emstat_wifi_v1.7.py`, requiere reflasheo).
 
-## 6. A verificar en hardware
+## 6. El merge dañaba los datos (corregido 12/11/2026)
+
+**Síntoma (usuario, mediciones CV):** la gráfica en vivo se veía bien y, al terminar,
+"la corrección" la dañaba.
+
+**Causa.** El merge guardaba por `seq` el **evento ya decodificado** (`merged_by_seq`,
+el primer transporte que lo trajera ganaba) y al cerrar los mezclaba. Pero cada transporte
+tiene **su propio** `EmstatStreamParser` con estado (`cycle` por marcador `C`, `direction`
+por `-`, índice de tiempo de CA, `_ca_main_started` por `*`). Si UDP perdía un marcador `C`,
+su parser seguía en el ciclo anterior; cuando TCP perdía un dato de ese ciclo, el hueco se
+rellenaba con el evento del parser UDP → **un punto con el ciclo anterior en medio del
+ciclo**. Al redibujar, ese punto se agrega a la línea del ciclo anterior, que traza una
+recta gruesa desde su final hasta él. Además, si el que perdía el `C` era TCP, el merge no
+lo arreglaba; y en CA un hueco dejaba `t_s` duplicados (`…0.4, 0.4…`).
+
+**Evidencia** en `files/CV` (archivos del 09–10/11, Keep runs): saltos de ciclo de 1 punto
+dentro de una corrida, siempre al ciclo anterior, p.ej. r1 de `…20261109_204521`:
+`[(0,216), (1,216), (2,209), (1,1), (2,7)]`; también `…20261110_182504` r1 y
+`…20261110_190221` r3. E e I del punto son continuos con sus vecinos: el dato era bueno,
+solo la etiqueta salía mal. Un simulador (pérdida controlada por transporte, código real de
+`EventPlotter`) reproduce la misma huella.
+
+**Diseño nuevo** ([EventEmstatFrame.py](../ui/EventEmstatFrame.py) `_reconcile_merge`):
+
+- Cada transporte guarda `raw_by_seq[source][seq] = raw` de **todo** `emstat_data`
+  (datos y marcadores). Ya no se guardan eventos decodificados.
+- Al cerrar: si el primario **no perdió ningún `seq`**, `total_data` y la gráfica **no se
+  tocan** (lo guardado es exactamente lo que se vio en vivo; status `Merge: no gaps`).
+- Si perdió alguno (dato o marcador): se re-parsea la unión ordenada por `seq` con **un
+  parser nuevo** (mismos `parser_kwargs` de la corrida, congelados en `start()`); si ambos
+  traen el `seq`, gana el primario. Así `cycle`/`direction`/`t_s` salen de un estado único,
+  y un marcador perdido en TCP se recupera del UDP.
+- Columna `recovered` en la hoja `data` (1 = punto que no se vio en vivo): filtrar
+  `recovered == 0` da la gráfica en vivo.
+- Hoja `raw` (`run, seq, tcp, udp, raw`): la unión cruda, para re-derivar o auditar
+  offline. Si un mismo `seq` trae `raw` distinto por cada transporte, se usa el primario
+  y se cuenta en consola.
+- `_reconcile_merge` corre una sola vez por corrida (`_reconciled`): `stop()` puede
+  entrar dos veces (botón + procesador) y antes duplicaba el merge.
+- Se quitó el `total_data.append(storage_dict.copy())` de `stop()`: `storage_dict` nunca
+  se llenaba y metía una fila vacía cuando el merge no reemplazaba la corrida.
+
+Lo que sigue sin resolverse: un `seq` que pierden **ambos** transportes. En CA eso corre
+`t_s` un intervalo desde ahí (el índice cuenta paquetes recibidos); calcular `t_s` desde el
+`seq` lo evitaría, pendiente.
+
+## 7. A verificar en hardware
 
 - [x] El `seq` aparece, incrementa y es idéntico en TCP y UDP (Wireshark) — **OK (`seq:106`)**.
 - [ ] Dos sockets en 5005 (temp + tap) **ambos reciben** el broadcast en la Pi (Linux,
@@ -107,7 +154,11 @@ UDP** justo cuando se necesita para recuperar el final. Nuevo modelo: el cierre 
       pierde.
 - [ ] Fase 1: matar el TCP a mitad de corrida y confirmar que el terminal por UDP cierra
       limpio (sin colgarse).
+- [ ] §6: corrida CV con Keep runs; si la consola dice `rellenados del otro transporte`,
+      comprobar que la gráfica final no tiene trazos cruzados y que los ciclos de la hoja
+      `data` son monótonos por corrida.
 
 ---
 
 __author__ = "Edisson A. Naula"
+__date__ = "$ 12/11/2026 $"
