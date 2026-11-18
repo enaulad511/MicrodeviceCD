@@ -91,10 +91,11 @@ Los dos primeros pasos se repiten cada vez que haya código local sin subir.
   - cycles × Keep runs.
 
   Detalle en [eis_impedancia.md](eis_impedancia.md) §6, §7.5.
-- [ ] ➖ HW — **CA end-to-end:** paquetes `e`/`i`, marcador `*`, Cottrell. La v1.9 ya está
-      flasheada ([ca_cronoamperometria.md](ca_cronoamperometria.md) §7).
+- [ ] ➖ HW — **CA end-to-end:** paquetes `e`/`i`, marcador `*`, Cottrell, timer de estado
+      (Equilibrium/Step). La v1.9 ya está flasheada
+      ([ca_cronoamperometria.md](ca_cronoamperometria.md) §7, §8).
 - [ ] ⬇ DEV — **CA:** calcular `Max bandwidth` automáticamente, como PSTrace
-      ([ca_cronoamperometria.md](ca_cronoamperometria.md) §7).
+      ([ca_cronoamperometria.md](ca_cronoamperometria.md) §8).
 
 ## Fluorescencia
 
@@ -173,7 +174,7 @@ Los dos primeros pasos se repiten cada vez que haya código local sin subir.
   ([temp_source_selector.md](temp_source_selector.md)).
 - **Firmware v1.9 del disco flasheado**, y **emisividad 0.96 del MLX confirmada** por la
   consola serial del Pico (usuario, 14/10/2026). CA ya no está bloqueada
-  ([ca_cronoamperometria.md](ca_cronoamperometria.md) §7,
+  ([ca_cronoamperometria.md](ca_cronoamperometria.md) §8,
   [mlx90614_emisividad.md](mlx90614_emisividad.md) §6).
 
 __author__ = "Edisson A. Naula"

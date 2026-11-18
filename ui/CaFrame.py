@@ -338,8 +338,13 @@ class CAFrame(ElectrochemProjectBarMixin, ttk.Frame):
         try:
             t_int = float(self.var_tinterval.get())
             t_eq = float(self.var_tequil.get())
+            t_run = float(self.var_trun.get())
         except ValueError:
-            t_int, t_eq = 0.0, 0.0
+            t_int, t_eq, t_run = 0.0, 0.0, 0.0
+        # Timer en la etiqueta de estado del plotter: "Pre-treatment — Equilibrium x/y s"
+        # (solo si hay equilibrio) y luego "Step x/t_run s" anclado al 1er paquete del
+        # loop principal. Con Keep runs las curvas se superponen y sin esto no se aprecia
+        # si la corrida sigue viva (docs/ca_cronoamperometria.md §7).
         self.udp_plotter.update_val_experiment(
             x_key="t_s",
             y_key="I_A",
@@ -347,6 +352,8 @@ class CAFrame(ElectrochemProjectBarMixin, ttk.Frame):
             ip_sender=ip_sender,
             callback_spin_motor=None,
             parser_kwargs={"ca_t_interval": t_int, "ca_has_equil": t_eq > 0},
+            pretreatment_phases=[["Equilibrium", t_eq]] if t_eq > 0 else None,
+            main_phase=("Step", t_run),
         )
         self.frame_plotter.grid(row=1, column=0, padx=5, pady=2, sticky="nsew")
         if self.frame_w_scroll:

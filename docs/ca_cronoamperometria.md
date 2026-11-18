@@ -166,13 +166,54 @@ CA no expone el bloque de motor del disco (a diferencia de CV): es una medida de
 transitorio a potencial fijo con el electrodo quieto. `callback_spin_motor=None`,
 igual que EIS/SQWV.
 
-## 7. Pendiente
+## 7. Timer en la etiqueta de estado
+
+Con *Keep runs* las curvas de corridas consecutivas se superponen (mismo `E_dc`, mismo
+rango de `t`) y no se aprecia si la corrida en curso sigue viva. Por eso la **etiqueta de
+estado** del plotter (entre los botones y el gráfico) muestra la fase y un contador que
+avanza cada segundo, reutilizando el indicador de fase del pre-tratamiento SWV
+([sqwv_plot_precondicionamiento.md](sqwv_plot_precondicionamiento.md) §4):
+
+```
+Pre-treatment — Equilibrium  2/3 s      (solo si t_equilibrium > 0)
+Pre-treatment done — waiting for step…  (equilibrio cumplido, aún sin paquete del escalón)
+Step  34/600 s
+Step done — waiting for end…            (reloj ≥ t_run, aún sin emstat_end)
+End of experiment (via TCP).            (o Stop / timeout / watchdog: su propio mensaje)
+```
+
+- **Mecanismo.** `CAFrame.send_script` pasa `pretreatment_phases=[["Equilibrium", t_eq]]`
+  (solo si `t_eq > 0`) y `main_phase=("Step", t_run)` a `EventPlotter.update_val_experiment`.
+  `_refresh_phase_status` ([EventEmstatFrame.py](../ui/EventEmstatFrame.py)) corre en el loop
+  UI existente (`_update_plot`, sin timer aparte).
+- **Reloj con transiciones por dato.** El equilibrio se ancla en `emstat_start` (`_acq_t0`);
+  el escalón en el **primer paquete del loop principal** (`_sweep_t0`), que en CA es el primer
+  evento `data` (el parser marca el equilibrio como no-dato hasta el `*`, §3.1). Se eligió el
+  reloj y no el último `t_s` recibido porque responde directamente "¿sigue corriendo?" y
+  `t_s` en vivo puede descuadrarse con pérdida de paquetes (§3.2). Si el stream se cae, el
+  contador sigue hasta que el watchdog (`idle_s + 15`) cierra la corrida con su mensaje.
+- **Pasado `t_run`.** Casi siempre ocurre: el loop dura `t_run + t_interval` y la cadena
+  añade latencia, así que al cumplir `t_run` se muestra "Step done — waiting for end…" en
+  lugar de seguir contando por encima del total.
+- **Formato:** segundos enteros (igual que SWV y que el `t_run` del formulario), sin min:s.
+- **Fin.** El mensaje del terminal/watchdog/Stop reemplaza al timer y nunca es pisado:
+  `_refresh_phase_status` no escribe si `_terminated` o `stop_event` están activos. Lo
+  alcanzado ya se lee en el eje `t` del gráfico, así que el mensaje de fin no añade tiempo.
+- **Alcance.** Solo CA pasa `main_phase`; SWV/CV/EIS no cambian (en SWV el indicador se sigue
+  apagando en "Sweep — acquiring…"). Con *Keep runs* cada corrida reinicia el contador
+  (`start()` limpia `_acq_t0`/`_sweep_t0`). No se añadió marcador en el gráfico para la
+  curva viva; se revisará si el timer no basta.
+- **Verificado en dev** (18/11/2026) con un servidor TCP falso que emite la secuencia
+  `emstat_start` → equilibrio → `*` → escalón → `emstat_end`: con y sin equilibrio, Stop a
+  mitad del escalón ("Stopped by user." se conserva) y regresión SWV. Falta verlo en el Pi.
+
+## 8. Pendiente
 
 - ~~**Flasheo del firmware v1.9**~~ — **hecho**: el disco corre la v1.9 (confirmado por
   el usuario el 14/10/2026), así que un payload `"ca"` ya no cae en
   `UNKNOWN_COMMAND`.
 - **Validación end-to-end en hardware** (ya no bloqueada por el flasheo) (forma de los paquetes `e`/`i` de CA, marcador
-  `*` entre loops, decaimiento de Cottrell esperado).
+  `*` entre loops, decaimiento de Cottrell esperado, timer de §7 contra la duración real).
 - **Automatizar Max bandwidth**: hoy es editable con default `58505m`; falta deducir
   cómo lo calcula PSTrace (¿de `t_interval`?) para fijarlo automáticamente.
 

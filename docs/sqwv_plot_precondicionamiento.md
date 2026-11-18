@@ -84,7 +84,12 @@ Sweep — acquiring…
   no bastaría (la "Deposition" de 60 s seguiría pareciendo congelada); por eso el contador n/dur.
 - Si la duración estimada se cumple pero aún no llega el barrido (latencia/equilibración larga):
   `Pre-treatment done — waiting for sweep…`.
-- CV/EIS/CA no pasan `pretreatment_phases` → el indicador no se activa (sin regresión).
+- CV/EIS no pasan `pretreatment_phases` → el indicador no se activa (sin regresión).
+- **Generalizado para CA (18/11/2026):** parámetro opcional `main_phase=(nombre, dur_s)`. Con
+  él el indicador **sigue contando** tras `_sweep_t0` ("Step  34/600 s") y el texto de espera
+  usa ese nombre ("waiting for step…"); sin él (SWV) se apaga en "Sweep — acquiring…" como
+  antes. El indicador ya no escribe si `_terminated`/`stop_event` están activos, para no pisar
+  el mensaje de un terminal. Detalle en [ca_cronoamperometria.md](ca_cronoamperometria.md) §7.
 
 ## 5. Archivos tocados (host-only)
 

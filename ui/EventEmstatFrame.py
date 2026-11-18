@@ -89,6 +89,11 @@ class EventPlotter(ttk.Frame):
         # update_val_experiment; el contador se ancla en emstat_start (_acq_t0) y la
         # transición a barrido la confirma el primer paquete 'sweep' (_sweep_t0).
         self.pretreatment_phases: list | None = None
+        # Fase principal opcional (nombre, dur_s): si viene, el indicador SIGUE contando
+        # tras el inicio del barrido/escalón (_sweep_t0) -> "Step  34/600 s". Lo usa CA:
+        # con Keep runs las curvas se superponen y no se aprecia si la corrida sigue viva.
+        # None (SWV/CV/EIS) -> el indicador se apaga al empezar el barrido, como antes.
+        self.main_phase: tuple[str, float] | None = None
         self._acq_t0: float | None = None
         self._sweep_t0: float | None = None
         self.max_points = max_points
@@ -683,6 +688,7 @@ class EventPlotter(ttk.Frame):
         cycle_legend=None,
         on_first_data=None,
         pretreatment_phases=None,
+        main_phase=None,
     ):
         if self.flag_recording:
             print("not posible to update payload while running experiment")
@@ -696,6 +702,7 @@ class EventPlotter(ttk.Frame):
         # corrida anterior a una nueva sin motor / sin pre-tratamiento.
         self.on_first_data = on_first_data
         self.pretreatment_phases = pretreatment_phases
+        self.main_phase = main_phase
         # Se reasignan SIEMPRE (no solo si vienen): el mismo plotter alterna modos
         # entre corridas (EIS) y un valor viejo contaminaría la corrida nueva.
         self.parser_kwargs = dict(parser_kwargs) if parser_kwargs else {}
@@ -1001,7 +1008,8 @@ class EventPlotter(ttk.Frame):
                 # los handlers solo deben tocar cosas thread-safe.
                 if self._sweep_t0 is None and event.get("phase") != "pretreatment":
                     self._sweep_t0 = time.time()
-                    if self.pretreatment_phases:
+                    # Con main_phase el contador de la fase principal lo pinta el loop UI.
+                    if self.pretreatment_phases and self.main_phase is None:
                         self._set_status("Sweep — acquiring…")
                     if self.on_first_data is not None:
                         cb = self.on_first_data
@@ -1296,8 +1304,8 @@ class EventPlotter(ttk.Frame):
 
             self._update_legends()
 
-        # Indicador de fase del pre-tratamiento (el plot no cambia ahí; evita parecer
-        # congelado). Se ejecuta en el mismo loop UI, sin timer aparte.
+        # Indicador de fase (pre-tratamiento SWV / timer de CA): evita parecer congelado
+        # o no saber si la corrida sigue viva. Mismo loop UI, sin timer aparte.
         self._refresh_phase_status()
 
         # Reprogramar si seguimos corriendo
@@ -1305,22 +1313,44 @@ class EventPlotter(ttk.Frame):
             self._schedule_update()
 
     def _refresh_phase_status(self):
-        """Mientras corre el pre-tratamiento SWV, muestra la fase actual y un contador en
-        la etiqueta de estado (p.ej. 'Pre-treatment — Deposition  34/60 s'). Time-based:
-        usa las duraciones de self.pretreatment_phases ancladas en _acq_t0 (emstat_start).
-        Se apaga al llegar el primer paquete de barrido (_sweep_t0) — esa transición es
-        data-driven, así que el desfase de latencia solo afecta a las cotas intermedias."""
-        if not self.pretreatment_phases or self._acq_t0 is None or self._sweep_t0 is not None:
+        """Indicador de fase en la etiqueta de estado (time-based, transiciones data-driven).
+
+        - Pre-tratamiento (SWV; equilibrio de CA): fase actual y contador, p.ej.
+          'Pre-treatment — Deposition  34/60 s', con las duraciones de
+          self.pretreatment_phases ancladas en _acq_t0 (emstat_start).
+        - Termina al llegar el primer paquete de barrido/escalón (_sweep_t0). Sin
+          main_phase el indicador se apaga ahí (SWV); con main_phase sigue contando la
+          fase principal anclada en _sweep_t0, p.ej. 'Step  34/600 s' (CA), y al cumplir
+          su duración pasa a '<fase> done — waiting for end…'.
+        Las transiciones las marcan paquetes, así que el desfase de latencia solo afecta a
+        las cotas intermedias. Nunca pisa el mensaje de un terminal/watchdog/Stop."""
+        if self._terminated or self.stop_event.is_set() or self._acq_t0 is None:
             return
-        elapsed = time.time() - self._acq_t0
-        acc = 0.0
-        for name, dur in self.pretreatment_phases:
-            if elapsed < acc + dur:
-                self._set_status(f"Pre-treatment — {name}  {elapsed - acc:.0f}/{dur:.0f} s")
+        now = time.time()
+        if self._sweep_t0 is None:
+            if not self.pretreatment_phases:
                 return
-            acc += dur
-        # Pasada la duración estimada del pre-tratamiento pero aún sin paquete de barrido.
-        self._set_status("Pre-treatment done — waiting for sweep…")
+            elapsed = now - self._acq_t0
+            acc = 0.0
+            for name, dur in self.pretreatment_phases:
+                if elapsed < acc + dur:
+                    self._set_status(f"Pre-treatment — {name}  {elapsed - acc:.0f}/{dur:.0f} s")
+                    return
+                acc += dur
+            # Pasada la duración estimada del pre-tratamiento pero aún sin paquete de barrido.
+            main = self.main_phase[0].lower() if self.main_phase else "sweep"
+            self._set_status(f"Pre-treatment done — waiting for {main}…")
+            return
+        if self.main_phase is None:
+            return
+        name, dur = self.main_phase
+        elapsed = now - self._sweep_t0
+        if elapsed < dur:
+            self._set_status(f"{name}  {elapsed:.0f}/{dur:.0f} s")
+        else:
+            # El loop dura t_run + t_interval y la cadena añade latencia: el fin real
+            # (emstat_end) llega después; su mensaje reemplaza a este.
+            self._set_status(f"{name} done — waiting for end…")
 
     # ---------------------------
     # Utilidades de plotting
