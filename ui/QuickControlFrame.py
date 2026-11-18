@@ -10,9 +10,12 @@ Reúne en una sola página lo esencial de las demás tabs del Manual Control:
   (el bloqueo de tabs evita el 'line busy' con las tabs viejas).
 - Lecturas de temperatura (UDP 5005, filtro de 4 muestras por canal — IR
   ambiente, IR objeto o termocupla, o las 3 a la vez con "All (3 temps)") o
-  fluorescencia (ADS1115 canal 0) — una señal a la vez por ahora — con plot,
-  retención de corridas (Keep data) y guardado a .xlsx (formato largo con columna
-  "channel") con metadata de actuadores en el nombre.
+  fluorescencia (par del fotodetector en el ADS1115) — una señal a la vez por
+  ahora — con plot, retención de corridas (Keep data) y guardado a .xlsx en
+  files/QUICK: hoja `data` (formato largo con columna "channel"), `settings` (foto
+  de la configuración al Start de cada corrida) y `events` (eventos de actuador
+  durante la lectura); metadata de actuadores también en el nombre. Los lee la
+  pestaña "Quick Control" de la ventana de análisis (docs/quick_analisis.md).
 
 Mientras haya CUALQUIER actuador o lectura activa se bloquean las demás tabs
 (ambos notebooks) vía lock_tabs_callback; se desbloquean solas al quedar todo
@@ -40,7 +43,9 @@ from templates.constants import (
     serial_port_encoder,
 )
 from templates.utils import (
+    experiment_dir,
     photoreceptor_channels,
+    photoreceptor_rf_ohm,
     read_settings_from_file,
     read_temp_source,
     temp_source_index,
@@ -85,6 +90,9 @@ class QuickControlFrame(ttk.Frame):
         self.motor_running = False
         self.motor_stopping = False
         self.motor_stop_event: Optional[threading.Event] = None
+        # Texto del estado del motor en marcha para la hoja `events` ("700 CW",
+        # "osc 30° 10%"); "off" detenido.
+        self._motor_state = "off"
 
         # ---- Estado LEDs: línea abierta mientras el toggle está ON ----
         self.led_pins: dict[str, Any] = {"heat": None, "fluor": None}
@@ -94,7 +102,9 @@ class QuickControlFrame(ttk.Frame):
         # ---- Estado lecturas ----
         self.reading_running = False
         self.reading_signal: Optional[str] = None  # "temp" | "fluor" (corrida en curso)
-        self.runs: list[dict] = []  # [{"signal", "t", "v", "run", "meta"}]
+        # [{"signal", "t", "v", "run", "meta", "cols", "settings", "events"}]
+        # settings = [(key, value)] al Start; events = [(t_s, actuator, state)].
+        self.runs: list[dict] = []
         self.run_index = 0
         self.start_time = 0.0
         self.udp_client: Optional[UdpClient] = None
@@ -437,6 +447,7 @@ class QuickControlFrame(ttk.Frame):
                     ),
                 )
                 self._set_status(f"Motor {direction} at {rpm:.0f} RPM.")
+                motor_state = f"{rpm:.0f} {direction}"
             else:
                 max_rpm = settings.get("max_rpm", 700)
                 thread = threading.Thread(
@@ -453,9 +464,12 @@ class QuickControlFrame(ttk.Frame):
                     ),
                 )
                 self._set_status(f"Oscillator ±{angle:.0f}° at {speed_pct:.0f}%.")
+                motor_state = f"osc {angle:.0f}° {speed_pct:.0f}%"
             disc.thread_motor = thread  # pyrefly: ignore  # singleton compartido
             thread.start()
         self.motor_running = True
+        self._motor_state = motor_state
+        self._log_event("motor", motor_state)
         self.btn_motor_start.configure(state=ttk.DISABLED)
         self.btn_motor_stop.configure(state=ttk.NORMAL)
         self.cmb_motor_mode.configure(state=ttk.DISABLED)
@@ -465,6 +479,9 @@ class QuickControlFrame(ttk.Frame):
         if not self.motor_running or self.motor_stop_event is None:
             return
         self.motor_stopping = True
+        # El disco sigue girando durante la rampa de frenado + go_zero: "stopping"
+        # hasta que _on_motor_stopped anota "off".
+        self._log_event("motor", "stopping")
         self.btn_motor_stop.configure(state=ttk.DISABLED)
         self._set_status("Stopping motor (ramp + go zero)…")
         self.motor_stop_event.set()
@@ -486,6 +503,8 @@ class QuickControlFrame(ttk.Frame):
         self.motor_running = False
         self.motor_stopping = False
         self.motor_stop_event = None
+        self._motor_state = "off"
+        self._log_event("motor", "off")
         self.btn_motor_start.configure(state=ttk.NORMAL)
         self.cmb_motor_mode.configure(state="readonly")
         self._set_status("Motor stopped.")
@@ -522,6 +541,8 @@ class QuickControlFrame(ttk.Frame):
             print(f"Error GPIO LED {which}: {e}")
             var.set(False)
             self._set_status(f"Error GPIO LED {which}: {e}")
+        # Estado final (tras un posible error); _log_event descarta los no-cambios.
+        self._log_event(f"{which}_led", "on" if var.get() else "off")
         self._update_lock()
 
     def _release_led(self, which):
@@ -632,6 +653,10 @@ class QuickControlFrame(ttk.Frame):
                 "run": self.run_index,
                 "meta": meta,
                 "cols": cols,
+                "settings": self._run_settings(signal, interval, meta),
+                # Estado inicial de los tres actuadores en t = 0: el análisis sombrea
+                # bien aunque el LED ya estuviera encendido antes del Start.
+                "events": [(0.0, a, s) for a, s in self._actuator_states().items()],
             }
         )
         self.reading_signal = signal
@@ -804,6 +829,62 @@ class QuickControlFrame(ttk.Frame):
         self._redraw()
         self._set_status("Data cleared.")
 
+    # ---------------- Eventos de actuador y settings por corrida ----------------
+
+    def _actuator_states(self) -> dict:
+        """Estado actual de cada actuador con los textos de la hoja `events`:
+        LEDs "on"/"off"; motor "off", "stopping" o el modo en marcha."""
+        if self.motor_stopping:
+            motor = "stopping"
+        elif self.motor_running:
+            motor = self._motor_state
+        else:
+            motor = "off"
+        return {
+            "fluor_led": "on" if self.led_fluor_var.get() else "off",
+            "heat_led": "on" if self.led_heat_var.get() else "off",
+            "motor": motor,
+        }
+
+    def _log_event(self, actuator: str, state: str):
+        """Anota un evento de actuador en la corrida en curso (solo mientras se lee).
+
+        Mismo origen de tiempo que las muestras (time.time() - start_time). Un estado
+        igual al último anotado no es un evento (p. ej. un toggle que falló y volvió a
+        OFF): anotarlo marcaría como "mixed" una ventana que no cruzó ningún cambio.
+        """
+        if not self.reading_running or not self.runs:
+            return
+        events = self.runs[-1].setdefault("events", [])
+        last = next((s for _t, a, s in reversed(events) if a == actuator), None)
+        if last == state:
+            return
+        events.append((round(time.time() - self.start_time, 3), actuator, state))
+
+    def _run_settings(self, signal: str, interval: int, meta: dict) -> list:
+        """Foto de la configuración al Start de la corrida → hoja `settings`.
+
+        Es por corrida y no por archivo: con Keep data se apilan corridas y entre una
+        y otra se puede cambiar el par del ADS, el FSR o Rf (docs/tia_fotodiodo.md §8
+        paso 3). `photoreceptor.rf_ohm` (0 = desconocido) es lo que deja al análisis
+        pasar V → nA (docs/quick_analisis.md)."""
+        pairs: list = [("signal", signal), ("interval_ms", interval)]
+        if signal == "fluor":
+            settings = read_settings_from_file()
+            use_diff, ch_p, ch_n = photoreceptor_channels(settings)
+            fsr = getattr(self.ads, "fsr", None)
+            if fsr is None:
+                fsr = settings.get("ads_fsr")
+            pairs += [
+                ("ads_fsr", fsr),
+                ("photoreceptor.use_diff", int(use_diff)),
+                ("photoreceptor.ch_p", ch_p),
+                ("photoreceptor.ch_n", ch_n),
+                ("photoreceptor.rf_ohm", photoreceptor_rf_ohm(settings)),
+            ]
+        pairs += [(f"meta.{k}", v) for k, v in meta.items()]
+        return pairs
+
     # ---------------- Persistencia ----------------
 
     def _current_actuator_meta(self):
@@ -839,14 +920,13 @@ class QuickControlFrame(ttk.Frame):
         if not any(run["t"] for run in self.runs):
             self._set_status("No data to save.")
             return
-        os.makedirs("files", exist_ok=True)
         signal = self.runs[-1]["signal"]
         suffix = self._build_filename_suffix(self.runs[-1].get("meta", {}))
         initialfile = f"unified_{signal}_{time.strftime('%Y%m%d_%H%M%S')}{suffix}.xlsx"
         filename = filedialog.asksaveasfilename(
             parent=self,
             title="Save data",
-            initialdir="files",
+            initialdir=experiment_dir("quick"),
             initialfile=initialfile,
             defaultextension=".xlsx",
             filetypes=XLSX_FILETYPES,
@@ -864,8 +944,16 @@ class QuickControlFrame(ttk.Frame):
             for t, row in zip(run["t"], run["v"]):
                 for ci, col_name in enumerate(cols):
                     rows.append([round(t, 3), row[ci], col_name, run["signal"], run["run"]])
+        # Por corrida: configuración al Start y eventos de actuador (docs/quick_analisis.md).
+        settings_rows: list[list] = [["run", "key", "value"]]
+        events_rows: list[list] = [["run", "t_s", "actuator", "state"]]
+        for run in self.runs:
+            settings_rows.extend([run["run"], k, v] for k, v in run.get("settings", []))
+            events_rows.extend([run["run"], t, a, s] for t, a, s in run.get("events", []))
         try:
-            write_workbook(filename, {"data": rows})
+            write_workbook(
+                filename, {"data": rows, "settings": settings_rows, "events": events_rows}
+            )
             self._set_status(f"Data saved: {os.path.basename(filename)}")
         except Exception as e:
             self._set_status(f"Error saving data: {e}")

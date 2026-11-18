@@ -5,19 +5,22 @@ from ui.analysis.peaks import PeakAnalysisFrame
 from ui.analysis.sqwv import SqwvAnalysisFrame
 from ui.analysis.eis import EISAnalysisFrame
 from ui.analysis.pcr import PcrAnalysisFrame
+from ui.analysis.quick import QuickAnalysisFrame
 
 
 # ---------------------------------------------------------------------------
-# Ventana: shell con notebook por metodo (Peaks CV - SQWV - EIS - PCR)
+# Ventana: shell con notebook por metodo (Peaks CV - SQWV - EIS - PCR - Quick Control)
 # ---------------------------------------------------------------------------
 
 
 class AnalysisWindow(ttk.Toplevel):
-    """Ventana de análisis con un notebook por método: picos (CV), SQWV, EIS y PCR.
-    La pestaña activa por defecto la decide el método del plotter que la lanzó (EIS →
-    pestaña EIS; SQWV → SQWV) o, si trae una corrida PCR en memoria, la pestaña PCR."""
+    """Ventana de análisis con un notebook por método: picos (CV), SQWV, EIS, PCR y
+    Quick Control. La pestaña activa por defecto la decide el método del plotter que
+    la lanzó (EIS → pestaña EIS; SQWV → SQWV); desde el shell general, Quick Control
+    si la pestaña principal activa es Manual Control (`prefer_quick`) y si no PCR
+    cuando hay una corrida PCR en memoria."""
 
-    def __init__(self, master, plotter=None, pcr_frame=None, **kwargs):
+    def __init__(self, master, plotter=None, pcr_frame=None, quick_frame=None, prefer_quick=False, **kwargs):
         super().__init__(master, **kwargs)
         self.title("Curve Analysis")
         self.geometry("1180x860")
@@ -29,20 +32,25 @@ class AnalysisWindow(ttk.Toplevel):
         self.sqwv = SqwvAnalysisFrame(self.notebook, owner=self, plotter=plotter)
         self.eis = EISAnalysisFrame(self.notebook, owner=self, plotter=plotter)
         self.pcr = PcrAnalysisFrame(self.notebook, owner=self, plotter=plotter, pcr_frame=pcr_frame)
+        self.quick = QuickAnalysisFrame(self.notebook, owner=self, quick_frame=quick_frame)
         self.notebook.add(self.peaks, text="Peaks (CV)")
         self.notebook.add(self.sqwv, text="SQWV Peaks")
         self.notebook.add(self.eis, text="EIS")
         self.notebook.add(self.pcr, text="PCR")
+        self.notebook.add(self.quick, text="Quick Control")
         method = getattr(plotter, "method", "") if plotter is not None else ""
         if method == "eis":
             self.notebook.select(self.eis)
         elif method == "sqwv":
             self.notebook.select(self.sqwv)
+        elif prefer_quick:
+            # Abierta desde el shell general con Manual Control a la vista.
+            self.notebook.select(self.quick)
         elif pcr_frame is not None and len(getattr(pcr_frame, "data_temperature", []) or []):
             # Abierta desde el shell general con una corrida PCR en memoria.
             self.notebook.select(self.pcr)
 
-        # Atajos de teclado enrutados a la pestaña activa (Peaks, SQWV, EIS o PCR).
+        # Atajos de teclado enrutados a la pestaña activa (Peaks, SQWV, EIS, PCR o Quick).
         self.bind("<Control-l>", lambda _e: self._active_load())
         self.bind("<Control-i>", lambda _e: self._active_import())
         self.protocol("WM_DELETE_WINDOW", self.on_close)
@@ -65,6 +73,8 @@ class AnalysisWindow(ttk.Toplevel):
             self.sqwv.import_analysis()
         elif tab is self.pcr:
             self.pcr.import_analysis()
+        elif tab is self.quick:
+            self.quick.import_analysis()
         else:
             self.peaks.import_analysis()
 

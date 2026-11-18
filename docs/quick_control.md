@@ -1,6 +1,13 @@
 # Quick Control: tab unificada del control manual
 
 > **26/10/2026:** el guardado pasó a `.xlsx` ([almacenamiento_por_experimento.md](almacenamiento_por_experimento.md)): el guardado es `unified_*.xlsx`, hoja `data` (mismo formato largo).
+>
+> **17/11/2026:** se guarda en `files/QUICK`. Además de `data`, el libro trae las hojas
+> `settings` (foto de la configuración al Start de cada corrida, con
+> `photoreceptor.rf_ohm`) y `events` (estado inicial de los actuadores y cada cambio
+> durante la lectura). Hay una pestaña de análisis para estos archivos
+> ([quick_analisis.md](quick_analisis.md)). La sección "Guardado CSV" de abajo es
+> histórica.
 
 ## Qué es
 
@@ -177,7 +184,7 @@ la misma red. No hay simulación.
 
 - Dos plots apilados / señales simultáneas (la estructura de `runs` ya lo
   permite).
-- Página de análisis para cargar los CSV `unified_*` (decidido fuera de
-  alcance en esta iteración).
+- ~~Página de análisis para cargar los `unified_*`~~: hecha el 17/11/2026
+  ([quick_analisis.md](quick_analisis.md)).
 
 __author__ = "Edisson A. Naula"

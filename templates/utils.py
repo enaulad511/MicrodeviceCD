@@ -104,8 +104,10 @@ DEFAULT_SETTINGS = {
     # Lectura del fotorreceptor en el ADS1115: use_diff = 1 lee el par diferencial
     # ch_p - ch_n; 0 lee ch_p single-ended. El mux solo forma 0-1, 0-3, 1-3 y 2-3
     # (photoreceptor_channels). 0-1 = TIA actual; el rediseñado va en 2-3
-    # (docs/tia_fotodiodo.md §7).
-    "photoreceptor": {"use_diff": 1.0, "ch_p": 0.0, "ch_n": 1.0},
+    # (docs/tia_fotodiodo.md §7). rf_ohm = Rf del TIA en uso (R1 + Rt medido),
+    # 0 = desconocido: no interviene en la lectura, solo viaja con cada corrida de
+    # Quick Control para pasar V → nA en el análisis (docs/quick_analisis.md).
+    "photoreceptor": {"use_diff": 1.0, "ch_p": 0.0, "ch_n": 1.0, "rf_ohm": 0.0},
     # Lectura de fluorescencia de PCR. Ventanas (s): espera tras el hold de
     # extensión, línea base (luz OFF), excitación (luz ON) y decaimiento (luz OFF);
     # muestreo: periodo dentro de cada ventana y lecturas del ADS por muestra.
@@ -223,12 +225,13 @@ def experiment_dir(method: str) -> str:
     """Devuelve (y crea) el directorio de guardado para un experimento.
 
     Ordena los CSV por método en subcarpetas de ``files/`` (``files/CV``,
-    ``files/SQWV``, ``files/EIS``, ``files/CA``, ``files/PCR``). El nombre de la
-    carpeta es el método en mayúsculas; los datos de temperatura del ciclador
-    (UDP) pertenecen conceptualmente a PCR.
+    ``files/SQWV``, ``files/EIS``, ``files/CA``, ``files/PCR``, ``files/QUICK``). El
+    nombre de la carpeta es el método en mayúsculas; los datos de temperatura del
+    ciclador (UDP) pertenecen conceptualmente a PCR. ``"quick"`` = lecturas de Quick
+    Control (``unified_*``).
 
     :param method: método del experimento (``"cv"``, ``"sqwv"``, ``"eis"``,
-        ``"ca"``, ``"pcr"``); no distingue mayúsculas.
+        ``"ca"``, ``"pcr"``, ``"quick"``); no distingue mayúsculas.
     :type method: str
     :return: ruta relativa de la carpeta, ya creada.
     :rtype: str
@@ -336,6 +339,23 @@ def photoreceptor_channels(settings: dict) -> "tuple[bool, AdsChannel, AdsChanne
             )
         ch_p, ch_n = 0, 1
     return use_diff, ch_p, ch_n
+
+
+def photoreceptor_rf_ohm(settings: dict) -> float:
+    """Rf del TIA en ohm desde ``settings["photoreceptor"]["rf_ohm"]``; 0.0 = desconocido.
+
+    No interviene en ninguna lectura: Quick Control lo copia en la hoja ``settings``
+    de cada corrida y la pestaña de análisis lo usa para pasar V → nA. Un valor
+    ausente, no numérico o ≤ 0 se trata como desconocido (docs/quick_analisis.md).
+    """
+    cfg = settings.get("photoreceptor", {}) if isinstance(settings, dict) else {}
+    if not isinstance(cfg, dict):
+        return 0.0
+    try:
+        rf = float(cfg.get("rf_ohm", 0.0))
+    except (TypeError, ValueError):
+        return 0.0
+    return rf if rf > 0 else 0.0
 
 
 def write_settings_to_file(new_settings: dict, file_path="resources/settings.json") -> bool:

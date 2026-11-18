@@ -128,9 +128,14 @@ Ecuaciones:
 
 **Fotodiodo MTD5052W, como hoy: cátodo al nodo sumador, ánodo a GND** (1.65 V de
 polarización inversa, dentro de los 5 V máximos). Con el cátodo en el nodo la lectura sube
-con la luz (A2 − A3 positivo), igual que ahora; si al montar sale negativo, el diodo está al
-revés: girarlo (el multiplexor del ADS solo forma A2 − A3, no A3 − A2, y A3 debe seguir
-siendo Vref para la cancelación de §4). La primera versión de este doc proponía el ánodo a
+con la luz (A2 − A3 positivo), igual que ahora (confirmado al montarlo el 13/11). Una
+lectura **negativa no** quiere decir que el diodo esté al revés: con el ánodo a GND, un diodo
+girado queda en directa, la salida del OPA320 se pega a 3.3 V y la lectura sale **positiva y
+fija** (≈ +1.6 V, o el tope del FSR) sin responder a la luz. Negativa con luz apunta a un
+cable con mal contacto (lo que pasó el 13/11) o a A2 y A3 intercambiados; diagnóstico en §8
+paso 3. Se arregla en el cableado, no en `ch_p`/`ch_n`: el multiplexor del ADS solo forma
+A2 − A3, no A3 − A2 (un 3-2 cae a 0-1 y lee el TIA viejo), y A3 debe seguir siendo Vref para
+la cancelación de §4. La primera versión de este doc proponía el ánodo a
 Vref_buf (fotovoltaico) por miedo a la corriente de oscuridad; la hoja de datos la da en
 5–30 pA a 5 V, así que no hay nada que ganar: la inversa deja menos capacidad (≈ 1 nF a
 1.65 V frente a ≈ 2 nF a 0 V) y una conexión menos. Si algún día se prefiere fotovoltaico,
@@ -183,7 +188,8 @@ lado, 4-5 en el otro.
 | cátodo (K, normalmente el terminal corto o la marca) | pin 4 de U1 (−IN) |
 | ánodo (A) | GND (opcional: Vref_buf, pin 1 de U2, para modo fotovoltaico) |
 
-Si la lectura sale negativa con luz, está al revés: girarlo.
+Si la lectura no sube con la luz, seguir el diagnóstico de §8 paso 3 antes de girarlo: con
+el ánodo a GND, girado da una lectura positiva fija, no negativa.
 
 **Rt — trimmer 1 MΩ (3 terminales, como reóstato)**
 
@@ -294,9 +300,13 @@ hasta que se trate el LED (§9).
   suficiente para comparar, pero no para medir fino con él.
 - **Corriente = voltaje guardado / Rf.** Todo lo guardado hasta el 11/11 (Newn1 a Newn6,
   pruebas de Quick Control) es con **Rf = 56.3 kΩ**: 50 mV ↔ 0.9 µA. Las corridas guardan
-  `ads_fsr` en la hoja `settings`, pero no Rf: tras el cambio, apuntar R1 + Rt medido en el
-  cuaderno de cada ajuste (o añadir `tia_rf_ohm` a `settings.json` y a la metadata; no
-  hecho). Sin ese dato dos corridas con distinto Rt no son comparables en nA.
+  `ads_fsr` en la hoja `settings`. Desde el **17/11** también hay Rf:
+  `photoreceptor.rf_ohm` en `settings.json` (0 = desconocido; se edita en Config). Las
+  corridas PCR lo llevan en su foto completa de `settings`, y Quick Control en la hoja
+  `settings` de cada corrida, de donde la pestaña de análisis saca los nA
+  ([quick_analisis.md](quick_analisis.md)). **Hay que cargar R1 + Rt medido cada vez que
+  se mueve el trimmer**: con un valor viejo, los nA salen mal sin ningún aviso. Sin ese
+  dato, dos corridas con distinto Rt no son comparables en nA.
 - Mejora pendiente y barata: descartar la primera muestra ON y la primera OFF al promediar
   (`settle_s` en `pcr_fluorescence`): hoy la primera ON vale 1/3 y entra en la media con un
   sesgo constante de ≈ −3 %. Inocuo mientras no cambie el muestreo.
@@ -309,8 +319,18 @@ hasta que se trate el LED (§9).
    por debajo de los 3.7 nA actuales (la corriente de oscuridad del MTD5052W es de pA). Si
    con el diodo tapado se quedan los ≈ 4 nA × Rf (4 mV a 1 MΩ), es fuga eléctrica de la
    placa, no luz.
-3. **LED ON con un disco**, trimmer al mínimo: A2 − A3 ≈ 0.9 µA × 0.1 MΩ ≈ 0.09 V. Si sale
-   negativo, girar el fotodiodo. Subir Rt hasta **≈ 0.7–0.8 V**.
+3. **LED ON con un disco**, trimmer al mínimo: A2 − A3 ≈ 0.9 µA × 0.1 MΩ ≈ 0.09 V,
+   positivo y subiendo con la luz. Subir Rt hasta **≈ 0.7–0.8 V**. Si no sale así:
+   - Primero **continuidad y contacto** de los cables. El 13/11 una lectura negativa con luz
+     era un cable al aire con mal contacto; asentado, la señal subió con la luz.
+   - Luego cada entrada single-ended (`use_diff = 0`, `ads_fsr = 4.096`, `ch_p = 2` y
+     después `3`; parar y volver a arrancar la lectura tras cada cambio): A3 ≈ 1.65 V fijo;
+     A2 ≈ 1.65 V a oscuras y sube con la luz. Si la que se mueve es A3, A2 y A3 están
+     intercambiados: cambiar los cables. Si la que se mueve baja de 1.65 V, el diodo está
+     girado en la variante fotovoltaica (ánodo a Vref_buf): girarlo.
+   - Lectura positiva fija (≈ +1.6 V o el tope del FSR) que no responde a la luz: diodo
+     girado con el ánodo a GND (queda en directa): girarlo.
+   - Al terminar, volver a `use_diff = 1`, `ch_p = 2`, `ch_n = 3`, `ads_fsr = 2.048`.
 4. `ads_fsr` = 2.048. Con la muestra más brillante que se tenga (o el final de una PCR
    positiva): A2 − A3 < 1.5 V. Si no, bajar Rt.
 5. **Ruido** en Quick Control (fluorescencia, 100 ms): 60 s a oscuras y 60 s con LED,
@@ -365,6 +385,8 @@ hasta que se trate el LED (§9).
 - [ ] Por qué las pruebas del 09–10/11 dieron 18–340 nA frente a los 904 nA de las corridas
       PCR con la misma electrónica: anotar muestra, disco y posición del LED en la próxima.
 - [ ] Construir y pasar el plan de §8; registrar R1 + Rt y `ads_fsr` finales aquí.
+      13/11: montado en A2-A3 y con la polaridad correcta (la señal sube con la luz); falta
+      el ajuste de Rt y los pasos 2 y 4–7.
 - [ ] Qué riel alimenta el LED y con qué corriente; driver de corriente constante solo si el
       ruido con luz no baja tras el TIA (§9).
 - [ ] Filtro de emisión delante del fotodiodo: modelo, banda y OD a 470 nm; y la prueba de

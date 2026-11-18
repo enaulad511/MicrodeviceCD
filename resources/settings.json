@@ -69,7 +69,8 @@
     "photoreceptor": {
         "use_diff": 1.0,
         "ch_p": 0,
-        "ch_n": 1
+        "ch_n": 1,
+        "rf_ohm": 0.0
     },
     "windows_pcr": 2500.0,
     "temp_source": "thermocouple",

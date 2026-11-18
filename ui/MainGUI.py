@@ -240,7 +240,17 @@ class MainGUI(ttk.Window):
                 pass
         from ui.analysis import AnalysisWindow
 
-        self.analysis_window = AnalysisWindow(self, plotter=self, pcr_frame=self.tab_pcr)
+        try:
+            prefer_quick = self.main_notebook.index(self.main_notebook.select()) == MANUAL_CONTROL_TAB
+        except Exception:
+            prefer_quick = False
+        self.analysis_window = AnalysisWindow(
+            self,
+            plotter=self,
+            pcr_frame=self.tab_pcr,
+            quick_frame=self.tab_quick,
+            prefer_quick=prefer_quick,
+        )
 
     def callback_ip(self):
         return self.ip_sender

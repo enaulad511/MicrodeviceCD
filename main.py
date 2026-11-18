@@ -11,4 +11,3 @@ if __name__ == '__main__':
     seed_default_settings()
     app = MainGUI(themename="litera")
     app.mainloop()
-    

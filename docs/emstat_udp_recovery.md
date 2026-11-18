@@ -157,6 +157,16 @@ Lo que sigue sin resolverse: un `seq` que pierden **ambos** transportes. En CA e
 - [ ] §6: corrida CV con Keep runs; si la consola dice `rellenados del otro transporte`,
       comprobar que la gráfica final no tiene trazos cruzados y que los ciclos de la hoja
       `data` son monótonos por corrida.
+  - **Parcial 12/11/2026** (`cv_data_20261112_133415_ang10_spd3.xlsx`, 6 corridas CV, red
+    mejorada): TCP no perdió **ningún** `seq` (658/658 por corrida) → camino "no gaps":
+    datos = vivo, `recovered` todo 0, ciclos 216/216/217 en las 6, hoja `raw` sin huecos.
+    UDP perdió 13 mensajes, entre ellos el **`C0002` de la corrida 4** (seq 439): la
+    divergencia del parser UDP que causaba el bug, vista en hardware. Falta una corrida con
+    pérdida en TCP para probar el relleno.
+  - En 3 de 6 corridas los "perdidos" por UDP son los 3 últimos (`P`, `-`, `*`): casi seguro
+    no es la red sino el cierre. El procesador drena TCP antes que UDP, el `emstat_end` de
+    TCP cierra la corrida y las últimas líneas UDP quedan en la cola. No afecta los datos
+    con TCP de primario, pero infla la "pérdida UDP" de la cobertura.
 
 ---
 

@@ -19,6 +19,7 @@ files/
   SQWV/
   EIS/
   CA/
+  QUICK/  ← lecturas de Quick Control (`unified_*`), desde el 17/11/2026
 ```
 
 Todo pasa por `experiment_dir(method) -> "files/<METODO>"` en
@@ -72,7 +73,9 @@ los valores nuevos son los exactos.
 | Export SQWV peaks | `sqwv_peaks_<ts>.xlsx` | `peaks`, `curves` (re-importable) | `<base>.csv` + `_curves.csv` |
 | Export Peaks (CV) | `analysis_<ts>.xlsx` | `results`, `curves` (re-importable) | `<base>.csv` + `_curves.csv` |
 | Export EIS | `eis_analysis_<ts>.xlsx` | `spectra` (siempre, re-importable), `nyquist` (si hay mediciones) | `_spectra.csv` + `<base>.csv` |
-| Photoreceptor / Temperature / Quick Control | `photoreceptor_data_*`, `temperature_log_*`, `unified_*` | `data` | 1 CSV |
+| Photoreceptor / Temperature | `photoreceptor_data_*`, `temperature_log_*` | `data` | 1 CSV |
+| Quick Control (desde el 17/11/2026 en `files/QUICK`) | `unified_*` | `data`, `settings` (por corrida), `events` ([quick_analisis.md](quick_analisis.md)) | 1 CSV |
+| Export análisis Quick Control | `quick_analysis_<ts>.xlsx` | `data`, `settings`, `events`, `windows`, `names`, `stats` (re-importable) | — |
 
 ### 3.1 Corrida PCR
 

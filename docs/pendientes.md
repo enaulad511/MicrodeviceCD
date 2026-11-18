@@ -101,8 +101,9 @@ Los dos primeros pasos se repiten cada vez que haya código local sin subir.
 - [ ] ➖ HW — Ciclo real: timing del muestreo, CSV crudo y ETA. Se puede cerrar con la
       misma corrida PCR de validación ([cambios_fluorescencia.md](cambios_fluorescencia.md)).
 - [ ] ➖ HW — **Rediseño del TIA** (OPA320, Rf = 100 kΩ + trimmer 1 MΩ, buffer de Vref; diseñado el
-      11/11): montar en A2-A3 (`photoreceptor.ch_p/ch_n` = 2/3), ajustar a ≈ 0.7 V con LED y
-      pasar el plan de validación; luego `ads_fsr` 2.048 ([tia_fotodiodo.md](tia_fotodiodo.md) §8).
+      11/11): montado en A2-A3 el 13/11 (`photoreceptor.ch_p/ch_n` = 2/3), la señal sube con
+      la luz; falta ajustar a ≈ 0.7 V con LED y pasar el plan de validación; luego `ads_fsr`
+      2.048 ([tia_fotodiodo.md](tia_fotodiodo.md) §8).
 
 ## Análisis
 
@@ -117,8 +118,14 @@ Los dos primeros pasos se repiten cada vez que haya código local sin subir.
 
 ## Control manual (Quick Control)
 
-- [ ] ⬇ DEV — Dos plots apilados; página de análisis para los CSV `unified_*` (fuera de
-      alcance por ahora) ([quick_control.md](quick_control.md)).
+- [ ] ⬇ DEV — Dos plots apilados / señales simultáneas ([quick_control.md](quick_control.md)).
+      La página de análisis de los `unified_*` quedó hecha el 17/11
+      ([quick_analisis.md](quick_analisis.md)).
+- [ ] ➖ HW — **Pestaña de análisis Quick Control:** en el Pi, una lectura de fluorescencia
+      prendiendo y apagando el LED y moviendo el motor. Comprobar que la hoja `events`
+      coincide con lo hecho y que el sombreado cae donde salta la señal. Cargar
+      `photoreceptor.rf_ohm` (R1 + Rt) en Config antes del paso 5 de §8
+      ([quick_analisis.md](quick_analisis.md) §8).
 
 ## Firmware legacy (otros equipos)
 
