@@ -1,21 +1,33 @@
 # -*- coding: utf-8 -*-
+import math
 import os
 import re
 import time
+import weakref
+from functools import lru_cache
+from tkinter import TclError
 from tkinter.filedialog import askopenfilename, asksaveasfilename
+from typing import TypedDict
 
 import numpy as np
 import ttkbootstrap as ttk
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 from matplotlib.figure import Figure
+from matplotlib.widgets import SpanSelector
 
 from templates.utils import experiment_dir
-from templates.xlsx_io import XLSX_FILETYPES, read_sheet_text, write_workbook, xlsx_path
+from templates.xlsx_io import (
+    XLSX_FILETYPES,
+    read_sheet_text,
+    read_sheets_text,
+    write_workbook,
+    xlsx_path,
+)
 from ui.analysis.common import CycleCurve, Experiment, _apply_filter, plt
 
 
 # ---------------------------------------------------------------------------
-# Detección de picos SWV (múltiples picos, ambas direcciones, con prominencia)
+# Detección de picos SWV (múltiples picos, solo máximos, con prominencia)
 # ---------------------------------------------------------------------------
 # Etiquetas de líneas cargadas por EventPlotter desde un archivo SWV: "<base>-r<run>c<cycle>".
 _SQWV_LBL_RE = re.compile(r"^(.+)-r(\d+)c(\d+)$")
@@ -29,12 +41,12 @@ def _parse_sqwv_label(label):
     return str(label), 1, 0
 
 
-def _detect_dir_indices(ys, want_max, window, min_prom):
-    """Índices de máximos (want_max=True) o mínimos locales en ys.
+def _detect_local_max_indices(ys, window, min_prom):
+    """Índices de máximos locales en ys (SWV solo usa máximos; los mínimos se quitaron).
 
-    Un punto es candidato si es el extremo en su ventana ±window y su prominencia
+    Un punto es candidato si es el máximo en su ventana ±window y su prominencia
     local (vs el lado menos profundo dentro de esa ventana) supera min_prom. Los
-    candidatos a <= window de distancia se fusionan conservando el más extremo, así
+    candidatos a <= window de distancia se fusionan conservando el más alto, así
     una meseta o un hombro no produce un racimo de picos pegados.
     """
     n = len(ys)
@@ -47,75 +59,294 @@ def _detect_dir_indices(ys, want_max, window, min_prom):
         hi = min(n, i + w + 1)
         seg = ys[lo:hi]
         v = ys[i]
-        if want_max:
-            if v == seg.max() and v > seg.min():
-                base = max(ys[lo : i + 1].min(), ys[i:hi].min())
-                if (v - base) >= min_prom:
-                    cand.append(i)
-        else:
-            if v == seg.min() and v < seg.max():
-                base = min(ys[lo : i + 1].max(), ys[i:hi].max())
-                if (base - v) >= min_prom:
-                    cand.append(i)
+        if v == seg.max() and v > seg.min():
+            base = max(ys[lo : i + 1].min(), ys[i:hi].min())
+            if (v - base) >= min_prom:
+                cand.append(i)
     merged = []
     for i in cand:
         if merged and (i - merged[-1]) <= w:
-            prev = merged[-1]
-            better = (ys[i] > ys[prev]) if want_max else (ys[i] < ys[prev])
-            if better:
+            if ys[i] > ys[merged[-1]]:
                 merged[-1] = i
         else:
             merged.append(i)
     return merged
 
 
-def _detect_peaks(xs, ys, direction, window, prom_frac):
-    """Devuelve (maxima, minima) como listas de (x, y).
+def _slope_window(n, window):
+    """Semi-ventana (puntos) que usa el detector por pendiente sobre `n` puntos: la pedida
+    (mínimo 2), reducida a lo sumo a n//4 (mínimo 2) cuando el rango de E es estrecho. La
+    comparten el detector y el aviso de Compute, para que avisen exactamente cuando se reduce."""
+    return min(max(2, int(window)), max(2, n // 4))
 
-    prom_frac es la prominencia mínima como fracción del span de ys (decisión Q11:
-    porcentaje del rango, así escala con el current range de cada corrida).
+
+@lru_cache(maxsize=32)
+def _sg_coeffs(w, order, deriv):
+    """Coeficientes Savitzky-Golay (ventana 2w+1, polinomio `order`, derivada `deriv`)
+    para np.correlate(ys, coef, 'valid'); respecto al ÍNDICE de muestra (no a E), así
+    un barrido descendente en E da el mismo resultado que uno ascendente."""
+    x = np.arange(-w, w + 1, dtype=float)
+    a = np.vander(x, order + 1, increasing=True)
+    return np.linalg.pinv(a)[deriv] * math.factorial(deriv)
+
+
+def _detect_slope_indices(ys, window, prom_frac):
+    """Índices de picos por PENDIENTE (curvatura), para picos sobre una línea base
+    inclinada que no son máximos locales.
+
+    Sobre una base decreciente la 1.ª derivada nunca cruza por cero: el pico solo la
+    frena. Lo que lo delata es el cambio de pendiente, es decir -y'' (máxima en el
+    centro de un pico, ~0 o negativa en una caída/subida suave de la base). Se estima
+    y' e y'' con Savitzky-Golay (ventana 2w+1, w = peak window, mínimo 2) y:
+
+    1. candidatos = máximos locales de -y'' sobre un umbral
+       max(prom_frac × máx(-y''), 5 × ruido), con ruido = MAD de las SEGUNDAS DIFERENCIAS
+       de y propagada a y'' (no la dispersión de y'': base y picos la inflan y se
+       pierden picos débiles). El umbral relativo solo no basta: una curva sin picos
+       siempre tendría un "más fuerte";
+    2. candidatos a <= w se fusionan conservando el de mayor -y'';
+    3. si y' cruza de + a − a menos de w del centro, el pico se ajusta a ese máximo
+       real (la pendiente fija el vértice); si no, queda en el hombro (centro de -y'').
+    """
+    ys = np.asarray(ys, dtype=float)
+    n = ys.size
+    # Un rango de E estrecho deja pocos puntos: se reduce la ventana (a lo sumo n/4, mínimo
+    # 2) en vez de no detectar nada; el llamador avisa cuando eso ocurre (`_slope_window`).
+    w = _slope_window(n, window)
+    if n < 2 * w + 3:
+        return []
+    c2 = _sg_coeffs(w, 3, 2)
+    d1 = np.full(n, np.nan)
+    d2 = np.full(n, np.nan)
+    d1[w : n - w] = np.correlate(ys, _sg_coeffs(w, 3, 1), "valid")
+    d2[w : n - w] = np.correlate(ys, c2, "valid")
+    curv = -d2
+    core = curv[w : n - w]
+    top = float(np.max(core))
+    if not np.isfinite(top) or top <= 0:
+        return []
+    # Ruido de y'' propagado desde el ruido de y, estimado con la MAD de las segundas
+    # diferencias (anulan la pendiente de la base; la MAD ignora los pocos puntos de
+    # los picos). La dispersión de y'' misma no sirve: la inflan base y picos.
+    dd = ys[2:] - 2.0 * ys[1:-1] + ys[:-2]
+    sigma_y = 1.4826 * float(np.median(np.abs(dd - np.median(dd)))) / math.sqrt(6.0)
+    noise = sigma_y * float(np.sqrt(np.sum(c2**2)))
+    thr = max(max(0.0, prom_frac) * top, 5.0 * noise)
+    cand = [
+        i
+        for i in range(w + 1, n - w - 1)
+        if curv[i] > 0 and curv[i] >= thr and curv[i] >= curv[i - 1] and curv[i] > curv[i + 1]
+    ]
+    merged = []
+    for i in cand:
+        if merged and (i - merged[-1]) <= w:
+            if curv[i] > curv[merged[-1]]:
+                merged[-1] = i
+        else:
+            merged.append(i)
+    out = []
+    for i in merged:
+        best: "int | None" = None  # cruce + → − de y' más cercano al centro
+        for j in range(max(w, i - w), min(n - w - 1, i + w)):
+            if d1[j] > 0 >= d1[j + 1] and (best is None or abs(j - i) < abs(best - i)):
+                best = j
+        if best is not None:
+            i = best if ys[best] >= ys[best + 1] else best + 1
+        if not out or i != out[-1]:
+            out.append(i)
+    return out
+
+
+def _detect_peaks(xs, ys, window, prom_frac, method="local"):
+    """Devuelve los máximos como lista de (x, y). SWV solo usa máximos (el pico de
+    corriente neta); los mínimos no se calculan.
+
+    method="local": máximos locales; prom_frac = prominencia mínima como fracción del
+    span de ys (decisión Q11: porcentaje del rango, escala con el current range).
+    method="slope": por pendiente/curvatura (`_detect_slope_indices`); prom_frac =
+    fracción de la curvatura del pico más marcado.
     """
     ys = np.asarray(ys, dtype=float)
     xs = np.asarray(xs, dtype=float)
     if ys.size == 0:
-        return [], []
-    span = float(np.max(ys) - np.min(ys)) or 1.0
-    min_prom = max(0.0, prom_frac) * span
-    maxs, mins = [], []
-    if direction in ("max", "both"):
-        for i in _detect_dir_indices(ys, True, window, min_prom):
-            maxs.append((float(xs[i]), float(ys[i])))
-    if direction in ("min", "both"):
-        for i in _detect_dir_indices(ys, False, window, min_prom):
-            mins.append((float(xs[i]), float(ys[i])))
-    return maxs, mins
+        return []
+    if method == "slope":
+        idx = _detect_slope_indices(ys, window, prom_frac)
+    else:
+        span = float(np.max(ys) - np.min(ys)) or 1.0
+        idx = _detect_local_max_indices(ys, window, max(0.0, prom_frac) * span)
+    return [(float(xs[i]), float(ys[i])) for i in idx]
+
+
+class _DetectSig(TypedDict):
+    """Parámetros de detección que firman un Compute (`_controls_sig`)."""
+
+    method: str
+    window_mv: int
+    prom: float
+    filter: str
+    fwin: int
 
 
 # ---------------------------------------------------------------------------
 # Pestaña: análisis de picos SWV (múltiples picos por corrida, sin tendencia)
 # ---------------------------------------------------------------------------
 class SqwvAnalysisFrame(ttk.Frame):
-    """Pestaña de picos SWV: experimentos (archivo/corrida) → corridas (runs).
+    """Pestaña de picos SWV: archivos cargados → corridas (runs). (En la UI cada archivo se
+    llama "File"; "experimento" es una serie de corridas de un mismo electrodo, ver
+    GLOSSARY.md. Internamente el archivo se guarda como `Experiment`, clase de `common`.)
 
     A diferencia de PeakAnalysisFrame, NO calcula tendencia entre experimentos: el
     énfasis es detectar MÚLTIPLES picos por corrida (analitos a distintos potenciales)
-    y reportar E_pico / I_pico en cada punto. Detecta máximos y mínimos con control de
-    ventana y prominencia (% del span), permite añadir/borrar picos a mano, y un solo
-    overlay con los picos marcados y anotados. Reusa Experiment/CycleCurve; el ítem por
-    curva es una corrida (SWV = un barrido I vs E por run; un archivo puede traer varios).
+    y reportar E_pico / I_pico (y la altura sobre la base local) en cada punto. Solo
+    máximos; semi-ventana en mV y prominencia por método; permite añadir/borrar picos a
+    mano, y un solo overlay con los picos marcados y anotados. Reusa Experiment/CycleCurve;
+    el ítem por curva es una corrida (SWV = un barrido I vs E por run; un archivo puede
+    traer varios).
     """
 
     FILTERS = ("none", "moving_avg", "median")
+    # Detección: máximos locales (clásico) o por pendiente/curvatura (picos sobre base inclinada).
+    METHODS = ("Local max", "Slope")
+    # Semi-ventana por defecto (mV): con 5.9 mV/punto son ~10 puntos. En las corridas reales
+    # de referencia (163121) con ±30 mV el pico aparecía/desaparecía entre corridas.
+    DEFAULT_PEAK_WINDOW_MV = 60
+    # La recta de la base se ancla a ±BASE_ANCHOR × semi-ventana del pico (±1× quedaba sobre
+    # los flancos y subestimaba la altura a la mitad; ±3× cae en el pico vecino).
+    BASE_ANCHOR = 2
+
+    def _method_key(self):
+        return "slope" if self.method_var.get() == "Slope" else "local"
+
+    def _num(self, var, cast, default, minimum):
+        """Lee un campo numérico sin lanzar: vacío / texto no numérico (mientras se
+        escribe en el spinbox) devuelve el último valor válido de ese campo, o `default`."""
+        key = str(var)
+        try:
+            v = cast(var.get())
+            if not math.isfinite(v):
+                raise ValueError
+        except (ValueError, TclError, OverflowError):  # 'inf' / '1e400' en un IntVar
+            return self._last_valid.get(key, default)
+        v = max(minimum, v)
+        self._last_valid[key] = v
+        return v
+
+    def _set_prom_field(self, value):
+        """Escribe el campo de prominencia desde el código (cambio de método, Import) y lo
+        registra como último valor válido: si luego el usuario lo deja vacío, `_num` debe
+        devolver ESTE valor y no el que tenía el campo con el otro método."""
+        v = max(0.0, float(value))
+        self.prominence_var.set(v)
+        self._last_valid[str(self.prominence_var)] = v
+
+    def _peak_window_mv(self):
+        return self._num(self.peak_window_var, int, self.DEFAULT_PEAK_WINDOW_MV, 1)
+
+    def _filter_window(self):
+        return self._num(self.filter_window_var, int, 5, 1)
+
+    def _prom_pct(self):
+        return self._num(self.prominence_var, float, 5.0, 0.0)
+
+    def _on_method_change(self):
+        """Guarda la prominencia del método que se deja y carga la del nuevo."""
+        self._prom[self._prom_method] = self._prom_pct()
+        self._prom_method = self._method_key()
+        self._set_prom_field(self._prom[self._prom_method])
+        self._update_prom_label()
+
+    def _prom_values(self):
+        """{'local': %, 'slope': %} con el valor del método activo tomado del campo."""
+        vals = dict(self._prom)
+        vals[self._method_key()] = self._prom_pct()
+        return vals
+
+    def _controls_sig(self) -> "_DetectSig":
+        """Parámetros de detección vigentes (sin el rango: Apply ya poda los picos)."""
+        return {
+            "method": self._method_key(),
+            "window_mv": self._peak_window_mv(),
+            "prom": self._prom_pct(),
+            "filter": self.filter_var.get(),
+            "fwin": self._filter_window(),
+        }
+
+    @staticmethod
+    def _window_pts(window_mv, xs):
+        """Semi-ventana en puntos para una curva: mV / paso medio de E (mínimo 1)."""
+        xs = np.asarray(xs, dtype=float)
+        if xs.size < 2:
+            return 1
+        step = float(np.median(np.abs(np.diff(xs))))
+        if not np.isfinite(step) or step <= 0:
+            return 1
+        return max(1, int(round(window_mv / 1000.0 / step)))
+
+    def _height_above_base(self, xs, ys, x, y, half_pts):
+        """Altura (A) del pico (x, y) sobre la recta que une los puntos a ±BASE_ANCHOR ×
+        half_pts (acotados a los extremos de xs/ys, que ya vienen recortados al rango de E).
+        None si el pico es él mismo un ancla (borde del rango) o no hay dos anclas distintas."""
+        if xs.size < 3:
+            return None
+        i = int(np.argmin(np.abs(xs - x)))
+        k = max(1, self.BASE_ANCHOR * int(half_pts))
+        a, b = max(0, i - k), min(xs.size - 1, i + k)
+        if a == b or a == i or b == i or xs[b] == xs[a]:
+            return None
+        base = ys[a] + (ys[b] - ys[a]) * (xs[i] - xs[a]) / (xs[b] - xs[a])
+        return float(y - base)
+
+    def _remember_heights(self, c, ys_full, peaks):
+        """Calcula y GUARDA la altura de `peaks` de la curva `c`, con los datos filtrados
+        (`ys_full`, curva completa) y la ventana vigentes AHORA. Se llama al detectar o añadir
+        un pico: la altura queda fija junto a E/I del pico y no cambia si luego se tocan el
+        filtro o la ventana sin recalcular."""
+        m = self._range_mask(c.xs)
+        xs_r, ys_r = c.xs[m], np.asarray(ys_full, dtype=float)[m]
+        half = self._window_pts(self._peak_window_mv(), xs_r)
+        store = self._heights.setdefault(c, {})
+        for x, y in peaks:
+            store[(x, y)] = self._height_above_base(xs_r, ys_r, x, y, half)
+
+    def _peaks_in_range(self, c):
+        """[(x, y, altura|None)] de los picos de `c` dentro del rango de E aplicado. Los
+        guardados fuera del rango (p. ej. el rango restaurado por Import, que no poda) no
+        se muestran ni se exportan."""
+        lo, hi = self._range()
+        heights = self._heights.get(c, {})
+        return [(x, y, heights.get((x, y))) for x, y in c.max_points if lo <= x <= hi]
+
+    def _update_prom_label(self):
+        if self._method_key() == "slope":
+            self.lbl_prom.configure(text="Min curvature (% of max):")
+        else:
+            self.lbl_prom.configure(text="Min prominence (%):")
 
     def __init__(self, master, owner, plotter=None, **kwargs):
         super().__init__(master, **kwargs)
         self.owner = owner
+        self._last_valid: "dict[str, float]" = {}  # str(var) → último valor válido del campo
+        # curva → {(x, y): altura}; débil para que borrar la curva libere su entrada.
+        self._heights: "weakref.WeakKeyDictionary[CycleCurve, dict]" = weakref.WeakKeyDictionary()
+        # curva → (filtro, ventana) con que se calculó su `ys_filtered` en el último Compute.
+        self._filters: "weakref.WeakKeyDictionary[CycleCurve, tuple[str, int]]" = (
+            weakref.WeakKeyDictionary()
+        )
+        # parámetros usados en el último Compute, o None
+        self._compute_sig: "_DetectSig | None" = None
+        # Rango de E APLICADO (Apply / Select on plot / Full range / Import): el único que
+        # leen Compute, Export, Add peak y el dibujo. Lo escrito en los campos no cuenta
+        # hasta aplicarlo.
+        self._applied_range: "tuple[float, float]" = (-np.inf, np.inf)
         self.experiments = []  # list[Experiment]
         self._tree_ref = {}  # iid árbol izq → ("exp", exp) | ("run", exp, curve)
         self._res_ref = {}  # iid tabla → ("exp", exp) | ("run", exp, c) | ("peak", exp, c, kind, (x,y))
         self._legend_visible = True
         self._add_mode = False  # captura de clics para añadir picos
         self._pick_cid: int | None = None
+        self._span_mode = False  # arrastre en la gráfica para fijar el rango de E
+        self._span: "SpanSelector | None" = None
 
         self._build_ui()
         # Siembra: corrida SWV en memoria (total_data, sin pre-tratamiento) + curvas cargadas
@@ -161,27 +392,38 @@ class SqwvAnalysisFrame(ttk.Frame):
             toolbar_b, text="📊 Compute", bootstyle="success", command=self.compute_peaks
         ).pack(side=ttk.LEFT, padx=3)
 
-        # --- Toolbar fila 2: dirección + ventana + prominencia + filtro ---
+        # --- Toolbar fila 2: ventana + prominencia + filtro ---
         toolbar2 = ttk.Frame(self)
         toolbar2.pack(side=ttk.TOP, fill=ttk.X, padx=6, pady=(0, 4))
-        ttk.Label(toolbar2, text="Peaks:").pack(side=ttk.LEFT, padx=(0, 4))
-        self.direction_var = ttk.StringVar(value="both")
-        for txt, val in (("Max", "max"), ("Min", "min"), ("Both", "both")):
-            ttk.Radiobutton(
-                toolbar2, text=txt, variable=self.direction_var, value=val
-            ).pack(side=ttk.LEFT)
-
-        ttk.Label(toolbar2, text="Peak window:").pack(side=ttk.LEFT, padx=(12, 4))
-        self.peak_window_var = ttk.IntVar(value=5)
-        ttk.Spinbox(
-            toolbar2, from_=1, to=500, increment=1, width=5, textvariable=self.peak_window_var
+        ttk.Label(toolbar2, text="Method:").pack(side=ttk.LEFT, padx=(0, 4))
+        self.method_var = ttk.StringVar(value=self.METHODS[1])  # Slope por defecto
+        ttk.Combobox(
+            toolbar2,
+            textvariable=self.method_var,
+            values=self.METHODS,
+            state="readonly",
+            width=10,
         ).pack(side=ttk.LEFT)
 
-        ttk.Label(toolbar2, text="Min prominence (%):").pack(side=ttk.LEFT, padx=(12, 4))
-        self.prominence_var = ttk.DoubleVar(value=5.0)
+        # Semi-ventana en mV (no en puntos): lo que importa es cuánto abarca respecto al
+        # ancho del pico, y el paso de E cambia entre archivos. Se pasa a puntos por curva.
+        ttk.Label(toolbar2, text="Peak window (mV):").pack(side=ttk.LEFT, padx=(12, 4))
+        self.peak_window_var = ttk.IntVar(value=self.DEFAULT_PEAK_WINDOW_MV)
+        ttk.Spinbox(
+            toolbar2, from_=5, to=1000, increment=5, width=5, textvariable=self.peak_window_var
+        ).pack(side=ttk.LEFT)
+
+        self.lbl_prom = ttk.Label(toolbar2, text="Min prominence (%):")
+        self.lbl_prom.pack(side=ttk.LEFT, padx=(12, 4))
+        # Un valor por método (significan cosas distintas): el campo muestra el del activo.
+        self._prom = {"local": 5.0, "slope": 5.0}
+        self._prom_method = "slope"
+        self.prominence_var = ttk.DoubleVar(value=self._prom["slope"])
         ttk.Spinbox(
             toolbar2, from_=0, to=100, increment=0.5, width=6, textvariable=self.prominence_var
         ).pack(side=ttk.LEFT)
+        self.method_var.trace_add("write", lambda *_: self._on_method_change())
+        self._update_prom_label()
 
         ttk.Separator(toolbar2, orient=ttk.VERTICAL).pack(side=ttk.LEFT, fill=ttk.Y, padx=8)
         ttk.Label(toolbar2, text="Filter:").pack(side=ttk.LEFT, padx=(0, 4))
@@ -193,11 +435,39 @@ class SqwvAnalysisFrame(ttk.Frame):
             state="readonly",
             width=12,
         ).pack(side=ttk.LEFT)
-        ttk.Label(toolbar2, text="Filter window:").pack(side=ttk.LEFT, padx=(8, 4))
+        ttk.Label(toolbar2, text="Filter window (pts):").pack(side=ttk.LEFT, padx=(8, 4))
         self.filter_window_var = ttk.IntVar(value=5)
         ttk.Spinbox(
             toolbar2, from_=1, to=500, increment=1, width=5, textvariable=self.filter_window_var
         ).pack(side=ttk.LEFT)
+
+        # --- Toolbar fila 2b: rango de potencial (se muestra y se calcula solo dentro) ---
+        toolbar_r = ttk.Frame(self)
+        toolbar_r.pack(side=ttk.TOP, fill=ttk.X, padx=6, pady=(0, 4))
+        ttk.Label(toolbar_r, text="E range (V):").pack(side=ttk.LEFT, padx=(0, 4))
+        self.e_min_var = ttk.StringVar(value="")
+        self.e_max_var = ttk.StringVar(value="")
+        e_min = ttk.Entry(toolbar_r, textvariable=self.e_min_var, width=8)
+        e_min.pack(side=ttk.LEFT)
+        ttk.Label(toolbar_r, text="to").pack(side=ttk.LEFT, padx=4)
+        e_max = ttk.Entry(toolbar_r, textvariable=self.e_max_var, width=8)
+        e_max.pack(side=ttk.LEFT)
+        for e in (e_min, e_max):
+            e.bind("<Return>", lambda _e: self.apply_range())
+        ttk.Button(
+            toolbar_r, text="Apply", bootstyle="secondary", command=self.apply_range
+        ).pack(side=ttk.LEFT, padx=(6, 3))
+        self.btn_span = ttk.Button(
+            toolbar_r,
+            text="↔ Select on plot",
+            bootstyle="secondary-outline",
+            command=self._toggle_span_mode,
+        )
+        self.btn_span.pack(side=ttk.LEFT, padx=3)
+        ttk.Button(
+            toolbar_r, text="Full range", bootstyle="secondary-outline", command=self.reset_range
+        ).pack(side=ttk.LEFT, padx=3)
+        ttk.Label(toolbar_r, text="(blank = no limit)").pack(side=ttk.LEFT, padx=6)
 
         # --- Toolbar fila 3: edición manual de picos ---
         toolbar3 = ttk.Frame(self)
@@ -253,7 +523,7 @@ class SqwvAnalysisFrame(ttk.Frame):
         main = ttk.PanedWindow(inner, orient=ttk.HORIZONTAL)
         main.pack(fill=ttk.X, padx=0, pady=(0, 6))
 
-        left = ttk.LabelFrame(main, text="Experiments → Runs (double-click to rename)")
+        left = ttk.LabelFrame(main, text="Files → Runs (double-click to rename)")
         main.add(left, weight=1)
         self.tree_curves = ttk.Treeview(
             left, columns=("info",), show="tree headings", selectmode="extended"
@@ -279,12 +549,12 @@ class SqwvAnalysisFrame(ttk.Frame):
         # --- Tabla de resultados (un pico por fila) ---
         bottom = ttk.LabelFrame(inner, text="Detected peaks (visible only)")
         bottom.pack(fill=ttk.BOTH, pady=(0, 6))
-        cols_r = ("type", "e_peak", "i_peak")
+        cols_r = ("e_peak", "i_peak", "height")
         self.tree_res = ttk.Treeview(bottom, columns=cols_r, show="tree headings", height=14)
-        self.tree_res.heading("#0", text="Experiment / Run")
+        self.tree_res.heading("#0", text="File / Run")
         self.tree_res.column("#0", width=300, anchor="w")
-        heads = {"type": "Type", "e_peak": "E peak (V)", "i_peak": "I peak (A)"}
-        widths = {"type": 80, "e_peak": 150, "i_peak": 150}
+        heads = {"e_peak": "E peak (V)", "i_peak": "I peak (A)", "height": "Height (A)"}
+        widths = {"e_peak": 150, "i_peak": 150, "height": 150}
         for c in cols_r:
             self.tree_res.heading(c, text=heads[c])
             self.tree_res.column(c, width=widths[c], anchor="w")
@@ -310,9 +580,20 @@ class SqwvAnalysisFrame(ttk.Frame):
         # se recrea en cada redibujo, invalidando el cid anterior).
         if self._add_mode:
             self._pick_cid = self.canvas.mpl_connect("button_press_event", self._on_add_click)
+        # Igual para el arrastre de rango: el selector pertenece al eje recreado.
+        self._span = None
+        if self._span_mode:
+            self._span = SpanSelector(
+                self.ax_overlay,
+                self._on_span_select,
+                "horizontal",
+                useblit=False,
+                props=dict(facecolor="tab:green", alpha=0.2),
+            )
 
     def _reset_plot_canvas(self):
         self._pick_cid = None
+        self._span = None
         try:
             self.toolbar_mpl.destroy()
         except Exception:
@@ -394,44 +675,40 @@ class SqwvAnalysisFrame(ttk.Frame):
     def _redraw(self):
         """Recrea el canvas, dibuja las curvas visibles (filtradas si hay filtro) con
         sus picos marcados/anotados, y reconstruye la tabla de resultados. NO detecta:
-        usa los picos ya almacenados en cada curva (max_points / min_points)."""
+        usa los picos ya almacenados en cada curva (max_points; SWV solo máximos)."""
         kind = self.filter_var.get()
-        fw = max(1, self.filter_window_var.get() or 1)
+        fw = self._filter_window()
         self._reset_plot_canvas()
         self.tree_res.delete(*self.tree_res.get_children())
         self._res_ref = {}
 
         any_visible = False
-        all_max, all_min = [], []
+        all_max = []
         for exp in self.experiments:
             vis = [c for c in exp.cycles if c.visible]
             if not vis:
                 continue
             exp_iid = self.tree_res.insert(
-                "", ttk.END, text=exp.name, values=("experiment", "", ""), open=True
+                "", ttk.END, text=exp.name, values=("", "", ""), open=True
             )
             self._res_ref[exp_iid] = ("exp", exp)
             for c in vis:
                 ys_disp = _apply_filter(c.ys, kind, fw) if kind != "none" else c.ys
+                m = self._range_mask(c.xs)
+                if not m.any():
+                    continue
                 self.ax_overlay.plot(
-                    c.xs, ys_disp, linewidth=1.2, marker=".", markersize=2,
+                    c.xs[m], ys_disp[m], linewidth=1.2, marker=".", markersize=2,
                     label=f"{exp.name}/{c.name}",
                 )
                 any_visible = True
-                for x, y in c.max_points:
+                for x, y, h in self._peaks_in_range(c):
                     all_max.append((x, y))
                     riid = self.tree_res.insert(
                         exp_iid, ttk.END, text=c.name,
-                        values=("max", f"{x:.6g}", f"{y:.6g}"),
+                        values=(f"{x:.6g}", f"{y:.6g}", "" if h is None else f"{h:.6g}"),
                     )
                     self._res_ref[riid] = ("peak", exp, c, "max", (x, y))
-                for x, y in c.min_points:
-                    all_min.append((x, y))
-                    riid = self.tree_res.insert(
-                        exp_iid, ttk.END, text=c.name,
-                        values=("min", f"{x:.6g}", f"{y:.6g}"),
-                    )
-                    self._res_ref[riid] = ("peak", exp, c, "min", (x, y))
         if all_max:
             xs, ys = zip(*all_max)
             self.ax_overlay.scatter(xs, ys, marker="^", s=55, color="tab:red", zorder=5)
@@ -439,14 +716,6 @@ class SqwvAnalysisFrame(ttk.Frame):
                 self.ax_overlay.annotate(
                     f"{x:.3g} V\n{y:.3g} A", (x, y), textcoords="offset points",
                     xytext=(0, 8), ha="center", fontsize=7, color="tab:red",
-                )
-        if all_min:
-            xs, ys = zip(*all_min)
-            self.ax_overlay.scatter(xs, ys, marker="v", s=55, color="tab:blue", zorder=5)
-            for x, y in all_min:
-                self.ax_overlay.annotate(
-                    f"{x:.3g} V\n{y:.3g} A", (x, y), textcoords="offset points",
-                    xytext=(0, -16), ha="center", fontsize=7, color="tab:blue",
                 )
         if any_visible:
             leg = self.ax_overlay.legend(loc="best", fontsize=7, ncol=2)
@@ -534,7 +803,7 @@ class SqwvAnalysisFrame(ttk.Frame):
         self.experiments = [e for e in self.experiments if id(e) not in exps_to_drop and e.cycles]
         self._refresh_tree()
         self._redraw()
-        self._set_status(f"Removed {len(exps_to_drop)} experiment(s), {len(runs_to_drop)} run(s).")
+        self._set_status(f"Removed {len(exps_to_drop)} file(s), {len(runs_to_drop)} run(s).")
 
     def toggle_visibility(self):
         refs = self._selected_refs()
@@ -552,35 +821,191 @@ class SqwvAnalysisFrame(ttk.Frame):
     def compute_peaks(self):
         """Detecta picos (decisión Q10: borra los previos y re-detecta de cero; la
         edición manual es un retoque posterior). Corre sobre datos filtrados."""
-        direction = self.direction_var.get()
-        pwin = max(1, self.peak_window_var.get() or 1)
-        prom_frac = max(0.0, float(self.prominence_var.get() or 0.0)) / 100.0
-        fkind = self.filter_var.get()
-        fwin = max(1, self.filter_window_var.get() or 1)
+        sig = self._controls_sig()
+        method = sig["method"]
+        pwin_mv = sig["window_mv"]
+        prom_frac = sig["prom"] / 100.0
+        fkind = sig["filter"]
+        fwin = sig["fwin"]
         n_curves = 0
         n_peaks = 0
+        n_narrow = 0  # curvas con menos puntos en el rango que los que pide la ventana
         for exp in self.experiments:
             for c in exp.cycles:
                 if not c.visible:
-                    c.max_points, c.min_points = [], []
+                    c.max_points = []
+                    self._heights.pop(c, None)
                     continue
                 ys_f = _apply_filter(c.ys, fkind, fwin) if fkind != "none" else c.ys
                 c.ys_filtered = ys_f
-                maxs, mins = _detect_peaks(c.xs, ys_f, direction, pwin, prom_frac)
-                c.max_points, c.min_points = maxs, mins
+                self._filters[c] = (fkind, fwin)  # Export etiqueta `y_filtered` con esto
+                # Se filtra la curva completa (sin efectos de borde por el recorte) y
+                # solo entonces se recorta al rango: todos los picos dentro se detectan,
+                # y la prominencia (% del span) es la del tramo seleccionado.
+                m = self._range_mask(c.xs)
+                # La semi-ventana está en mV: se pasa a puntos con el paso de E de esta curva.
+                pwin = self._window_pts(pwin_mv, c.xs[m])
+                if method == "slope":
+                    n_pts = int(m.sum())
+                    w_eff = _slope_window(n_pts, pwin)
+                    # Avisa si el detector reduce la ventana, o si no quedan puntos para correrlo.
+                    if w_eff != max(2, pwin) or n_pts < 2 * w_eff + 3:
+                        n_narrow += 1
+                maxs = _detect_peaks(c.xs[m], ys_f[m], pwin, prom_frac, method)
+                c.max_points = maxs
+                # La altura se fija ahora, con el mismo filtro/ventana que dieron el pico.
+                self._heights.pop(c, None)
+                self._remember_heights(c, ys_f, maxs)
                 n_curves += 1
-                n_peaks += len(maxs) + len(mins)
+                n_peaks += len(maxs)
+        self._compute_sig = sig
         self._redraw()
+        lo, hi = self._range()
+        rng = ""
+        if np.isfinite(lo) or np.isfinite(hi):
+            rng = f", E=[{lo:.4g}, {hi:.4g}] V".replace("-inf", "min").replace("inf", "max")
         self._set_status(
-            f"Detected {n_peaks} peak(s) on {n_curves} run(s) — dir={direction}, "
-            f"prom={self.prominence_var.get():g}%, filter={fkind}"
+            f"Detected {n_peaks} peak(s) on {n_curves} run(s) — "
+            f"{self.method_var.get()}, prom={sig['prom']:g}%, filter={fkind}"
             + (f" (w={fwin})" if fkind != "none" else "")
+            + rng
+            + (
+                f". E range narrower than the peak window on {n_narrow} run(s): window "
+                "shrunk (or too few points to detect), and peaks within one window of the "
+                "range edge can't be found — widen the range or lower the window."
+                if n_narrow
+                else ""
+            )
+            + self._range_hint()
         )
+
+    # ------------------------------------------------------ Rango de potencial
+    def _range(self):
+        """(lo, hi) en V del rango de E APLICADO; ±inf = sin límite. Lo escrito en los campos
+        no cuenta hasta pulsar Apply (o Select on plot / Full range / Import)."""
+        return self._applied_range
+
+    def _parse_range_fields(self):
+        """(lo, hi, bad): lo/hi = float, o None si el campo está vacío (sin límite); bad = el
+        texto del primer campo que no es un número finito (entonces lo y hi son None), o
+        None si ambos valen."""
+        out = []
+        for var in (self.e_min_var, self.e_max_var):
+            s = var.get().strip()
+            if not s:
+                out.append(None)
+                continue
+            try:
+                v = float(s)
+            except ValueError:
+                v = float("nan")
+            if not math.isfinite(v):  # 'nan' / 'inf' / texto a medio escribir ('0.2 V')
+                return None, None, s
+            out.append(v)
+        return out[0], out[1], None
+
+    def _commit_range(self):
+        """Fija el rango aplicado desde los campos (con mín > máx los intercambia y los campos
+        muestran el rango realmente aplicado). Devuelve (ok, swapped, bad): si algún campo no
+        es un número finito no cambia nada y `bad` es ese texto."""
+        lo, hi, bad = self._parse_range_fields()
+        if bad is not None:
+            return False, False, bad
+        swapped = lo is not None and hi is not None and lo > hi
+        if swapped:
+            self.e_min_var.set(f"{hi:.6g}")
+            self.e_max_var.set(f"{lo:.6g}")
+            lo, hi, _ = self._parse_range_fields()  # el rango es el del texto ya redondeado
+        self._applied_range = (-np.inf if lo is None else lo, np.inf if hi is None else hi)
+        return True, swapped, None
+
+    def _range_fields_pending(self):
+        """True si lo escrito en E min / E max no coincide con el rango aplicado."""
+        lo, hi, bad = self._parse_range_fields()
+        if bad is not None:
+            return True
+        lo = -np.inf if lo is None else lo
+        hi = np.inf if hi is None else hi
+        if lo > hi:
+            lo, hi = hi, lo
+        return (lo, hi) != self._applied_range
+
+    def _range_hint(self):
+        """Sufijo para el estado de Compute / Export cuando los campos no están aplicados."""
+        if self._range_fields_pending():
+            return " The E range fields are not applied — press Apply (the applied range was used)."
+        return ""
+
+    def _range_mask(self, xs):
+        lo, hi = self._range()
+        xs = np.asarray(xs, dtype=float)
+        return (xs >= lo) & (xs <= hi)
+
+    def apply_range(self):
+        """Aplica el rango: recorta lo que se muestra y descarta los picos que quedan
+        fuera (no quedan picos ocultos que se exporten); Compute detecta dentro."""
+        ok, swapped, bad = self._commit_range()
+        if not ok:
+            self._set_status(f"'{bad}' is not a valid number; E range not applied.")
+            return
+        lo, hi = self._range()
+        dropped = 0
+        for exp in self.experiments:
+            for c in exp.cycles:
+                keep = [p for p in c.max_points if lo <= p[0] <= hi]
+                dropped += len(c.max_points) - len(keep)
+                c.max_points[:] = keep
+        self._redraw()
+        if np.isfinite(lo) or np.isfinite(hi):
+            self._set_status(
+                ("E min/max were swapped. " if swapped else "")
+                + f"E range applied; {dropped} peak(s) outside removed. Press Compute to re-detect."
+            )
+        else:
+            self._set_status("E range cleared (full sweep).")
+
+    def reset_range(self):
+        self.e_min_var.set("")
+        self.e_max_var.set("")
+        self.apply_range()
+
+    def _toggle_span_mode(self):
+        self._span_mode = not self._span_mode
+        if self._span_mode:
+            if self._add_mode:  # los clics no pueden servir a las dos cosas
+                self._toggle_add_mode()
+            self.btn_span.configure(bootstyle="success")
+            self._set_status("Drag on the plot to choose the E range (toolbar pan/zoom must be off).")
+        else:
+            self.btn_span.configure(bootstyle="secondary-outline")
+            self._set_status("Range selection cancelled.")
+        self._redraw()
+
+    def _on_span_select(self, xmin, xmax):
+        try:
+            if getattr(self.toolbar_mpl, "mode", "") not in ("", None):
+                return
+        except Exception:
+            pass
+        if xmax - xmin <= 0:
+            return
+        self.e_min_var.set(f"{xmin:.4g}")
+        self.e_max_var.set(f"{xmax:.4g}")
+        # Una sola selección por activación: evita redefinir el rango sin querer.
+        self._span_mode = False
+        self.btn_span.configure(bootstyle="secondary-outline")
+        # El redibujo recrea el canvas; se difiere fuera del callback del selector.
+        self.after(0, self.apply_range)
 
     # ------------------------------------------------ Edición manual de picos
     def _toggle_add_mode(self):
         self._add_mode = not self._add_mode
         if self._add_mode:
+            if self._span_mode:
+                self._span_mode = False
+                self.btn_span.configure(bootstyle="secondary-outline")
+                if self._span is not None:
+                    self._span.set_active(False)
             if self._pick_cid is None:
                 self._pick_cid = self.canvas.mpl_connect("button_press_event", self._on_add_click)
             self.btn_add.configure(bootstyle="success")
@@ -601,20 +1026,24 @@ class SqwvAnalysisFrame(ttk.Frame):
         por las escalas dispares de E (V) e I (A)."""
         best = None  # (dist_px, exp, curve, x, y)
         kind = self.filter_var.get()
-        fw = max(1, self.filter_window_var.get() or 1)
+        fw = self._filter_window()
         for exp in self.experiments:
             for c in exp.cycles:
                 if not c.visible or c.xs.size == 0:
                     continue
                 ys = _apply_filter(c.ys, kind, fw) if kind != "none" else c.ys
+                m = self._range_mask(c.xs)
+                if not m.any():
+                    continue
+                xs_r, ys_r = c.xs[m], ys[m]
                 try:
-                    pts = self.ax_overlay.transData.transform(np.column_stack([c.xs, ys]))
+                    pts = self.ax_overlay.transData.transform(np.column_stack([xs_r, ys_r]))
                 except Exception:
                     continue
                 d = np.hypot(pts[:, 0] - event.x, pts[:, 1] - event.y)
                 j = int(np.argmin(d))
                 if best is None or d[j] < best[0]:
-                    best = (float(d[j]), exp, c, float(c.xs[j]), float(ys[j]))
+                    best = (float(d[j]), exp, c, float(xs_r[j]), float(ys_r[j]))
         if best is None:
             return None
         return best[1], best[2], best[3], best[4]
@@ -631,21 +1060,18 @@ class SqwvAnalysisFrame(ttk.Frame):
         if found is None:
             return
         _exp, c, x, y = found
-        # Clasifica como max/min según la forma local alrededor del punto elegido.
+        # SWV: solo máximos, todo clic añade un pico máximo.
+        target = c.max_points
+        if any(abs(px - x) < 1e-12 and abs(py - y) < 1e-30 for px, py in target):
+            self._set_status(f"Peak already present at E={x:.4g} V, I={y:.4g} A.")
+            return
+        target.append((x, y))
+        target.sort(key=lambda t: t[0])
         kind = self.filter_var.get()
-        fw = max(1, self.filter_window_var.get() or 1)
-        ys = _apply_filter(c.ys, kind, fw) if kind != "none" else c.ys
-        j = int(np.argmin(np.abs(c.xs - x)))
-        w = max(1, self.peak_window_var.get() or 1)
-        lo, hi = max(0, j - w), min(len(ys), j + w + 1)
-        local_mean = float(np.mean(ys[lo:hi]))
-        peak_kind = "max" if y >= local_mean else "min"
-        target = c.max_points if peak_kind == "max" else c.min_points
-        if not any(abs(px - x) < 1e-12 and abs(py - y) < 1e-30 for px, py in target):
-            target.append((x, y))
-            target.sort(key=lambda t: t[0])
+        ys_f = _apply_filter(c.ys, kind, self._filter_window()) if kind != "none" else c.ys
+        self._remember_heights(c, ys_f, [(x, y)])
         self._redraw()
-        self._set_status(f"Added {peak_kind} peak at E={x:.4g} V, I={y:.4g} A.")
+        self._set_status(f"Added peak at E={x:.4g} V, I={y:.4g} A.")
 
     def _delete_selected_peaks(self):
         sel = [i for i in self.tree_res.selection() if i in self._res_ref]
@@ -654,11 +1080,10 @@ class SqwvAnalysisFrame(ttk.Frame):
             self._set_status("Select one or more peak rows in the table to delete.")
             return
         n = 0
-        for _tag, _exp, c, kind, (x, y) in peaks:
-            lst = c.max_points if kind == "max" else c.min_points
-            for k, (px, py) in enumerate(lst):
+        for _tag, _exp, c, _kind, (x, y) in peaks:
+            for k, (px, py) in enumerate(c.max_points):
                 if abs(px - x) < 1e-12 and abs(py - y) < 1e-30:
-                    lst.pop(k)
+                    c.max_points.pop(k)
                     n += 1
                     break
         self._redraw()
@@ -705,6 +1130,9 @@ class SqwvAnalysisFrame(ttk.Frame):
 
     def clear_all(self):
         self.experiments.clear()
+        self._heights.clear()
+        self._filters.clear()
+        self._compute_sig = None  # el rango aplicado se conserva, igual que los campos
         self._tree_ref.clear()
         self._res_ref.clear()
         self.tree_curves.delete(*self.tree_curves.get_children())
@@ -783,8 +1211,11 @@ class SqwvAnalysisFrame(ttk.Frame):
         )
         if not path:
             return
+        settings_rows = None
         try:
-            rows = read_sheet_text(path, "curves") or []
+            sheets = read_sheets_text(path)
+            rows = sheets.get("curves") or []
+            settings_rows = sheets.get("settings")
             header = [h.strip() for h in (rows[0] if rows else [])]
             if "y_raw" not in header:
                 self._set_status("Not an SWV analysis export (missing 'curves' sheet).")
@@ -824,24 +1255,122 @@ class SqwvAnalysisFrame(ttk.Frame):
                 exp.cycles.append(CycleCurve(name=run_name, xs=xs, ys=ys))
             self.experiments.append(exp)
             added += 1
+        restored = self._apply_settings_rows(settings_rows)
         self._refresh_tree()
         self._redraw()
-        self._set_status(f"Imported {added} experiment(s) from {os.path.basename(path)}.")
+        self._set_status(
+            f"Imported {added} file(s) from {os.path.basename(path)}."
+            + (" Settings restored — press Compute to recalculate peaks." if restored else "")
+        )
+
+    # ------------------------------------------- Settings (rango + parámetros)
+    def _settings_rows(self):
+        """Hoja `settings` (key, value): rango de E y parámetros de detección/filtro,
+        para poder recalcular los picos al volver a cargar el export."""
+        lo, hi = self._range()
+        # Los parámetros del ÚLTIMO COMPUTE (los que produjeron los picos exportados); si no
+        # se ha calculado, los controles vigentes. El rango es el vigente (Apply ya poda).
+        sig = self._compute_sig or self._controls_sig()
+        prom = self._prom_values()
+        prom[sig["method"]] = sig["prom"]
+        return [
+            ["key", "value"],
+            ["e_min_V", lo if np.isfinite(lo) else ""],
+            ["e_max_V", hi if np.isfinite(hi) else ""],
+            ["method", sig["method"]],
+            ["peak_window_mV", sig["window_mv"]],
+            # Uno por método: significan cosas distintas (% del span / % de la curvatura).
+            ["prominence_pct_local", prom["local"]],
+            ["prominence_pct_slope", prom["slope"]],
+            ["filter", sig["filter"]],
+            ["filter_window", sig["fwin"]],
+        ]
+
+    def _apply_settings_rows(self, rows):
+        """Restaura los controles desde la hoja `settings` (si el libro la trae; los
+        exports viejos no). Valores inválidos se ignoran. No recalcula picos."""
+        if not rows:
+            return False
+        kv = {}
+        for r in rows[1:]:
+            if r:
+                # Una celda vacía (rango sin límite) puede llegar como fila de un solo
+                # elemento: la clave debe existir con valor "" para limpiar el campo.
+                kv[r[0].strip()] = r[1].strip() if len(r) >= 2 else ""
+
+        def _num(key, cast):
+            try:
+                return cast(float(kv[key]))
+            except (KeyError, ValueError, OverflowError):  # int(float('inf')) → OverflowError
+                return None
+
+        # Rango: vacío en el archivo = sin límite (se limpia el campo). Se aplica (es el
+        # rango del export) pero NO poda los picos de lo ya cargado: `_peaks_in_range` los
+        # oculta y Full range los devuelve.
+        if "e_min_V" in kv or "e_max_V" in kv:
+            for key, var in (("e_min_V", self.e_min_var), ("e_max_V", self.e_max_var)):
+                if key in kv:
+                    v = _num(key, float)
+                    var.set(f"{v:.6g}" if v is not None and math.isfinite(v) else "")
+            self._commit_range()
+        if kv.get("method") in ("local", "slope"):
+            self.method_var.set(self.METHODS[1] if kv["method"] == "slope" else self.METHODS[0])
+        if kv.get("filter") in self.FILTERS:
+            self.filter_var.set(kv["filter"])
+        for key, var, cast in (
+            ("peak_window_mV", self.peak_window_var, int),
+            ("filter_window", self.filter_window_var, int),
+        ):
+            v = _num(key, cast)
+            if v is not None:
+                var.set(v)
+        # Exports anteriores guardaban la ventana en puntos (`peak_window`): se convierte
+        # a mV con el paso de las curvas ya cargadas.
+        if "peak_window_mV" not in kv:
+            pts = _num("peak_window", int)
+            step_mv = self._median_step_mv()
+            if pts is not None and step_mv is not None:
+                self.peak_window_var.set(max(1, int(round(pts * step_mv))))
+        # Prominencia por método; el export anterior traía un solo valor (`min_prominence_pct`)
+        # que pertenece al método guardado en ese mismo archivo.
+        legacy = _num("min_prominence_pct", float)
+        if legacy is not None and "prominence_pct_local" not in kv:
+            self._prom[self._method_key()] = legacy
+        for key, mkey in (("prominence_pct_local", "local"), ("prominence_pct_slope", "slope")):
+            v = _num(key, float)
+            if v is not None:
+                self._prom[mkey] = v
+        self._set_prom_field(self._prom[self._method_key()])
+        return True
+
+    def _median_step_mv(self):
+        """Paso medio de E (mV) de las curvas cargadas; None si no hay."""
+        steps = []
+        for exp in self.experiments:
+            for c in exp.cycles:
+                if c.xs.size > 1:
+                    s = float(np.median(np.abs(np.diff(c.xs))))
+                    if np.isfinite(s) and s > 0:
+                        steps.append(s)
+        return 1000.0 * float(np.median(steps)) if steps else None
 
     def export_results(self):
         """Exporta UN libro (espejo de PeakAnalysisFrame):
-        - hoja `peaks`: un pico por fila (experiment, run, type, E_peak, I_peak).
-        - hoja `curves`: curvas punto-a-punto (crudo + filtrado) para reimportar.
+        - hoja `peaks`: un pico por fila (experiment, run, type, E_peak, I_peak, height_A),
+          solo los del rango aplicado; `type` es siempre "max".
+        - hoja `curves`: curvas punto-a-punto (crudo + filtrado) para reimportar, siempre el
+          barrido completo. `filter`/`filter_window` de cada curva son los que produjeron su
+          `y_filtered` en el último Compute (no los controles de ahora).
+        - hoja `settings`: rango aplicado y parámetros del último Compute (`_settings_rows`).
         """
-        rows = []
+        rows: list[list] = []
         for exp in self.experiments:
             for c in exp.cycles:
                 if not c.visible:
                     continue
-                for x, y in c.max_points:
-                    rows.append([exp.name, c.name, "max", x, y])
-                for x, y in c.min_points:
-                    rows.append([exp.name, c.name, "min", x, y])
+                # `type` queda como constante "max" por compatibilidad del formato.
+                for x, y, h in self._peaks_in_range(c):
+                    rows.append([exp.name, c.name, "max", x, y, h])
         if not any(c.visible for e in self.experiments for c in e.cycles):
             self._set_status("Nothing to export. Load or seed a run first.")
             return
@@ -855,7 +1384,7 @@ class SqwvAnalysisFrame(ttk.Frame):
             return
         path = xlsx_path(path)
         fkind = self.filter_var.get()
-        fwin = max(1, self.filter_window_var.get() or 1)
+        fwin = self._filter_window()
         curves: list[list] = [
             ["experiment", "run", "point_idx", "x", "y_raw", "y_filtered",
              "filter", "filter_window"]
@@ -864,28 +1393,40 @@ class SqwvAnalysisFrame(ttk.Frame):
             for c in exp.cycles:
                 if not c.visible:
                     continue
+                # La etiqueta es la del filtro que produjo `ys_filtered` (Compute); una curva
+                # que no pasó por Compute se filtra ahora con los controles y se etiqueta con ellos.
                 ys_f = c.ys_filtered
-                if ys_f is None or len(ys_f) != len(c.ys):
+                rec = self._filters.get(c)
+                if ys_f is None or len(ys_f) != len(c.ys) or rec is None:
                     ys_f = _apply_filter(c.ys, fkind, fwin) if fkind != "none" else c.ys
+                    rec = (fkind, fwin)
+                kind_c, win_c = rec
                 for i in range(len(c.xs)):
                     curves.append(
-                        [exp.name, c.name, i, c.xs[i], c.ys[i], ys_f[i], fkind,
-                         fwin if fkind != "none" else None]
+                        [exp.name, c.name, i, c.xs[i], c.ys[i], ys_f[i], kind_c,
+                         win_c if kind_c != "none" else None]
                     )
         try:
             write_workbook(
                 path,
                 {
-                    "peaks": [["experiment", "run", "type", "E_peak_V", "I_peak_A"]] + rows,
+                    "peaks": [
+                        ["experiment", "run", "type", "E_peak_V", "I_peak_A", "height_A"]
+                    ] + rows,
                     "curves": curves,
+                    "settings": self._settings_rows(),
                 },
             )
         except Exception as e:
             self._set_status(f"Export error: {e}")
             return
+        stale = self._compute_sig is not None and self._compute_sig != self._controls_sig()
         self._set_status(
-            f"Exported {len(rows)} peak(s) and {len(curves) - 1} curve point(s) "
+            ("Controls changed since Compute: the file keeps the settings used by Compute. "
+             if stale else "")
+            + f"Exported {len(rows)} peak(s) and {len(curves) - 1} curve point(s) "
             f"→ {os.path.basename(path)}."
+            + self._range_hint()
         )
 
 
